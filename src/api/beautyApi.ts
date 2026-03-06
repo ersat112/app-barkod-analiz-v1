@@ -23,15 +23,24 @@ export const fetchBeautyProduct = async (barcode: string): Promise<Product | nul
 
     if (response.data.status === 1) {
       const p = response.data.product;
+      const resolvedName =
+        p.product_name ||
+        p.product_name_tr ||
+        p.product_name_en ||
+        p.generic_name ||
+        p.generic_name_tr ||
+        p.generic_name_en ||
+        'İsimsiz Kozmetik';
       
       return {
         barcode: barcode,
-        name: p.product_name || p.product_name_tr || 'İsimsiz Kozmetik',
+        name: resolvedName,
         brand: p.brands || 'Bilinmeyen Marka',
         image_url: p.image_front_url || p.image_url || '',
         type: 'beauty',
-        // Kozmetiklerde Nutri-Score yerine bazen Nova veya Eco-Score gelir, güvenli bir değer atıyoruz
-        grade: p.ecoscore_grade || 'c',
+        // OpenBeautyFacts'te skor alanı her üründe olmayabilir; varsa doğrudan kullanılır.
+        score: typeof p.score === 'number' ? p.score : undefined,
+        grade: p.ecoscore_grade || p.nutriscore_grade || 'unknown',
         ingredients_text: p.ingredients_text || p.ingredients_text_tr || '',
         // 🧴 Hata veren alan artık güvenli:
         usage_instructions: p.usage || p.instructions || 'Kullanım talimatı belirtilmemiş.'

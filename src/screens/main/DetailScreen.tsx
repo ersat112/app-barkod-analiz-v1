@@ -18,6 +18,7 @@ import { BannerAd, BannerAdSize } from 'react-native-google-mobile-ads';
 
 // 🔌 Core Services & Stores
 import { fetchFoodProduct } from '../../api/foodApi';
+import { fetchBeautyProduct } from '../../api/beautyApi';
 import { analyzeProduct } from '../../utils/analysis';
 import { saveProductToHistory } from '../../services/db';
 import { useTheme } from '../../context/ThemeContext';
@@ -56,7 +57,11 @@ export const DetailScreen: React.FC = () => {
   const loadProductSequence = async () => {
     try {
       setLoading(true);
-      const data = await fetchFoodProduct(barcode);
+      // Önce gıda API'si, bulunamazsa kozmetik API'si denenir.
+      let data = await fetchFoodProduct(barcode);
+      if (!data) {
+        data = await fetchBeautyProduct(barcode);
+      }
       
       if (!data) {
         setError(t('product_not_found'));
@@ -65,7 +70,7 @@ export const DetailScreen: React.FC = () => {
 
       const result = analyzeProduct(data);
       setAnalysis(data, result);
-      saveProductToHistory(data, result.riskLevel ? 1 : 0);
+      saveProductToHistory(data, result.score);
     } catch (err) {
       setError(t('error_generic'));
     } finally {

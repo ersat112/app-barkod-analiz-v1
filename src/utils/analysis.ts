@@ -58,37 +58,39 @@ export const analyzeProduct = (product: Product): AnalysisResult => {
 
   const foundECodes = Array.from(foundECodesMap.values());
 
-  // ⚖️ Puanlama Mantığı (Health Score)
-  const highRiskCount = foundECodes.filter(e => e.risk === 'Yüksek').length;
-  const moderateRiskCount = foundECodes.filter(e => e.risk === 'Orta').length;
-  const productGrade = (product.grade || 'b').toLowerCase();
+  // ⚖️ Skor tamamen API değerinden alınır, dahili faktörlerle oynanmaz.
+  // OpenFoodFacts nutriscore_score değeri -15..40 aralığındadır (düşük daha iyi).
+  // Uygulama tarafında yalnızca görselleştirme için 0..100 bandına normalize edilir.
+  const apiScoreRaw = typeof product.score === 'number' ? product.score : null;
+  const normalizedApiScore = apiScoreRaw === null
+    ? null
+    : Math.max(0, Math.min(100, Math.round((40 - apiScoreRaw) / 55 * 100)));
 
-  let healthScore = 100;
-  
-  // Nutri-Score Kesintisi
-  const penalties: Record<string, number> = { a: 0, b: 10, c: 30, d: 55, e: 75 };
-  healthScore -= (penalties[productGrade] || 20);
-
-  // Katkı Maddesi Kesintisi
-  healthScore -= (highRiskCount * 30);
-  healthScore -= (moderateRiskCount * 12);
-
-  // Puan Sınırlandırma
-  healthScore = Math.max(0, Math.min(100, healthScore));
+  const gradeToScore: Record<string, number> = {
+    a: 95,
+    b: 80,
+    c: 60,
+    d: 35,
+    e: 10,
+  };
+  const productGrade = (product.grade || 'unknown').toLowerCase();
+  const healthScore = normalizedApiScore ?? gradeToScore[productGrade] ?? 0;
 
   // 🚦 Durum Belirleme
   let riskLevel: 'Düşük' | 'Orta' | 'Yüksek' = 'Düşük';
   let color = '#1ED760'; 
   let recommendation = "İçerik temiz ve güvenle tüketilebilir.";
 
-  if (healthScore < 45 || highRiskCount > 0) {
+  if (healthScore < 45) {
     riskLevel = 'Yüksek';
     color = '#FF4444';
-    recommendation = "Yüksek riskli maddeler tespit edildi. Tüketimi önerilmez.";
-  } else if (healthScore < 75 || moderateRiskCount > 0) {
+    recommendation = "API skoruna göre ürün risk seviyesi yüksek görünüyor.";
+  } else if (healthScore < 75) {
     riskLevel = 'Orta';
     color = '#FFD700';
-    recommendation = "Bazı riskli maddeler içeriyor. Sınırlı tüketilmesi önerilir.";
+    recommendation = "API skoruna göre ürün orta risk seviyesinde.";
+  } else {
+    recommendation = "API skoruna göre ürün düşük risk seviyesinde.";
   }
 
   // 💡 ÖNEMLİ: AnalysisResult interface'indeki TÜM alanlar burada dönmelidir.
