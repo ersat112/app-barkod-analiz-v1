@@ -1,29 +1,68 @@
 {
   "expo": {
-    "name": "app-barkod-analiz-v1",
+    "name": "ErEnesAl®",
     "slug": "app-barkod-analiz-v1",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#121212"
     },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.ersat.erenesalv1",
+      "buildNumber": "1.0.0",
+      "infoPlist": {
+        "NSCameraUsageDescription": "ErEnesAl, ürün barkodlarını tarayabilmek için kamera iznine ihtiyaç duyar.",
+        "NSMicrophoneUsageDescription": "Bu uygulama mikrofon erişimi gerektirmez ancak kamera modülleri için tanımlanması önerilir.",
+        "NSPhotoLibraryUsageDescription": "Ürün fotoğraflarını kaydedebilmek için galeri erişimi gereklidir."
+      }
     },
     "android": {
+      "package": "com.ersat.erenesalv1",
+      "versionCode": 1,
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
+        "backgroundColor": "#121212"
+      },
+      "permissions": [
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "INTERNET"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Barkod tarama işlemi için kamera erişimi gereklidir."
+        }
+      ],
+      "expo-sqlite",
+      "expo-localization",
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
+          "iosAppId": "ca-app-pub-3940256099942544~1458002511"
+        }
+      ]
+    ],
+    "extra": {
+      "firebaseProjectId": "barkodanaliz-5ed4b",
+      "eas": {
+        "projectId": "your-eas-project-id"
+      }
     }
   }
 }

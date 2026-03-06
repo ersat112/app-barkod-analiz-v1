@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "1054230654930",
+    "project_id": "barkodanaliz-5ed4b",
+    "storage_bucket": "barkodanaliz-5ed4b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1054230654930:android:8ddfface512e627f7b620b",
+        "android_client_info": {
+          "package_name": "com.ersat.barkodanaliz"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1054230654930-g0fug3a8l97mvpn7qh0b9hev1vkm2biu.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.ersat.barkodanaliz",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "1054230654930-7f8godgcqhlgta86fq84otgnecroh6dv.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyARZ1TKhaGtnknxmz1-l2eZlX7XfDmJSPA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1054230654930-7f8godgcqhlgta86fq84otgnecroh6dv.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1054230654930-l6i1ino6u6mfqmftnldamqh1pp2r78bl.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.ersat.barkodanaliz"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

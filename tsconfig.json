@@ -1,0 +1,18 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"]
+    },
+    "skipLibCheck": true,
+    // 🎯 İŞTE SİHİRLİ DOKUNUŞ BURADA:
+    "moduleResolution": "bundler"
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "App.tsx"
+  ]
+}
