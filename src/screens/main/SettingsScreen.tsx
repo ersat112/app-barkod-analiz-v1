@@ -17,6 +17,7 @@ import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { auth, db } from '../../config/firebase';
 import { useAuth } from '../../context/AuthContext';
@@ -95,6 +96,7 @@ export const SettingsScreen: React.FC = () => {
   const { user } = useAuth();
   const { colors, isDark, setIsDark, toggleTheme } = useTheme();
   const { locale, changeLanguage, supportedLanguages, ready: languageReady } = useLanguage();
+  const insets = useSafeAreaInsets();
 
   const tt = useCallback(
     (key: string, fallback: string) => {
@@ -260,9 +262,13 @@ export const SettingsScreen: React.FC = () => {
       : tt('email_not_verified', 'E-posta doğrulanmadı');
   }, [tt, user?.emailVerified]);
 
+  const headerTopPadding = Math.max(insets.top + 16, 32);
+  const scrollBottomPadding = Math.max(insets.bottom + 28, 40);
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
+      contentContainerStyle={{ paddingBottom: scrollBottomPadding }}
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
@@ -272,7 +278,7 @@ export const SettingsScreen: React.FC = () => {
         />
       }
     >
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: headerTopPadding }]}>
         <Text style={[styles.headerTitle, { color: colors.primary }]}>
           {tt('settings', 'Ayarlar')}
         </Text>
@@ -347,7 +353,7 @@ export const SettingsScreen: React.FC = () => {
       >
         <View style={styles.itemLeft}>
           <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
-            <Ionicons name="language-outline" size={20} color={colors.primary} />
+            <Ionicons name="globe-outline" size={20} color={colors.primary} />
           </View>
           <Text style={[styles.itemLabel, { color: colors.text }]}>
             {tt('language', 'Dil')}
@@ -448,8 +454,6 @@ export const SettingsScreen: React.FC = () => {
           {tt('footer_slogan', 'Sağlık için akıllı seçimler')}
         </Text>
       </View>
-
-      <View style={{ height: 50 }} />
     </ScrollView>
   );
 };
@@ -457,7 +461,6 @@ export const SettingsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
-    paddingTop: 60,
     paddingHorizontal: 25,
     marginBottom: 20,
   },
