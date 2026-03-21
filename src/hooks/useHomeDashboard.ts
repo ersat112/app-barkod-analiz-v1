@@ -13,6 +13,7 @@ const emptySnapshot: HomeDashboardSnapshot = {
   weeklyActiveDays: 0,
   streakCount: 0,
   lastScannedProduct: null,
+  recentProducts: [],
 };
 
 export const useHomeDashboard = () => {
