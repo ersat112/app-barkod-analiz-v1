@@ -10,6 +10,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 import { Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
@@ -47,11 +48,19 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 const MainTabNavigator: React.FC = () => {
   const { t } = useTranslation();
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const tt = (key: string, fallback: string) => {
     const value = t(key, { defaultValue: fallback });
     return value === key ? fallback : value;
   };
+
+  const tabBarBottomPadding = Math.max(
+    insets.bottom,
+    Platform.OS === 'ios' ? 24 : 12
+  );
+  const tabBarTopPadding = 10;
+  const tabBarHeight = 56 + tabBarBottomPadding + tabBarTopPadding;
 
   return (
     <Tab.Navigator
@@ -61,12 +70,15 @@ const MainTabNavigator: React.FC = () => {
         tabBarHideOnKeyboard: true,
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.border,
+        sceneStyle: {
+          backgroundColor: colors.background,
+        },
         tabBarStyle: {
           backgroundColor: colors.background,
           borderTopColor: colors.border,
-          height: Platform.OS === 'ios' ? 88 : 65,
-          paddingBottom: Platform.OS === 'ios' ? 30 : 10,
-          paddingTop: 10,
+          height: tabBarHeight,
+          paddingBottom: tabBarBottomPadding,
+          paddingTop: tabBarTopPadding,
           elevation: 0,
           shadowOpacity: 0,
         },
