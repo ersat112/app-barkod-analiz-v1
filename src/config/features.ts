@@ -1,20 +1,24 @@
 export const PRODUCT_CACHE_TABLE_NAME = 'product_cache' as const;
 export const SHARED_PRODUCT_CACHE_COLLECTION = 'shared_product_cache' as const;
+export const MISSING_PRODUCT_CONTRIBUTIONS_COLLECTION =
+  'missing_product_contributions' as const;
+export const MISSING_PRODUCT_DRAFTS_STORAGE_KEY =
+  'erenesal_missing_product_drafts' as const;
 export const PRODUCT_CACHE_SCHEMA_VERSION = 1 as const;
 
 export const FEATURES = Object.freeze({
   productRepository: Object.freeze({
-    foundationEnabled: false,
+    foundationEnabled: true,
     sqliteCacheEnabled: true,
     sqliteReadEnabled: true,
     sqliteWriteEnabled: true,
-    firestoreReadEnabled: false,
-    firestoreWriteEnabled: false,
-    remoteParallelFetchEnabled: false,
+    firestoreReadEnabled: true,
+    firestoreWriteEnabled: true,
+    remoteParallelFetchEnabled: true,
   }),
 
   missingProduct: Object.freeze({
-    firestoreContributionSyncEnabled: false,
+    firestoreContributionSyncEnabled: true,
   }),
 
   productPresentation: Object.freeze({
