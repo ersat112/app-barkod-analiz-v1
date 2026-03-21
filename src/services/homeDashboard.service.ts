@@ -25,6 +25,23 @@ type DashboardRow = {
   last_scanned_updated_at: string | null;
 };
 
+type HistoryRow = {
+  id: number;
+  barcode: string;
+  name: string;
+  brand: string | null;
+  image_url: string | null;
+  type: string | null;
+  score: number | null;
+  grade: string | null;
+  ingredients_text: string | null;
+  country: string | null;
+  origin: string | null;
+  sourceName: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
 export type HomeDashboardSnapshot = {
   todayCount: number;
   todayUniqueCount: number;
@@ -34,6 +51,7 @@ export type HomeDashboardSnapshot = {
   weeklyActiveDays: number;
   streakCount: number;
   lastScannedProduct: HistoryEntry | null;
+  recentProducts: HistoryEntry[];
 };
 
 const db = getDatabase();
@@ -44,6 +62,28 @@ const safeNumber = (value?: number | null, fallback = 0): number => {
 
 const toNullableNumber = (value?: number | null): number | null => {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+};
+
+const mapHistoryRow = (row: HistoryRow): HistoryEntry => {
+  return {
+    id: row.id,
+    barcode: row.barcode,
+    name: row.name,
+    brand: row.brand ?? '',
+    image_url: row.image_url ?? '',
+    type: row.type === 'beauty' ? 'beauty' : 'food',
+    score: typeof row.score === 'number' ? row.score : undefined,
+    grade: row.grade ?? undefined,
+    ingredients_text: row.ingredients_text ?? undefined,
+    country: row.country ?? undefined,
+    origin: row.origin ?? undefined,
+    sourceName:
+      row.sourceName === 'openfoodfacts' || row.sourceName === 'openbeautyfacts'
+        ? row.sourceName
+        : undefined,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
 };
 
 const toHistoryEntry = (row: DashboardRow): HistoryEntry | null => {
@@ -114,6 +154,27 @@ export const getHomeDashboardSnapshot = (): HomeDashboardSnapshot => {
       (SELECT updated_at FROM history ORDER BY datetime(created_at) DESC, id DESC LIMIT 1) AS last_scanned_updated_at
   `);
 
+  const recentRows = db.getAllSync<HistoryRow>(
+    `SELECT
+      id,
+      barcode,
+      name,
+      brand,
+      image_url,
+      type,
+      score,
+      grade,
+      ingredients_text,
+      country,
+      origin,
+      source_name as sourceName,
+      created_at,
+      updated_at
+     FROM history
+     ORDER BY datetime(created_at) DESC, id DESC
+     LIMIT 8`
+  );
+
   if (!row) {
     return {
       todayCount: 0,
@@ -124,6 +185,7 @@ export const getHomeDashboardSnapshot = (): HomeDashboardSnapshot => {
       weeklyActiveDays: 0,
       streakCount: 0,
       lastScannedProduct: null,
+      recentProducts: [],
     };
   }
 
@@ -136,5 +198,6 @@ export const getHomeDashboardSnapshot = (): HomeDashboardSnapshot => {
     weeklyActiveDays: safeNumber(row.weekly_active_day_count, 0),
     streakCount: safeNumber(row.streak_count, 0),
     lastScannedProduct: toHistoryEntry(row),
+    recentProducts: recentRows.map(mapHistoryRow),
   };
 };
