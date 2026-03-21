@@ -17,6 +17,7 @@ import { usePaginatedHistory } from '../../hooks/usePaginatedHistory';
 import {
   HistoryEmptyState,
   HistoryErrorState,
+  HistoryFilterBar,
   HistoryListFooter,
   HistoryListHeader,
   HistoryListItem,
@@ -46,10 +47,16 @@ export const HistoryScreen: React.FC = () => {
     refreshing,
     loadError,
     hasMore,
+    searchQuery,
+    selectedType,
+    hasActiveFilters,
     loadInitial,
     refresh,
     loadMore,
     deleteEntry,
+    setSearchQuery,
+    setSelectedType,
+    clearFilters,
     parseCreatedAt,
   } = usePaginatedHistory(tt);
 
@@ -104,6 +111,21 @@ export const HistoryScreen: React.FC = () => {
   }
 
   if (!items.length) {
+    if (hasActiveFilters) {
+      return (
+        <HistoryEmptyState
+          title={tt('no_results', 'Sonuç bulunamadı')}
+          text={tt(
+            'history_filtered_empty',
+            'Arama veya filtre sonucunda eşleşen geçmiş kaydı bulunamadı.'
+          )}
+          actionLabel={tt('clear_filters', 'Filtreleri Temizle')}
+          onActionPress={clearFilters}
+          colors={colors}
+        />
+      );
+    }
+
     return (
       <HistoryEmptyState
         title={tt('history', 'Geçmiş')}
@@ -142,14 +164,30 @@ export const HistoryScreen: React.FC = () => {
             <HistorySectionHeader section={section} colors={colors} />
           )}
           ListHeaderComponent={
-            <HistoryListHeader
-              title={tt('history', 'Geçmiş')}
-              subtitle={tt(
-                'history_swipe_hint',
-                'Önceki barkod analizlerinizi burada görebilir, sağa kaydırarak silebilirsiniz.'
-              )}
-              colors={colors}
-            />
+            <>
+              <HistoryListHeader
+                title={tt('history', 'Geçmiş')}
+                subtitle={tt(
+                  'history_swipe_hint',
+                  'Önceki barkod analizlerinizi burada görebilir, sağa kaydırarak silebilirsiniz.'
+                )}
+                colors={colors}
+              />
+              <HistoryFilterBar
+                searchValue={searchQuery}
+                selectedType={selectedType}
+                hasActiveFilters={hasActiveFilters}
+                onSearchChange={setSearchQuery}
+                onSelectType={setSelectedType}
+                onClear={clearFilters}
+                searchPlaceholder={tt('history_search_placeholder', 'Marka, ürün ya da barkod ara')}
+                allLabel={tt('all', 'Tümü')}
+                foodLabel={tt('food_label', 'Gıda')}
+                beautyLabel={tt('beauty_label', 'Kozmetik')}
+                clearLabel={tt('clear', 'Temizle')}
+                colors={colors}
+              />
+            </>
           }
           ListFooterComponent={
             <>
