@@ -33,9 +33,7 @@
       },
       "permissions": [
         "CAMERA",
-        "INTERNET",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
+        "INTERNET"
       ]
     },
     "web": {
