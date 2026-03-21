@@ -12,7 +12,6 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -20,31 +19,29 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../context/ThemeContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { AdBanner } from '../../components/AdBanner';
+import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
+import {
+  saveMissingProductDraft,
+  type MissingProductType,
+} from '../../services/missingProductDraft.service';
+import { syncMissingProductDraftToFirestore } from '../../services/missingProductContribution.service';
 
 type MissingRoute = RouteProp<RootStackParamList, 'MissingProduct'>;
-
-type MissingProductType = 'food' | 'beauty' | 'unknown';
-
-type MissingDraft = {
-  barcode: string;
-  name: string;
-  brand: string;
-  country: string;
-  origin: string;
-  ingredients_text: string;
-  notes: string;
-  type: MissingProductType;
-  created_at: string;
-  status: 'draft';
-};
-
-const STORAGE_KEY = 'erenesal_missing_product_drafts';
+type SaveOutcome = 'synced' | 'queued';
 
 export const MissingProductScreen: React.FC = () => {
   const { t } = useTranslation();
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<any>();
   const route = useRoute<MissingRoute>();
+
+  const layout = useAppScreenLayout({
+    topInsetExtra: 12,
+    topInsetMin: 56,
+    contentBottomExtra: 40,
+    contentBottomMin: 44,
+    horizontalPadding: 20,
+  });
 
   const tt = useCallback(
     (key: string, fallback: string) => {
@@ -77,6 +74,7 @@ export const MissingProductScreen: React.FC = () => {
   const [productType, setProductType] = useState<MissingProductType>('unknown');
   const [saving, setSaving] = useState(false);
   const [successVisible, setSuccessVisible] = useState(false);
+  const [saveOutcome, setSaveOutcome] = useState<SaveOutcome>('queued');
 
   const isFormValid = useMemo(() => {
     return barcode.length >= 8 && name.trim().length > 0;
@@ -94,25 +92,20 @@ export const MissingProductScreen: React.FC = () => {
     try {
       setSaving(true);
 
-      const draft: MissingDraft = {
+      const draft = await saveMissingProductDraft({
         barcode,
-        name: name.trim(),
-        brand: brand.trim(),
-        country: country.trim(),
-        origin: origin.trim(),
-        ingredients_text: ingredientsText.trim(),
-        notes: notes.trim(),
+        name,
+        brand,
+        country,
+        origin,
+        ingredients_text: ingredientsText,
+        notes,
         type: productType,
-        created_at: new Date().toISOString(),
-        status: 'draft',
-      };
+      });
 
-      const existingRaw = await AsyncStorage.getItem(STORAGE_KEY);
-      const existing = existingRaw ? JSON.parse(existingRaw) : [];
+      const syncResult = await syncMissingProductDraftToFirestore(draft);
 
-      const nextValue = [draft, ...(Array.isArray(existing) ? existing : [])];
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(nextValue));
-
+      setSaveOutcome(syncResult.status === 'synced' ? 'synced' : 'queued');
       setSuccessVisible(true);
     } catch (error) {
       console.error('Missing product draft save failed:', error);
@@ -141,6 +134,24 @@ export const MissingProductScreen: React.FC = () => {
     navigation.goBack();
   }, [navigation]);
 
+  const successTitle = useMemo(() => {
+    return saveOutcome === 'synced'
+      ? tt('draft_synced_title', 'Bildirim Gönderildi')
+      : tt('draft_saved_title', 'Taslak Kuyruğa Alındı');
+  }, [saveOutcome, tt]);
+
+  const successText = useMemo(() => {
+    return saveOutcome === 'synced'
+      ? tt(
+          'draft_synced_message',
+          'Eksik ürün bildirimi Firestore katkı kuyruğuna başarıyla gönderildi.'
+        )
+      : tt(
+          'draft_saved_message',
+          'Eksik ürün bildirimi yerel taslak olarak saklandı. Ağ veya izin sorunu nedeniyle daha sonra tekrar senkronize edilebilir.'
+        );
+  }, [saveOutcome, tt]);
+
   return (
     <KeyboardAvoidingView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -149,7 +160,12 @@ export const MissingProductScreen: React.FC = () => {
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={{
+          ...styles.scrollContent,
+          paddingTop: layout.headerTopPadding,
+          paddingBottom: layout.contentBottomPadding,
+          paddingHorizontal: layout.horizontalPadding,
+        }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -168,7 +184,7 @@ export const MissingProductScreen: React.FC = () => {
           <Text style={[styles.headerSubtitle, { color: colors.text }]}>
             {tt(
               'missing_product_subtitle',
-              'Bu barkod veritabanında yoksa, ürün bilgilerini kaydederek sonraki sürümlerde katkı sağlayabilirsiniz.'
+              'Bu barkod veritabanında yoksa ürün bilgilerini kaydedin. Uygulama önce yerel taslak oluşturur, ardından güvenli şekilde katkı kuyruğuna göndermeyi dener.'
             )}
           </Text>
         </View>
@@ -367,7 +383,7 @@ export const MissingProductScreen: React.FC = () => {
             </Text>
           ) : (
             <Text style={styles.submitBtnText}>
-              {tt('save_as_draft', 'Taslak Olarak Kaydet')}
+              {tt('save_as_draft', 'Kaydet ve Senkronize Et')}
             </Text>
           )}
         </TouchableOpacity>
@@ -375,7 +391,7 @@ export const MissingProductScreen: React.FC = () => {
         <Text style={[styles.helperText, { color: colors.text }]}>
           {tt(
             'draft_helper_text',
-            'Bu kayıt yerel taslak olarak saklanır. İleride admin paneli veya toplu senkronizasyon ile sisteme aktarılabilir.'
+            'Bu ekran önce yerel taslak üretir. Firestore senkronu başarılıysa katkı kuyruğuna gider, başarısız olursa taslak cihazda korunur.'
           )}
         </Text>
 
@@ -393,18 +409,19 @@ export const MissingProductScreen: React.FC = () => {
             ]}
           >
             <View style={[styles.successIconWrap, { backgroundColor: `${colors.primary}15` }]}>
-              <Ionicons name="checkmark-circle" size={60} color={colors.primary} />
+              <Ionicons
+                name={saveOutcome === 'synced' ? 'cloud-done-outline' : 'save-outline'}
+                size={60}
+                color={colors.primary}
+              />
             </View>
 
             <Text style={[styles.successTitle, { color: colors.text }]}>
-              {tt('draft_saved_title', 'Taslak Kaydedildi')}
+              {successTitle}
             </Text>
 
             <Text style={[styles.successText, { color: colors.text }]}>
-              {tt(
-                'draft_saved_message',
-                'Eksik ürün bildirimi taslak olarak kaydedildi. Daha sonra sisteme ekleme veya senkronizasyon için kullanılabilir.'
-              )}
+              {successText}
             </Text>
 
             <TouchableOpacity
@@ -426,11 +443,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  scrollContent: {
-    padding: 20,
-    paddingTop: 56,
-    paddingBottom: 40,
-  },
+  scrollContent: {},
   header: {
     marginBottom: 22,
   },
