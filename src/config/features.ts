@@ -50,4 +50,11 @@ export const CACHE_POLICY = Object.freeze({
   sharedNotFoundTtlMs: 1000 * 60 * 60 * 24,
 });
 
+export const AD_POLICY = Object.freeze({
+  warmupSuccessfulScans: 3,
+  scansBetweenInterstitials: 4,
+  minInterstitialCooldownMs: 1000 * 60 * 2,
+  maxDailyInterstitials: 6,
+});
+
 export type FeatureFlags = typeof FEATURES;
