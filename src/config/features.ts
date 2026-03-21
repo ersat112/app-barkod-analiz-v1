@@ -22,12 +22,12 @@ export const FEATURES = Object.freeze({
   }),
 
   productPresentation: Object.freeze({
-    gs1OriginLabelFixEnabled: false,
+    gs1OriginLabelFixEnabled: true,
   }),
 
   scanner: Object.freeze({
-    reducedInterstitialEnabled: false,
-    removeUnusedPermissionsEnabled: false,
+    reducedInterstitialEnabled: true,
+    removeUnusedPermissionsEnabled: true,
   }),
 
   home: Object.freeze({
