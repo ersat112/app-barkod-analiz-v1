@@ -17,13 +17,13 @@ import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { auth, db } from '../../config/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { AdBanner } from '../../components/AdBanner';
+import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 
 const APP_VERSION = 'v1.0.4';
 
@@ -96,7 +96,14 @@ export const SettingsScreen: React.FC = () => {
   const { user } = useAuth();
   const { colors, isDark, setIsDark, toggleTheme } = useTheme();
   const { locale, changeLanguage, supportedLanguages, ready: languageReady } = useLanguage();
-  const insets = useSafeAreaInsets();
+
+  const layout = useAppScreenLayout({
+    topInsetExtra: 16,
+    topInsetMin: 32,
+    contentBottomExtra: 28,
+    contentBottomMin: 40,
+    horizontalPadding: 25,
+  });
 
   const tt = useCallback(
     (key: string, fallback: string) => {
@@ -262,13 +269,10 @@ export const SettingsScreen: React.FC = () => {
       : tt('email_not_verified', 'E-posta doğrulanmadı');
   }, [tt, user?.emailVerified]);
 
-  const headerTopPadding = Math.max(insets.top + 16, 32);
-  const scrollBottomPadding = Math.max(insets.bottom + 28, 40);
-
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
-      contentContainerStyle={{ paddingBottom: scrollBottomPadding }}
+      contentContainerStyle={{ paddingBottom: layout.contentBottomPadding }}
       showsVerticalScrollIndicator={false}
       refreshControl={
         <RefreshControl
@@ -278,7 +282,15 @@ export const SettingsScreen: React.FC = () => {
         />
       }
     >
-      <View style={[styles.header, { paddingTop: headerTopPadding }]}>
+      <View
+        style={[
+          styles.header,
+          {
+            paddingTop: layout.headerTopPadding,
+            paddingHorizontal: layout.horizontalPadding,
+          },
+        ]}
+      >
         <Text style={[styles.headerTitle, { color: colors.primary }]}>
           {tt('settings', 'Ayarlar')}
         </Text>
@@ -293,7 +305,11 @@ export const SettingsScreen: React.FC = () => {
       <View
         style={[
           styles.profileCard,
-          { backgroundColor: colors.card, borderColor: colors.border },
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            marginHorizontal: layout.horizontalPadding,
+          },
         ]}
       >
         <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
@@ -322,7 +338,12 @@ export const SettingsScreen: React.FC = () => {
         </View>
       </View>
 
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>
+      <Text
+        style={[
+          styles.sectionTitle,
+          { color: colors.text, marginHorizontal: layout.horizontalPadding },
+        ]}
+      >
         {tt('application_settings', 'Uygulama Ayarları')}
       </Text>
 
@@ -348,7 +369,11 @@ export const SettingsScreen: React.FC = () => {
       <View
         style={[
           styles.languageBox,
-          { backgroundColor: colors.card, borderColor: colors.border },
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            marginHorizontal: layout.horizontalPadding,
+          },
         ]}
       >
         <View style={styles.itemLeft}>
@@ -394,7 +419,12 @@ export const SettingsScreen: React.FC = () => {
         </View>
       </View>
 
-      <Text style={[styles.sectionTitle, { color: colors.text }]}>
+      <Text
+        style={[
+          styles.sectionTitle,
+          { color: colors.text, marginHorizontal: layout.horizontalPadding },
+        ]}
+      >
         {tt('support_info', 'Destek ve Bilgi')}
       </Text>
 
@@ -446,7 +476,12 @@ export const SettingsScreen: React.FC = () => {
         <AdBanner />
       </View>
 
-      <View style={styles.footer}>
+      <View
+        style={[
+          styles.footer,
+          { paddingHorizontal: layout.horizontalPadding },
+        ]}
+      >
         <Text style={[styles.footerText, { color: colors.text }]}>
           ErEnesAl® {APP_VERSION}
         </Text>
@@ -461,7 +496,6 @@ export const SettingsScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
-    paddingHorizontal: 25,
     marginBottom: 20,
   },
   headerTitle: {
@@ -476,7 +510,6 @@ const styles = StyleSheet.create({
     opacity: 0.65,
   },
   profileCard: {
-    marginHorizontal: 25,
     padding: 20,
     borderRadius: 20,
     flexDirection: 'row',
@@ -517,7 +550,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   sectionTitle: {
-    marginHorizontal: 25,
     fontSize: 13,
     fontWeight: 'bold',
     textTransform: 'uppercase',
@@ -567,7 +599,6 @@ const styles = StyleSheet.create({
     maxWidth: 110,
   },
   languageBox: {
-    marginHorizontal: 25,
     padding: 16,
     borderRadius: 16,
     borderWidth: 1,
@@ -615,7 +646,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 20,
     opacity: 0.3,
-    paddingHorizontal: 25,
   },
   footerText: {
     fontSize: 12,
