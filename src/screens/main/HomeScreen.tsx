@@ -10,12 +10,12 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { AdBanner } from '../../components/AdBanner';
 import { useHomeDashboard } from '../../hooks/useHomeDashboard';
+import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import {
   ChallengeCard,
   DidYouKnowCard,
@@ -63,7 +63,14 @@ export const HomeScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const { user } = useAuth();
   const navigation = useNavigation<any>();
-  const insets = useSafeAreaInsets();
+
+  const layout = useAppScreenLayout({
+    topInsetExtra: 18,
+    topInsetMin: 70,
+    contentBottomExtra: 40,
+    contentBottomMin: 100,
+    horizontalPadding: 25,
+  });
 
   const { snapshot, loading, refreshing, loadError, load, refresh } = useHomeDashboard();
 
@@ -287,8 +294,9 @@ export const HomeScreen: React.FC = () => {
       showsVerticalScrollIndicator={false}
       contentContainerStyle={{
         ...styles.scrollContent,
-        paddingTop: Math.max(insets.top + 18, 70),
-        paddingBottom: Math.max(insets.bottom + 40, 100),
+        paddingTop: layout.headerTopPadding,
+        paddingBottom: layout.contentBottomPadding,
+        paddingHorizontal: layout.horizontalPadding,
       }}
       refreshControl={
         <RefreshControl
@@ -463,9 +471,7 @@ export const HomeScreen: React.FC = () => {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  scrollContent: {
-    paddingHorizontal: 25,
-  },
+  scrollContent: {},
   header: {
     marginBottom: 24,
   },
