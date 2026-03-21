@@ -14,6 +14,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AD_UNIT_ID, GLOBAL_AD_CONFIG } from '../../config/admob';
 import { useTheme } from '../../context/ThemeContext';
@@ -26,6 +27,7 @@ export const ScannerScreen: React.FC = () => {
   const { colors } = useTheme();
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
+  const insets = useSafeAreaInsets();
 
   const tt = useCallback(
     (key: string, fallback: string) => {
@@ -267,6 +269,9 @@ export const ScannerScreen: React.FC = () => {
     );
   }
 
+  const topInsetPadding = Math.max(insets.top + 8, 24);
+  const bottomControlsOffset = Math.max(insets.bottom + 16, 28);
+
   return (
     <View style={styles.container}>
       {isFocused && (
@@ -281,7 +286,7 @@ export const ScannerScreen: React.FC = () => {
       )}
 
       <View style={styles.overlay} pointerEvents="box-none">
-        <View style={styles.topDarkArea}>
+        <View style={[styles.topDarkArea, { paddingTop: topInsetPadding }]}>
           <TouchableOpacity
             style={styles.topCloseBtn}
             onPress={() => navigation.goBack()}
@@ -330,7 +335,10 @@ export const ScannerScreen: React.FC = () => {
       </View>
 
       {!isManualMode && (
-        <View style={styles.controls} pointerEvents="box-none">
+        <View
+          style={[styles.controls, { bottom: bottomControlsOffset }]}
+          pointerEvents="box-none"
+        >
           <TouchableOpacity
             style={styles.controlBtn}
             onPress={() => setTorch((prev) => !prev)}
@@ -513,7 +521,6 @@ const styles = StyleSheet.create({
   topDarkArea: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.72)',
-    paddingTop: 58,
     paddingHorizontal: 20,
   },
   topCloseBtn: {
@@ -605,7 +612,6 @@ const styles = StyleSheet.create({
   },
   controls: {
     position: 'absolute',
-    bottom: 42,
     width: '100%',
     flexDirection: 'row',
     justifyContent: 'space-evenly',
