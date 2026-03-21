@@ -4,6 +4,7 @@ import {
   Image,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -12,6 +13,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 
 import type { HistoryEntry } from '../../../services/db';
 import type { HistorySection } from '../../../hooks/usePaginatedHistory';
+import type { HistoryFilterType } from '../../../services/history.service';
 
 type ThemeColors = {
   background: string;
@@ -28,7 +30,6 @@ type HistoryListItemProps = {
   foodLabel: string;
   fallbackBrand: string;
   fallbackName: string;
-  scoreSuffix?: string;
   onPress: () => void;
   onDelete: () => void;
   colors: ThemeColors;
@@ -54,6 +55,21 @@ type HistoryFooterProps = {
   colors: ThemeColors;
 };
 
+type HistoryFilterBarProps = {
+  searchValue: string;
+  selectedType: HistoryFilterType;
+  hasActiveFilters: boolean;
+  onSearchChange: (value: string) => void;
+  onSelectType: (value: HistoryFilterType) => void;
+  onClear: () => void;
+  searchPlaceholder: string;
+  allLabel: string;
+  foodLabel: string;
+  beautyLabel: string;
+  clearLabel: string;
+  colors: ThemeColors;
+};
+
 const FALLBACK_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
 
 export const HistoryListHeader: React.FC<HistoryHeaderProps> = ({
@@ -65,6 +81,94 @@ export const HistoryListHeader: React.FC<HistoryHeaderProps> = ({
     <View style={styles.header}>
       <Text style={[styles.headerTitle, { color: colors.primary }]}>{title}</Text>
       <Text style={[styles.headerSubtitle, { color: colors.text }]}>{subtitle}</Text>
+    </View>
+  );
+};
+
+export const HistoryFilterBar: React.FC<HistoryFilterBarProps> = ({
+  searchValue,
+  selectedType,
+  hasActiveFilters,
+  onSearchChange,
+  onSelectType,
+  onClear,
+  searchPlaceholder,
+  allLabel,
+  foodLabel,
+  beautyLabel,
+  clearLabel,
+  colors,
+}) => {
+  const filterOptions: Array<{ key: HistoryFilterType; label: string }> = [
+    { key: 'all', label: allLabel },
+    { key: 'food', label: foodLabel },
+    { key: 'beauty', label: beautyLabel },
+  ];
+
+  return (
+    <View style={styles.filterWrap}>
+      <View
+        style={[
+          styles.searchBox,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+      >
+        <Ionicons name="search-outline" size={18} color={colors.primary} />
+        <TextInput
+          value={searchValue}
+          onChangeText={onSearchChange}
+          placeholder={searchPlaceholder}
+          placeholderTextColor={`${colors.text}55`}
+          style={[styles.searchInput, { color: colors.text }]}
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
+        {searchValue.trim().length > 0 ? (
+          <TouchableOpacity onPress={() => onSearchChange('')}>
+            <Ionicons name="close-circle" size={18} color={colors.border} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      <View style={styles.filterRow}>
+        {filterOptions.map((option) => {
+          const selected = selectedType === option.key;
+
+          return (
+            <TouchableOpacity
+              key={option.key}
+              style={[
+                styles.filterChip,
+                {
+                  borderColor: selected ? colors.primary : colors.border,
+                  backgroundColor: selected ? `${colors.primary}12` : colors.card,
+                },
+              ]}
+              onPress={() => onSelectType(option.key)}
+            >
+              <Text
+                style={[
+                  styles.filterChipText,
+                  { color: selected ? colors.primary : colors.text },
+                ]}
+              >
+                {option.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+
+        {hasActiveFilters ? (
+          <TouchableOpacity
+            style={[styles.clearChip, { borderColor: colors.border }]}
+            onPress={onClear}
+          >
+            <Text style={[styles.clearChipText, { color: colors.text }]}>
+              {clearLabel}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
     </View>
   );
 };
@@ -257,6 +361,50 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     opacity: 0.68,
+  },
+  filterWrap: {
+    paddingHorizontal: 16,
+    paddingBottom: 6,
+  },
+  searchBox: {
+    borderWidth: 1,
+    borderRadius: 18,
+    minHeight: 52,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 14,
+    paddingVertical: 12,
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    flexWrap: 'wrap',
+  },
+  filterChip: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  filterChipText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  clearChip: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  clearChipText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   sectionHeader: {
     paddingHorizontal: 20,
