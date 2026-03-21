@@ -21,6 +21,7 @@ import { barcodeDecoder } from '../../utils/barcodeDecoder';
 import { AdBanner } from '../../components/AdBanner';
 import { AlternativeCard } from '../../components/AlternativeCard';
 import { FamilyHealthAlert } from '../../components/organisms/FamilyHealthAlert';
+import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import {
   AdditivesSection,
   DetailErrorState,
@@ -65,6 +66,13 @@ export const DetailScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<any>();
   const route = useRoute<DetailRoute>();
+
+  const layout = useAppScreenLayout({
+    contentBottomExtra: 120,
+    contentBottomMin: 150,
+    floatingBottomExtra: 12,
+    floatingBottomMin: 12,
+  });
 
   const tt = useCallback(
     (key: string, fallback: string) => {
@@ -426,7 +434,10 @@ export const DetailScreen: React.FC = () => {
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: layout.contentBottomPadding },
+        ]}
       >
         <DetailHeroSection
           imageUri={productImageUri}
@@ -528,7 +539,12 @@ export const DetailScreen: React.FC = () => {
         </View>
       </ScrollView>
 
-      <View style={styles.adContainer}>
+      <View
+        style={[
+          styles.adContainer,
+          { bottom: layout.floatingBottomOffset },
+        ]}
+      >
         <AdBanner />
       </View>
     </View>
@@ -539,15 +555,12 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
   },
-  scrollContent: {
-    paddingBottom: 100,
-  },
+  scrollContent: {},
   content: {
     padding: 25,
   },
   adContainer: {
     position: 'absolute',
-    bottom: 0,
     width: '100%',
     alignItems: 'center',
   },
