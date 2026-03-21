@@ -9,11 +9,11 @@ import {
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useTranslation } from 'react-i18next';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTheme } from '../../context/ThemeContext';
 import { AdBanner } from '../../components/AdBanner';
 import { usePaginatedHistory } from '../../hooks/usePaginatedHistory';
+import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import {
   HistoryEmptyState,
   HistoryErrorState,
@@ -29,7 +29,13 @@ export const HistoryScreen: React.FC = () => {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const navigation = useNavigation<any>();
-  const insets = useSafeAreaInsets();
+
+  const layout = useAppScreenLayout({
+    topInsetExtra: 20,
+    topInsetMin: 60,
+    contentBottomExtra: 16,
+    contentBottomMin: 24,
+  });
 
   const tt = useCallback(
     (key: string, fallback: string) => {
@@ -172,6 +178,7 @@ export const HistoryScreen: React.FC = () => {
                   'Önceki barkod analizlerinizi burada görebilir, sağa kaydırarak silebilirsiniz.'
                 )}
                 colors={colors}
+                topPadding={layout.headerTopPadding}
               />
               <HistoryFilterBar
                 searchValue={searchQuery}
@@ -199,7 +206,7 @@ export const HistoryScreen: React.FC = () => {
               <View style={styles.footerBox}>
                 <AdBanner />
               </View>
-              <View style={{ height: Math.max(insets.bottom + 16, 24) }} />
+              <View style={{ height: layout.contentBottomPadding }} />
             </>
           }
           stickySectionHeadersEnabled={false}
