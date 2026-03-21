@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
 import { fetchProductByBarcode } from '../../api/productResolver';
+import { FEATURES } from '../../config/features';
 import { useTheme } from '../../context/ThemeContext';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { saveProductToHistory } from '../../services/db';
@@ -46,8 +47,8 @@ const scoreToGrade = (score: number): 'A' | 'B' | 'C' | 'D' | 'E' => {
   return 'E';
 };
 
-const normalizeOriginText = (value?: string | null): string => {
-  if (!value) return 'Menşei yok';
+const normalizeDisplayText = (value?: string | null): string => {
+  if (!value) return '';
 
   return value
     .replace(/en:/gi, '')
@@ -131,15 +132,57 @@ export const DetailScreen: React.FC = () => {
       : 'Open Beauty Facts';
   }, [extendedProduct?.sourceName, tt]);
 
-  const resolvedOriginLabel = useMemo(() => {
-    const raw =
-      extendedProduct?.origin ||
-      extendedProduct?.country ||
-      originInfo.country ||
-      tt('international', 'Uluslararası');
+  const actualOriginRaw = useMemo(() => {
+    return normalizeDisplayText(
+      extendedProduct?.origin || extendedProduct?.country || ''
+    );
+  }, [extendedProduct?.country, extendedProduct?.origin]);
 
-    return normalizeOriginText(raw);
-  }, [extendedProduct?.country, extendedProduct?.origin, originInfo.country, tt]);
+  const hasActualOrigin = actualOriginRaw.length > 0;
+
+  const actualOriginLabel = useMemo(() => {
+    if (hasActualOrigin) {
+      return actualOriginRaw;
+    }
+
+    return tt('origin_not_available', 'Menşei bilgisi yok');
+  }, [actualOriginRaw, hasActualOrigin, tt]);
+
+  const gs1PrefixLabel = useMemo(() => {
+    if (!originInfo.hasGs1PrefixInfo || !originInfo.gs1PrefixCountry || !originInfo.prefix) {
+      return tt('gs1_not_available', 'GS1 kayıt bilgisi yok');
+    }
+
+    return `${originInfo.gs1PrefixCountry} (${originInfo.prefix})`;
+  }, [originInfo.gs1PrefixCountry, originInfo.hasGs1PrefixInfo, originInfo.prefix, tt]);
+
+  const headerBadgeLabel = useMemo(() => {
+    if (FEATURES.productPresentation.gs1OriginLabelFixEnabled) {
+      if (hasActualOrigin) {
+        return actualOriginLabel;
+      }
+
+      if (originInfo.hasGs1PrefixInfo && originInfo.gs1PrefixCountry) {
+        return `GS1: ${originInfo.gs1PrefixCountry}`;
+      }
+
+      return tt('origin_not_available', 'Menşei bilgisi yok');
+    }
+
+    return (
+      actualOriginRaw ||
+      originInfo.country ||
+      tt('international', 'Uluslararası')
+    );
+  }, [
+    actualOriginLabel,
+    actualOriginRaw,
+    hasActualOrigin,
+    originInfo.country,
+    originInfo.gs1PrefixCountry,
+    originInfo.hasGs1PrefixInfo,
+    tt,
+  ]);
 
   const displayScore = useMemo(() => {
     return Math.max(
@@ -314,7 +357,8 @@ export const DetailScreen: React.FC = () => {
         message:
           `${displayedProduct.brand || tt('unknown_brand', 'Bilinmeyen Marka')} - ${displayedProduct.name || tt('unnamed_product', 'İsimsiz Ürün')}\n` +
           `${tt('source', 'Kaynak')}: ${sourceLabel}\n` +
-          `${tt('origin_label', 'Menşei')}: ${resolvedOriginLabel}\n` +
+          `${tt('origin_label', 'Menşei')}: ${actualOriginLabel}\n` +
+          `GS1: ${gs1PrefixLabel}\n` +
           `${tt('analysis_summary', 'Analiz Özeti')}: ${displayedAnalysis.riskLevel} Risk\n` +
           `${tt('score_label', 'Skor')}: ${displayScore}/100\n` +
           `Not: ${displayGrade}\n` +
@@ -325,12 +369,13 @@ export const DetailScreen: React.FC = () => {
       Alert.alert(tt('error_title', 'Hata'), tt('share_error', 'Paylaşım başarısız oldu'));
     }
   }, [
+    actualOriginLabel,
     displayGrade,
     displayScore,
     displayedAnalysis,
     displayedProduct,
+    gs1PrefixLabel,
     normalizedRouteBarcode,
-    resolvedOriginLabel,
     sourceLabel,
     tt,
   ]);
@@ -412,9 +457,13 @@ export const DetailScreen: React.FC = () => {
           </View>
 
           <View style={styles.originBadge}>
-            <Ionicons name="globe-outline" size={14} color="#FFF" />
+            <Ionicons
+              name={hasActualOrigin ? 'flag-outline' : 'barcode-outline'}
+              size={14}
+              color="#FFF"
+            />
             <Text style={styles.originText} numberOfLines={1}>
-              {resolvedOriginLabel}
+              {headerBadgeLabel}
             </Text>
           </View>
         </View>
@@ -455,7 +504,22 @@ export const DetailScreen: React.FC = () => {
                 style={[styles.metaChipText, { color: colors.text }]}
                 numberOfLines={1}
               >
-                {resolvedOriginLabel}
+                {actualOriginLabel}
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.metaChip,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <Ionicons name="barcode-outline" size={14} color={colors.primary} />
+              <Text
+                style={[styles.metaChipText, { color: colors.text }]}
+                numberOfLines={1}
+              >
+                {`GS1: ${gs1PrefixLabel}`}
               </Text>
             </View>
 
@@ -474,6 +538,22 @@ export const DetailScreen: React.FC = () => {
               </Text>
             </View>
           </View>
+
+          {FEATURES.productPresentation.gs1OriginLabelFixEnabled ? (
+            <View
+              style={[
+                styles.gs1InfoCard,
+                { backgroundColor: colors.card, borderColor: colors.border },
+              ]}
+            >
+              <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
+              <Text style={[styles.gs1InfoText, { color: colors.text }]}>
+                {hasActualOrigin
+                  ? `GS1 prefix bilgisi: ${gs1PrefixLabel}. Ürünün menşei alanı ayrıca gösterilir.`
+                  : `Gerçek menşei bilgisi bulunamadı. Gösterilen GS1 alanı barkodun kayıt bölgesidir: ${gs1PrefixLabel}.`}
+              </Text>
+            </View>
+          ) : null}
 
           <View
             style={[
@@ -760,6 +840,21 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     flexShrink: 1,
+  },
+  gs1InfoCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 20,
+  },
+  gs1InfoText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 18,
+    opacity: 0.8,
   },
   scoreCard: {
     flexDirection: 'row',
