@@ -9,7 +9,6 @@ import {
   Platform,
 } from 'react-native';
 import { useTheme } from '../../context/ThemeContext';
-import { useAuth } from '../../context/AuthContext';
 
 const { width, height } = Dimensions.get('window');
 
@@ -20,8 +19,6 @@ const { width, height } = Dimensions.get('window');
  */
 export const SplashScreen: React.FC = () => {
   const { colors } = useTheme();
-  const { loading } = useAuth(); // AuthContext'ten gelen yüklenme durumu
-
   // Animasyon Değerleri
   const fadeAnim = useRef(new Animated.Value(0)).current; // Logo görünürlüğü
   const scaleAnim = useRef(new Animated.Value(0.85)).current; // Logo büyüklüğü
@@ -51,7 +48,7 @@ export const SplashScreen: React.FC = () => {
         useNativeDriver: true,
       }),
     ]).start();
-  }, []);
+  }, [fadeAnim, scaleAnim, slideUpAnim]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -77,9 +74,9 @@ export const SplashScreen: React.FC = () => {
 
         {/* ✍️ Metin Animasyonu */}
         <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideUpAnim }] }}>
-          <Text style={[styles.title, { color: colors.primary }]}>ErEnesAl®</Text>
+          <Text style={[styles.title, { color: colors.primary }]}>Barkod Analiz</Text>
           <View style={[styles.line, { backgroundColor: colors.primary }]} />
-          <Text style={[styles.subtitle, { color: colors.text }]}>v1 ULTRA ANALİZ</Text>
+          <Text style={[styles.subtitle, { color: colors.text }]}>v1</Text>
         </Animated.View>
       </View>
 
@@ -89,7 +86,7 @@ export const SplashScreen: React.FC = () => {
           MADE FOR HEALTH WITH INTELLIGENCE
         </Text>
         <Text style={[styles.versionText, { color: colors.text }]}>
-          © 2026 Ersat Yazılım A.Ş.
+          © 2026 ErEnesAl® - All Rights Reserved
         </Text>
       </View>
     </View>

@@ -1,15 +1,26 @@
-import React, { createContext, useState, useContext, useEffect } from 'react';
-import { useTranslation } from 'react-i18next';
-import i18n from 'i18next';
-import { initReactI18next } from 'react-i18next';
-import * as Localization from 'expo-localization';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import i18n from 'i18next';
+import { initReactI18next, useTranslation } from 'react-i18next';
+import { getLocales } from 'expo-localization';
 
-// 📚 Dil dosyalarını içeri aktarıyoruz
 import tr from '../assets/locales/tr/common.json';
 import en from '../assets/locales/en/common.json';
 import de from '../assets/locales/de/common.json';
 import fr from '../assets/locales/fr/common.json';
+
+const STORAGE_KEY = 'erenesal-language';
+const SUPPORTED_LANGUAGES = ['tr', 'en', 'de', 'fr'] as const;
+
+type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
 const resources = {
   tr: { translation: tr },
@@ -18,66 +29,128 @@ const resources = {
   fr: { translation: fr },
 };
 
-// ⚙️ i18n Yapılandırması
+const getDeviceLanguage = (): SupportedLanguage => {
+  try {
+    const locale = getLocales()?.[0];
+    const code = locale?.languageCode?.toLowerCase() as SupportedLanguage | undefined;
+
+    if (code && SUPPORTED_LANGUAGES.includes(code)) {
+      return code;
+    }
+
+    return 'tr';
+  } catch {
+    return 'tr';
+  }
+};
+
 if (!i18n.isInitialized) {
   i18n.use(initReactI18next).init({
     resources,
-    lng: Localization.getLocales()[0].languageCode || 'tr',
+    lng: getDeviceLanguage(),
     fallbackLng: 'tr',
-    interpolation: { escapeValue: false },
+    compatibilityJSON: 'v4',
+    interpolation: {
+      escapeValue: false,
+    },
+    returnNull: false,
   });
 }
 
-/**
- * 🌍 Dil Bağlamı (Language Context)
- */
-const LanguageContext = createContext<any>(null);
+type LanguageContextValue = {
+  locale: SupportedLanguage;
+  supportedLanguages: SupportedLanguage[];
+  ready: boolean;
+  changeLanguage: (lang: string) => Promise<void>;
+};
 
-export const LanguageProvider = ({ children }: { children: React.ReactNode }) => {
-  const { t } = useTranslation();
-  const [locale, setLocale] = useState(i18n.language);
+const LanguageContext = createContext<LanguageContextValue | undefined>(undefined);
 
-  // Uygulama açıldığında kaydedilen dili geri getir
+type LanguageProviderProps = {
+  children: ReactNode;
+};
+
+export const LanguageProvider: React.FC<LanguageProviderProps> = ({ children }) => {
+  useTranslation();
+
+  const [locale, setLocale] = useState<SupportedLanguage>(
+    (i18n.language as SupportedLanguage) || 'tr'
+  );
+  const [ready, setReady] = useState(false);
+
   useEffect(() => {
+    let mounted = true;
+
     const loadSavedLanguage = async () => {
-      const savedLang = await AsyncStorage.getItem('user-language');
-      if (savedLang) {
-        await i18n.changeLanguage(savedLang);
-        setLocale(savedLang);
+      try {
+        const savedLang = await AsyncStorage.getItem(STORAGE_KEY);
+        const fallbackLang = getDeviceLanguage();
+
+        const nextLang =
+          savedLang && SUPPORTED_LANGUAGES.includes(savedLang as SupportedLanguage)
+            ? (savedLang as SupportedLanguage)
+            : fallbackLang;
+
+        await i18n.changeLanguage(nextLang);
+
+        if (!mounted) return;
+        setLocale(nextLang);
+      } catch (error) {
+        console.error('Language load failed:', error);
+
+        if (!mounted) return;
+        setLocale('tr');
+      } finally {
+        if (mounted) {
+          setReady(true);
+        }
       }
     };
+
     loadSavedLanguage();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const changeLanguage = async (lang: string) => {
-    try {
-      await i18n.changeLanguage(lang);
-      setLocale(lang);
-      await AsyncStorage.setItem('user-language', lang);
-      console.log(`Dil "zınk" diye değişti: ${lang}`);
-    } catch (error) {
-      console.error("Dil değiştirme hatası:", error);
-    }
-  };
+  const changeLanguage = useCallback(async (lang: string) => {
+    const normalized = String(lang || '').toLowerCase() as SupportedLanguage;
 
-  return (
-    <LanguageContext.Provider value={{ locale, changeLanguage, t }}>
-      {children}
-    </LanguageContext.Provider>
+    if (!SUPPORTED_LANGUAGES.includes(normalized)) {
+      console.warn('Unsupported language ignored:', lang);
+      return;
+    }
+
+    try {
+      await i18n.changeLanguage(normalized);
+      setLocale(normalized);
+      await AsyncStorage.setItem(STORAGE_KEY, normalized);
+      console.log('Language changed:', normalized);
+    } catch (error) {
+      console.error('Language change failed:', error);
+    }
+  }, []);
+
+  const value = useMemo<LanguageContextValue>(
+    () => ({
+      locale,
+      supportedLanguages: [...SUPPORTED_LANGUAGES],
+      ready,
+      changeLanguage,
+    }),
+    [changeLanguage, locale, ready]
   );
+
+  return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
 };
 
-/**
- * ⚓ useLanguage Hook'u
- * SettingScreen ve diğer ekranlarda dili yönetmek için bu dışa aktarılır.
- */
-export const useLanguage = () => {
+export const useLanguage = (): LanguageContextValue => {
   const context = useContext(LanguageContext);
+
   if (!context) {
-    throw new Error('useLanguage, bir LanguageProvider içinde kullanılmalıdır!');
+    throw new Error('useLanguage must be used within a LanguageProvider.');
   }
+
   return context;
 };
-
-// Not: HomeScreen bileşenini bu dosyada tutmak yerine kendi dosyasına taşıman en iyisidir,
-// ancak mantık değişmesin dediğin için yapıya zarar vermeden context'i dışa aktardık.

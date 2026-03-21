@@ -1,103 +1,258 @@
 import { E_CODES_DATA } from '../services/eCodesData';
 
 /**
- * 🔬 ErEnesAl® v1 - Merkezi Analiz Motoru
- * Gıda ve Kozmetik ürünleri için hibrit risk analizi ve puanlama sağlar.
+ * ErEnesAl® v1 - Merkezi Analiz Motoru
+ * Gıda ve kozmetik ürünleri için hibrit risk analizi ve puanlama sağlar.
  */
+
+export type ProductType = 'food' | 'beauty';
+export type ProductSource = 'openfoodfacts' | 'openbeautyfacts';
+export type ProductSourceStatus = 'found' | 'not_found';
 
 export interface Product {
   barcode: string;
   name: string;
   brand: string;
   image_url: string;
-  type: 'food' | 'beauty';
+  type: ProductType;
+
   score?: number;
-  grade?: string; 
+  grade?: string;
   ingredients_text?: string;
+
   additives?: string[];
-  nutriments?: any;
-  nutrient_levels?: any;
-  // 🧴 Kozmetik API için gerekli alan
-  usage_instructions?: string; 
+  nutriments?: Record<string, unknown>;
+  nutrient_levels?: Record<string, unknown>;
+
+  usage_instructions?: string;
+
+  country?: string;
+  countries_tags?: string[];
+  origin?: string;
+  origins_tags?: string[];
+  sourceName?: ProductSource;
+  sourceStatus?: ProductSourceStatus;
+}
+
+export interface ECodeMatch {
+  code: string;
+  name: string;
+  risk?: string;
+  impact?: string;
+  [key: string]: unknown;
 }
 
 export interface AnalysisResult {
   riskLevel: 'Düşük' | 'Orta' | 'Yüksek';
-  foundECodes: any[];
+  foundECodes: ECodeMatch[];
   summary: string;
   color: string;
   recommendation: string;
-  score: number; // Detay ekranındaki sağlık skoru
+  score: number;
 }
 
-export const analyzeProduct = (product: Product): AnalysisResult => {
-  const text = (product.ingredients_text || "").toUpperCase();
-  const foundECodesMap = new Map<string, any>();
-  
-  // 1️⃣ RegEx Tarama (E-Kodları)
-  const eCodeRegex = /E[- ]?\d{3,4}[a-z]?/gi;
-  const matches = text.match(eCodeRegex) || [];
-  
-  matches.forEach(m => {
-    const rawMatch = String(m);
-    const cleanCode = rawMatch.replace(/[- ]/g, "").toUpperCase(); 
-    if (E_CODES_DATA[cleanCode]) {
-      foundECodesMap.set(cleanCode, { ...E_CODES_DATA[cleanCode] });
-    }
-  });
+const RISK_COLORS = {
+  low: '#1ED760',
+  medium: '#FFD700',
+  high: '#FF4444',
+};
 
-  // 2️⃣ İsim Bazlı Tarama (Gizli içerikler)
-  Object.keys(E_CODES_DATA).forEach(code => {
-    const additive = E_CODES_DATA[code];
-    if (additive.name && text.includes(additive.name.toUpperCase())) {
-      if (!foundECodesMap.has(code)) {
-        foundECodesMap.set(code, { ...additive });
-      }
+const GRADE_TO_SCORE: Record<string, number> = {
+  a: 95,
+  b: 80,
+  c: 60,
+  d: 35,
+  e: 10,
+};
+
+const clamp = (value: number, min = 0, max = 100): number =>
+  Math.max(min, Math.min(max, value));
+
+const normalizeText = (value?: string): string =>
+  (value || '').toUpperCase().trim();
+
+/**
+ * API skorlarını 0-100 aralığına normalize eder.
+ *
+ * OFF nutriscore_score tipik aralık: -15..40
+ * Düşük skor daha iyi olduğu için ters normalize edilir.
+ */
+const normalizeApiScore = (rawScore?: number): number | null => {
+  if (typeof rawScore !== 'number' || !Number.isFinite(rawScore)) {
+    return null;
+  }
+
+  if (rawScore >= -15 && rawScore <= 40) {
+    return clamp(Math.round(((40 - rawScore) / 55) * 100));
+  }
+
+  if (rawScore >= 0 && rawScore <= 100) {
+    return clamp(Math.round(rawScore));
+  }
+
+  return clamp(Math.round(rawScore));
+};
+
+const getGradeFallbackScore = (grade?: string): number | null => {
+  const normalizedGrade = (grade || '').toLowerCase().trim();
+  return GRADE_TO_SCORE[normalizedGrade] ?? null;
+};
+
+const getRiskPenalty = (risk?: string): number => {
+  const normalizedRisk = (risk || '').toLowerCase().trim();
+
+  if (normalizedRisk === 'yüksek') return 18;
+  if (normalizedRisk === 'orta') return 8;
+  if (normalizedRisk === 'düşük') return 3;
+
+  return 5;
+};
+
+const getRecommendation = (
+  type: ProductType,
+  riskLevel: 'Düşük' | 'Orta' | 'Yüksek',
+  foundECodesCount: number,
+  hasApiScore: boolean
+): string => {
+  if (type === 'beauty') {
+    if (riskLevel === 'Yüksek') {
+      return foundECodesCount > 0
+        ? 'İçerikte dikkat gerektiren bileşenler bulundu. Kozmetik ürünü kullanmadan önce içerik detayını kontrol edin.'
+        : 'Kozmetik ürün için risk seviyesi yüksek görünüyor. İçerik ve kullanım amacı dikkatle incelenmeli.';
     }
-  });
+
+    if (riskLevel === 'Orta') {
+      return foundECodesCount > 0
+        ? 'Kozmetik içerikte bazı dikkat edilmesi gereken maddeler bulunuyor.'
+        : 'Kozmetik ürün orta risk seviyesinde görünüyor.';
+    }
+
+    return hasApiScore
+      ? 'Kozmetik ürün mevcut verilere göre düşük risk seviyesinde görünüyor.'
+      : 'Kozmetik içerik genel olarak temiz görünüyor.';
+  }
+
+  if (riskLevel === 'Yüksek') {
+    return foundECodesCount > 0
+      ? 'Ürün hem API skoru hem de içerik bileşenleri açısından yüksek risk gösterebilir.'
+      : 'API skoruna göre ürün risk seviyesi yüksek görünüyor.';
+  }
+
+  if (riskLevel === 'Orta') {
+    return foundECodesCount > 0
+      ? 'Ürün içerik ve skor açısından orta seviyede dikkat gerektiriyor.'
+      : 'API skoruna göre ürün orta risk seviyesinde.';
+  }
+
+  return hasApiScore
+    ? 'API skoruna göre ürün düşük risk seviyesinde görünüyor.'
+    : 'İçerik temiz ve güvenle değerlendirilebilir görünüyor.';
+};
+
+export const analyzeProduct = (product: Product): AnalysisResult => {
+  const text = normalizeText(product.ingredients_text);
+  const foundECodesMap = new Map<string, ECodeMatch>();
+
+  /**
+   * 1) Regex ile E-kod tarama
+   * Örnek: E330, E-330, E 330
+   */
+  const eCodeRegex = /E[- ]?\d{3,4}[A-Z]?/gi;
+  const matches = text.match(eCodeRegex) || [];
+
+  matches.forEach((match) => {
+  const cleanCode = String(match).replace(/[- ]/g, '').toUpperCase();
+  const additive = E_CODES_DATA[cleanCode];
+
+  if (additive) {
+    foundECodesMap.set(cleanCode, {
+      ...additive,
+      code: cleanCode,
+      name: additive.name || cleanCode,
+    });
+  }
+});
+
+  /**
+   * 2) İsim bazlı tarama
+   * İçerikte E kodu yazmasa bile katkı maddesi adı geçebilir
+   */
+  Object.keys(E_CODES_DATA).forEach((code) => {
+  const additive = E_CODES_DATA[code];
+  const additiveName = String(additive?.name || '').toUpperCase().trim();
+
+  if (!additiveName) return;
+
+  if (text.includes(additiveName) && !foundECodesMap.has(code)) {
+    foundECodesMap.set(code, {
+      ...additive,
+      code,
+      name: additive.name || code,
+    });
+  }
+});
 
   const foundECodes = Array.from(foundECodesMap.values());
 
-  // ⚖️ Puanlama Mantığı (Health Score)
-  const highRiskCount = foundECodes.filter(e => e.risk === 'Yüksek').length;
-  const moderateRiskCount = foundECodes.filter(e => e.risk === 'Orta').length;
-  const productGrade = (product.grade || 'b').toLowerCase();
+  /**
+   * 3) Temel skor hesabı
+   * Öncelik: API score -> grade -> varsayılan
+   */
+  const normalizedApiScore = normalizeApiScore(product.score);
+  const gradeFallbackScore = getGradeFallbackScore(product.grade);
 
-  let healthScore = 100;
-  
-  // Nutri-Score Kesintisi
-  const penalties: Record<string, number> = { a: 0, b: 10, c: 30, d: 55, e: 75 };
-  healthScore -= (penalties[productGrade] || 20);
+  let healthScore =
+    normalizedApiScore ??
+    gradeFallbackScore ??
+    (product.type === 'beauty' ? 70 : 60);
 
-  // Katkı Maddesi Kesintisi
-  healthScore -= (highRiskCount * 30);
-  healthScore -= (moderateRiskCount * 12);
+  /**
+   * 4) Katkı maddesi risk etkisi
+   * Çok sayıda veya yüksek riskli katkı varsa skoru düşür
+   */
+  const additivePenalty = foundECodes.reduce((total, item) => {
+    return total + getRiskPenalty(item.risk);
+  }, 0);
 
-  // Puan Sınırlandırma
-  healthScore = Math.max(0, Math.min(100, healthScore));
+  const cappedPenalty = Math.min(additivePenalty, 35);
+  healthScore = clamp(healthScore - cappedPenalty);
 
-  // 🚦 Durum Belirleme
+  /**
+   * 5) Son risk seviyesi
+   */
   let riskLevel: 'Düşük' | 'Orta' | 'Yüksek' = 'Düşük';
-  let color = '#1ED760'; 
-  let recommendation = "İçerik temiz ve güvenle tüketilebilir.";
+  let color = RISK_COLORS.low;
 
-  if (healthScore < 45 || highRiskCount > 0) {
+  if (healthScore < 45) {
     riskLevel = 'Yüksek';
-    color = '#FF4444';
-    recommendation = "Yüksek riskli maddeler tespit edildi. Tüketimi önerilmez.";
-  } else if (healthScore < 75 || moderateRiskCount > 0) {
+    color = RISK_COLORS.high;
+  } else if (healthScore < 75) {
     riskLevel = 'Orta';
-    color = '#FFD700';
-    recommendation = "Bazı riskli maddeler içeriyor. Sınırlı tüketilmesi önerilir.";
+    color = RISK_COLORS.medium;
   }
 
-  // 💡 ÖNEMLİ: AnalysisResult interface'indeki TÜM alanlar burada dönmelidir.
+  const hasApiScore = normalizedApiScore !== null || gradeFallbackScore !== null;
+
+  const recommendation = getRecommendation(
+    product.type,
+    riskLevel,
+    foundECodes.length,
+    hasApiScore
+  );
+
+  const summary =
+    foundECodes.length > 0
+      ? `${foundECodes.length} içerik bileşeni incelendi, katkı bazlı risk etkisi hesaba katıldı.`
+      : hasApiScore
+      ? 'API skoru ve ürün derecesi üzerinden analiz tamamlandı.'
+      : 'İçerikte belirgin riskli madde tespit edilmedi.';
+
   return {
     riskLevel,
     foundECodes,
-    summary: foundECodes.length > 0 ? `${foundECodes.length} içerik bileşeni incelendi.` : "Riskli madde bulunamadı.",
+    summary,
     color,
     recommendation,
-    score: healthScore // Bu alan eksikse imza satırı hata verir!
+    score: healthScore,
   };
-};
+};  

@@ -1,62 +1,160 @@
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import {
+  deleteObject,
+  getDownloadURL,
+  ref,
+  uploadBytes,
+  type UploadMetadata,
+} from 'firebase/storage';
 import { storage } from '../config/firebase';
 
 /**
  * ErEnesAl® v1 - Firebase Storage Yönetim Servisi
- * Ürün görsellerini ve kullanıcı dosyalarını buluta yüklemek için kullanılır.
+ * Ürün görselleri ve kullanıcı katkı dosyaları için merkezi servis.
  */
+
+const sanitizePathPart = (value: string): string =>
+  String(value || '')
+    .trim()
+    .replace(/[^\w.-]+/g, '_');
+
+const guessContentType = (uri: string): string => {
+  const lower = uri.toLowerCase();
+
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  if (lower.endsWith('.heic')) return 'image/heic';
+  if (lower.endsWith('.heif')) return 'image/heif';
+
+  return 'image/jpeg';
+};
+
+const buildTimestampedPath = (
+  folder: string,
+  identifier: string,
+  extension = 'jpg'
+): string => {
+  const safeFolder = sanitizePathPart(folder);
+  const safeIdentifier = sanitizePathPart(identifier) || 'file';
+  return `${safeFolder}/${safeIdentifier}_${Date.now()}.${extension}`;
+};
+
+const resolveExtensionFromUri = (uri: string): string => {
+  const lower = uri.toLowerCase();
+
+  if (lower.endsWith('.png')) return 'png';
+  if (lower.endsWith('.webp')) return 'webp';
+  if (lower.endsWith('.heic')) return 'heic';
+  if (lower.endsWith('.heif')) return 'heif';
+
+  return 'jpg';
+};
+
+const uriToBlob = async (uri: string): Promise<Blob> => {
+  const response = await fetch(uri);
+
+  if (!response.ok) {
+    throw new Error(`Dosya okunamadı: ${response.status}`);
+  }
+
+  return await response.blob();
+};
 
 export const storageService = {
   /**
-   * 📸 Görseli Firebase Storage'a Yükle
-   * @param uri - Cihazdaki yerel dosya yolu (expo-camera'dan gelen)
-   * @param path - Kaydedilecek klasör yolu (Örn: 'products/868123.jpg')
-   * @returns Yüklenen dosyanın public URL'i
+   * Genel görsel yükleme fonksiyonu.
    */
-  uploadImage: async (uri: string, path: string): Promise<string | null> => {
-    try {
-      // 1. URI'yi Blob formatına dönüştür (React Native/Firebase zorunluluğu)
-      const response = await fetch(uri);
-      const blob = await response.blob();
+  uploadImage: async (
+    uri: string,
+    path: string,
+    metadata?: UploadMetadata
+  ): Promise<string | null> => {
+    if (!uri?.trim() || !path?.trim()) {
+      return null;
+    }
 
-      // 2. Firebase Storage referansı oluştur
+    try {
+      const blob = await uriToBlob(uri);
       const storageRef = ref(storage, path);
 
-      // 3. Dosyayı yükle
-      const snapshot = await uploadBytes(storageRef, blob);
+      const uploadMeta: UploadMetadata = {
+        contentType: guessContentType(uri),
+        cacheControl: 'public,max-age=3600',
+        ...(metadata || {}),
+      };
 
-      // 4. Public erişim URL'ini al
+      const snapshot = await uploadBytes(storageRef, blob, uploadMeta);
       const downloadURL = await getDownloadURL(snapshot.ref);
-      
-      console.log('Dosya başarıyla yüklendi:', downloadURL);
+
       return downloadURL;
     } catch (error) {
-      console.error('Storage Yükleme Hatası:', error);
+      console.error('Storage uploadImage error:', error);
       return null;
     }
   },
 
   /**
-   * 🖼️ Ürün Görseli Yükle (Kısayol)
-   * Barkod numarasına göre özel bir klasörleme yapar.
+   * Barkod ürün görselini yükler.
    */
   uploadProductImage: async (uri: string, barcode: string): Promise<string | null> => {
-    const fileName = `products/${barcode}_${Date.now()}.jpg`;
-    return await storageService.uploadImage(uri, fileName);
+    const ext = resolveExtensionFromUri(uri);
+    const path = buildTimestampedPath('products', barcode, ext);
+
+    return await storageService.uploadImage(uri, path, {
+      customMetadata: {
+        barcode: sanitizePathPart(barcode),
+        source: 'product',
+      },
+    });
   },
 
   /**
-   * 🗑️ Dosyayı Sil
-   * Veritabanından bir ürün silindiğinde depolama alanını temizlemek için kullanılır.
+   * Eksik ürün katkı ekranından gelen görseli yükler.
    */
-  deleteImage: async (imageUrl: string): Promise<void> => {
-    try {
-      // URL'den referans oluşturarak dosyayı bul ve sil
-      const fileRef = ref(storage, imageUrl);
-      await deleteObject(fileRef);
-      console.log('Dosya Storage üzerinden silindi.');
-    } catch (error) {
-      console.error('Storage Silme Hatası:', error);
+  uploadMissingProductImage: async (
+    uri: string,
+    barcode: string
+  ): Promise<string | null> => {
+    const ext = resolveExtensionFromUri(uri);
+    const path = buildTimestampedPath('missing-products', barcode, ext);
+
+    return await storageService.uploadImage(uri, path, {
+      customMetadata: {
+        barcode: sanitizePathPart(barcode),
+        source: 'missing-product',
+      },
+    });
+  },
+
+  /**
+   * Kullanıcı avatarı / profil görseli yüklemek için yardımcı fonksiyon.
+   */
+  uploadUserImage: async (uri: string, userId: string): Promise<string | null> => {
+    const ext = resolveExtensionFromUri(uri);
+    const path = buildTimestampedPath('users', userId, ext);
+
+    return await storageService.uploadImage(uri, path, {
+      customMetadata: {
+        userId: sanitizePathPart(userId),
+        source: 'user-profile',
+      },
+    });
+  },
+
+  /**
+   * Storage dosyasını tam URL veya path ile siler.
+   */
+  deleteImage: async (imageUrlOrPath: string): Promise<boolean> => {
+    if (!imageUrlOrPath?.trim()) {
+      return false;
     }
-  }
+
+    try {
+      const fileRef = ref(storage, imageUrlOrPath);
+      await deleteObject(fileRef);
+      return true;
+    } catch (error) {
+      console.error('Storage deleteImage error:', error);
+      return false;
+    }
+  },
 };

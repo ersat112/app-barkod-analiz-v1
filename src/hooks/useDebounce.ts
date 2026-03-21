@@ -1,24 +1,43 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /**
- * ErEnesAl® v1 - Performans Hook'u
- * Verilen değerin belirlenen süre boyunca değişmemesini bekler.
- * Gereksiz API çağrılarını ve render işlemlerini minimize eder.
+ * ErEnesAl® v1 - Debounce Hook'u
+ * Verilen değeri belirli süre sabit kaldığında günceller.
  */
-export function useDebounce<T>(value: T, delay: number): T {
+
+type UseDebounceOptions = {
+  immediate?: boolean;
+};
+
+export function useDebounce<T>(
+  value: T,
+  delay: number,
+  options: UseDebounceOptions = {}
+): T {
+  const { immediate = false } = options;
   const [debouncedValue, setDebouncedValue] = useState<T>(value);
+  const isFirstRun = useRef(true);
 
   useEffect(() => {
-    // Belirlenen delay süresi kadar bekle
+    if (delay <= 0) {
+      setDebouncedValue(value);
+      return;
+    }
+
+    if (immediate && isFirstRun.current) {
+      setDebouncedValue(value);
+      isFirstRun.current = false;
+      return;
+    }
+
     const handler = setTimeout(() => {
       setDebouncedValue(value);
     }, delay);
 
-    // Eğer value değişirse (kullanıcı yazmaya devam ederse) önceki timer'ı temizle
     return () => {
       clearTimeout(handler);
     };
-  }, [value, delay]);
+  }, [value, delay, immediate]);
 
   return debouncedValue;
 }

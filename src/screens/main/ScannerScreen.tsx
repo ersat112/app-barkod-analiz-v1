@@ -1,163 +1,267 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  StyleSheet,
-  View,
-  Text,
-  TouchableOpacity,
-  Dimensions,
   Animated,
-  TextInput,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
-  Keyboard,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useNavigation, useIsFocused } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
-import { InterstitialAd, AdEventType } from 'react-native-google-mobile-ads';
 
-// 🔌 Config & Services & Utils
-import { useTheme } from '../../context/ThemeContext';
-import { adService } from '../../services/adService'; 
 import { AD_UNIT_ID, GLOBAL_AD_CONFIG } from '../../config/admob';
+import { useTheme } from '../../context/ThemeContext';
+import { adService } from '../../services/adService';
+import { getAdMobModule } from '../../services/admobRuntime';
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
-const { width } = Dimensions.get('window');
-
-/**
- * ErEnesAl® v1 - Profesyonel Barkod Tarayıcı ve Manuel Giriş Ekranı
- * Donanım hızlandırmalı tarama, akıllı reklam yönetimi ve manuel veri girişi sağlar.
- */
 export const ScannerScreen: React.FC = () => {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const navigation = useNavigation<any>();
-  const isFocused = useIsFocused(); 
+  const isFocused = useIsFocused();
 
-  // --- States ---
+  const tt = useCallback(
+    (key: string, fallback: string) => {
+      const value = t(key, { defaultValue: fallback });
+      return value === key ? fallback : value;
+    },
+    [t]
+  );
+
   const [permission, requestPermission] = useCameraPermissions();
-  const [scanned, setScanned] = useState<boolean>(false);
-  const [torch, setTorch] = useState<boolean>(false);
-  const [adLoaded, setAdLoaded] = useState<boolean>(false);
-  
-  // ⌨️ Manuel Giriş States
-  const [isManualMode, setIsManualMode] = useState<boolean>(false);
-  const [manualBarcode, setManualBarcode] = useState<string>('');
-  const [manualError, setManualError] = useState<string>('');
-  
-  // --- Refs & Animations ---
-  const interstitialRef = useRef<InterstitialAd | null>(null);
+  const [scanned, setScanned] = useState(false);
+  const [torch, setTorch] = useState(false);
+  const [adLoaded, setAdLoaded] = useState(false);
+
+  const [isManualMode, setIsManualMode] = useState(false);
+  const [manualBarcode, setManualBarcode] = useState('');
+  const [manualError, setManualError] = useState('');
+
+  const interstitialRef = useRef<any>(null);
   const lineAnim = useRef(new Animated.Value(0)).current;
+  const scanResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animationRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  /**
-   * 💰 AdMob Interstitial (Geçiş Reklamı) Yönetimi
-   */
   useEffect(() => {
-    const interstitial = InterstitialAd.createForAdRequest(AD_UNIT_ID.INTERSTITIAL, GLOBAL_AD_CONFIG);
-    
-    const unsubscribeLoaded = interstitial.addAdEventListener(AdEventType.LOADED, () => {
-      setAdLoaded(true);
-    });
+    try {
+      const adsModule = getAdMobModule();
 
-    const unsubscribeClosed = interstitial.addAdEventListener(AdEventType.CLOSED, () => {
+      if (!adsModule?.InterstitialAd || !adsModule?.AdEventType) {
+        console.log('[Interstitial] native ads module unavailable');
+        setAdLoaded(false);
+        interstitialRef.current = null;
+        return;
+      }
+
+      const { InterstitialAd, AdEventType } = adsModule;
+      const interstitial = InterstitialAd.createForAdRequest(
+        AD_UNIT_ID.INTERSTITIAL,
+        GLOBAL_AD_CONFIG
+      );
+
+      const unsubscribeLoaded = interstitial.addAdEventListener(
+        AdEventType.LOADED,
+        () => {
+          console.log('[Interstitial] loaded');
+          setAdLoaded(true);
+        }
+      );
+
+      const unsubscribeClosed = interstitial.addAdEventListener(
+        AdEventType.CLOSED,
+        () => {
+          console.log('[Interstitial] closed');
+          setAdLoaded(false);
+          interstitial.load();
+        }
+      );
+
+      const unsubscribeError = interstitial.addAdEventListener(
+        AdEventType.ERROR,
+        (error: any) => {
+          console.log('[Interstitial] failed', error);
+          setAdLoaded(false);
+        }
+      );
+
+      interstitial.load();
+      interstitialRef.current = interstitial;
+
+      return () => {
+        unsubscribeLoaded?.();
+        unsubscribeClosed?.();
+        unsubscribeError?.();
+      };
+    } catch (error) {
+      console.log('[Interstitial] setup failed', error);
+      interstitialRef.current = null;
       setAdLoaded(false);
-      interstitial.load(); 
-    });
+      return;
+    }
+  }, []);
 
-    interstitial.load();
-    interstitialRef.current = interstitial;
+  useEffect(() => {
+    if (isFocused && !isManualMode) {
+      lineAnim.setValue(0);
+
+      animationRef.current = Animated.loop(
+        Animated.sequence([
+          Animated.timing(lineAnim, {
+            toValue: 240,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(lineAnim, {
+            toValue: 0,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+
+      animationRef.current.start();
+    } else {
+      animationRef.current?.stop();
+      animationRef.current = null;
+    }
 
     return () => {
-      unsubscribeLoaded();
-      unsubscribeClosed();
+      animationRef.current?.stop();
+      animationRef.current = null;
+    };
+  }, [isFocused, isManualMode, lineAnim]);
+
+  useEffect(() => {
+    return () => {
+      if (scanResetTimeoutRef.current) {
+        clearTimeout(scanResetTimeoutRef.current);
+      }
     };
   }, []);
 
-  /**
-   * 🎞️ Tarama Çizgisi Animasyonu
-   */
-  useEffect(() => {
-    if (isFocused && !isManualMode) {
-      const startAnimation = () => {
-        lineAnim.setValue(0);
-        Animated.loop(
-          Animated.sequence([
-            Animated.timing(lineAnim, { toValue: 240, duration: 2000, useNativeDriver: true }),
-            Animated.timing(lineAnim, { toValue: 0, duration: 2000, useNativeDriver: true }),
-          ])
-        ).start();
-      };
-      startAnimation();
-    }
-  }, [isFocused, isManualMode, lineAnim]);
+  const closeManualMode = useCallback(() => {
+    setIsManualMode(false);
+    setManualError('');
+    setManualBarcode('');
+    Keyboard.dismiss();
+  }, []);
 
-  /**
-   * ⚙️ Çekirdek Barkod İşleme Motoru (Ortak Fonksiyon)
-   * Hem kamera taramasından hem de manuel girişten gelen veriler buraya düşer.
-   */
-  const processBarcode = async (validBarcodeData: string) => {
-    setScanned(true);
+  const processBarcode = useCallback(
+    async (validBarcodeData: string) => {
+      setScanned(true);
 
-    try {
-      const shouldShow = await adService.shouldShowAd();
-      if (shouldShow && adLoaded && interstitialRef.current) {
-        await interstitialRef.current.show();
+      try {
+        const shouldShow = await adService.shouldShowAd();
+
+        if (shouldShow && adLoaded && interstitialRef.current) {
+          console.log('[Interstitial] show requested');
+          await interstitialRef.current.show();
+        }
+      } catch (error) {
+        console.error('Ad showing failed:', error);
+      } finally {
+        setIsManualMode(false);
+        setManualBarcode('');
+        setManualError('');
+
+        navigation.navigate('Detail', { barcode: validBarcodeData });
+
+        if (scanResetTimeoutRef.current) {
+          clearTimeout(scanResetTimeoutRef.current);
+        }
+
+        scanResetTimeoutRef.current = setTimeout(() => {
+          setScanned(false);
+        }, 1800);
       }
-    } catch (e) {
-      console.error("Ad showing failed:", e);
-    } finally {
-      setIsManualMode(false); // Manuel moddaysa kapat
-      setManualBarcode('');   // Girdiyi temizle
-      
-      navigation.navigate('Detail', { barcode: validBarcodeData });
-      setTimeout(() => setScanned(false), 2000);
-    }
-  };
+    },
+    [adLoaded, navigation]
+  );
 
-  /**
-   * 📸 Kameradan Gelen Veriyi Yakalama
-   */
-  const handleBarCodeScanned = ({ data }: { data: string }) => {
-    if (scanned || !isFocused || isManualMode) return;
-    
-    const decoded = barcodeDecoder.decode(data);
-    if (!decoded.isValid) return; 
+  const handleBarCodeScanned = useCallback(
+    ({ data, type }: { data: string; type?: string }) => {
+      if (scanned || !isFocused || isManualMode) return;
 
-    processBarcode(decoded.normalizedData);
-  };
+      const decoded = barcodeDecoder.decode(data, type);
 
-  /**
-   * ⌨️ Manuel Girilen Veriyi Yakalama ve Doğrulama
-   */
-  const handleManualSubmit = () => {
+      if (!decoded.isValid) return;
+
+      processBarcode(decoded.normalizedData);
+    },
+    [isFocused, isManualMode, processBarcode, scanned]
+  );
+
+  const handleManualSubmit = useCallback(() => {
     Keyboard.dismiss();
     setManualError('');
 
-    if (!manualBarcode.trim()) {
-      setManualError(t('please_enter_barcode') || 'Lütfen barkod girin');
+    const rawValue = manualBarcode.trim();
+
+    if (!rawValue) {
+      setManualError(tt('please_enter_barcode', 'Lütfen barkod girin'));
       return;
     }
 
-    const decoded = barcodeDecoder.decode(manualBarcode.trim());
+    const decoded = barcodeDecoder.decode(rawValue);
+
     if (!decoded.isValid) {
-      setManualError(t('invalid_barcode') || 'Geçersiz barkod formatı');
+      setManualError(tt('invalid_barcode', 'Geçersiz barkod formatı'));
       return;
     }
 
     processBarcode(decoded.normalizedData);
-  };
+  }, [manualBarcode, processBarcode, tt]);
 
-  // --- İzin Kontrolleri ---
-  if (!permission) return <View style={{ flex: 1, backgroundColor: '#000' }} />;
-  
+  if (!permission) {
+    return <View style={[styles.container, { backgroundColor: '#000' }]} />;
+  }
+
   if (!permission.granted) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <Ionicons name="camera-reverse-outline" size={80} color={colors.primary} />
-        <Text style={[styles.permissionText, { color: colors.text }]}>{t('camera_permission_required')}</Text>
-        <TouchableOpacity style={[styles.btn, { backgroundColor: colors.primary }]} onPress={requestPermission}>
-          <Text style={styles.btnText}>{t('allow_camera').toUpperCase()}</Text>
+      <View style={[styles.permissionContainer, { backgroundColor: colors.background }]}>
+        <View
+          style={[
+            styles.permissionIconWrap,
+            { backgroundColor: `${colors.primary}14` },
+          ]}
+        >
+          <Ionicons name="camera-outline" size={58} color={colors.primary} />
+        </View>
+
+        <Text style={[styles.permissionTitle, { color: colors.text }]}>
+          {tt('camera_permission_required', 'Kamera izni gerekiyor')}
+        </Text>
+
+        <Text style={[styles.permissionText, { color: colors.text }]}>
+          {tt(
+            'camera_permission_help',
+            'Barkod tarayabilmek için kameraya erişim izni vermeniz gerekiyor.'
+          )}
+        </Text>
+
+        <TouchableOpacity
+          style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
+          onPress={requestPermission}
+        >
+          <Text style={styles.primaryBtnText}>
+            {tt('allow_camera', 'Kameraya İzin Ver').toUpperCase()}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.secondaryGhostBtn, { borderColor: colors.border }]}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={[styles.secondaryGhostBtnText, { color: colors.text }]}>
+            {tt('go_back', 'Geri Dön')}
+          </Text>
         </TouchableOpacity>
       </View>
     );
@@ -171,149 +275,457 @@ export const ScannerScreen: React.FC = () => {
           onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
           enableTorch={torch}
           barcodeScannerSettings={{
-            barcodeTypes: ["ean13", "ean8", "upc_a", "upc_e"], 
+            barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'],
           }}
-        >
-          {/* 🎯 Tarama Overlay (Maske) */}
-          <View style={styles.overlay}>
-            <View style={styles.darkArea} />
-            <View style={styles.middleRow}>
-              <View style={styles.darkArea} />
-              
-              <View style={[styles.scannerFrame, { borderColor: colors.primary }]}>
-                {!isManualMode && (
-                  <Animated.View 
-                    style={[
-                      styles.scanLine, 
-                      { backgroundColor: colors.primary, transform: [{ translateY: lineAnim }] }
-                    ]} 
-                  />
-                )}
-                <View style={[styles.corner, styles.topLeft, { borderColor: colors.primary }]} />
-                <View style={[styles.corner, styles.topRight, { borderColor: colors.primary }]} />
-                <View style={[styles.corner, styles.bottomLeft, { borderColor: colors.primary }]} />
-                <View style={[styles.corner, styles.bottomRight, { borderColor: colors.primary }]} />
-              </View>
+        />
+      )}
 
-              <View style={styles.darkArea} />
-            </View>
-            <View style={styles.darkArea}>
-                <Text style={styles.infoText}>
-                  {isManualMode ? '' : t('align_barcode_instruction')}
-                </Text>
-            </View>
+      <View style={styles.overlay} pointerEvents="box-none">
+        <View style={styles.topDarkArea}>
+          <TouchableOpacity
+            style={styles.topCloseBtn}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="close" size={28} color="#FFF" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.middleRow}>
+          <View style={styles.sideDarkArea} />
+
+          <View style={[styles.scannerFrame, { borderColor: colors.primary }]}>
+            {!isManualMode && (
+              <Animated.View
+                style={[
+                  styles.scanLine,
+                  {
+                    backgroundColor: colors.primary,
+                    transform: [{ translateY: lineAnim }],
+                  },
+                ]}
+              />
+            )}
+
+            <View style={[styles.corner, styles.topLeft, { borderColor: colors.primary }]} />
+            <View style={[styles.corner, styles.topRight, { borderColor: colors.primary }]} />
+            <View
+              style={[styles.corner, styles.bottomLeft, { borderColor: colors.primary }]}
+            />
+            <View
+              style={[styles.corner, styles.bottomRight, { borderColor: colors.primary }]}
+            />
           </View>
 
-          {/* 🛠️ Donanım ve Menü Kontrolleri */}
-          {!isManualMode && (
-            <View style={styles.controls}>
-              {/* Flaş */}
-              <TouchableOpacity style={styles.controlBtn} onPress={() => setTorch(!torch)}>
-                <Ionicons name={torch ? "flash" : "flash-off"} size={26} color={torch ? colors.primary : "#FFF"} />
-              </TouchableOpacity>
-              
-              {/* Manuel Giriş Togglesi */}
-              <TouchableOpacity style={styles.controlBtnCenter} onPress={() => setIsManualMode(true)}>
-                <Ionicons name="keypad" size={32} color={colors.primary} />
-              </TouchableOpacity>
+          <View style={styles.sideDarkArea} />
+        </View>
 
-              {/* Kapat */}
-              <TouchableOpacity style={[styles.controlBtn, { backgroundColor: 'rgba(255,68,68,0.2)', borderColor: '#FF4444' }]} onPress={() => navigation.goBack()}>
-                <Ionicons name="close" size={30} color="#FF4444" />
+        <View style={styles.bottomDarkArea}>
+          <Text style={styles.infoTitle}>{tt('scan_now', 'Şimdi Tara')}</Text>
+          <Text style={styles.infoText}>
+            {isManualMode
+              ? ''
+              : tt('align_barcode_instruction', 'Barkodu çerçeveye hizalayın')}
+          </Text>
+        </View>
+      </View>
+
+      {!isManualMode && (
+        <View style={styles.controls} pointerEvents="box-none">
+          <TouchableOpacity
+            style={styles.controlBtn}
+            onPress={() => setTorch((prev) => !prev)}
+            activeOpacity={0.85}
+          >
+            <Ionicons
+              name={torch ? 'flash' : 'flash-off'}
+              size={24}
+              color={torch ? colors.primary : '#FFF'}
+            />
+            <Text style={styles.controlLabel}>
+              {torch ? tt('flash_on', 'Açık') : tt('flash_label', 'Flaş')}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.controlBtnCenter}
+            onPress={() => setIsManualMode(true)}
+            activeOpacity={0.9}
+          >
+            <Ionicons name="keypad-outline" size={30} color={colors.primary} />
+            <Text style={[styles.controlCenterLabel, { color: colors.primary }]}>
+              {tt('manual_entry_title', 'Barkodu Elle Girin')}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.controlBtn}
+            onPress={() => setScanned(false)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="refresh-outline" size={24} color="#FFF" />
+            <Text style={styles.controlLabel}>{tt('retry', 'Yenile')}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {isManualMode && (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.manualOverlay}
+        >
+          <View
+            style={[
+              styles.manualCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <View style={styles.manualHeader}>
+              <Text style={[styles.manualTitle, { color: colors.text }]}>
+                {tt('manual_entry_title', 'Barkodu Elle Girin')}
+              </Text>
+
+              <TouchableOpacity onPress={closeManualMode}>
+                <Ionicons name="close" size={24} color={colors.text} />
               </TouchableOpacity>
             </View>
-          )}
 
-          {/* ⌨️ Manuel Giriş Overlay */}
-          {isManualMode && (
-            <KeyboardAvoidingView 
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
-              style={styles.manualOverlay}
-            >
-              <View style={[styles.manualCard, { backgroundColor: colors.card }]}>
-                <Text style={[styles.manualTitle, { color: colors.text }]}>
-                  {t('manual_entry_title') || 'Barkodu Elle Girin'}
+            <Text style={[styles.manualSubtitle, { color: colors.text }]}>
+              {tt(
+                'manual_barcode_help',
+                '8, 12 veya 13 haneli barkod numarasını girin.'
+              )}
+            </Text>
+
+            <TextInput
+              style={[
+                styles.input,
+                {
+                  color: colors.text,
+                  borderColor: manualError ? '#FF4444' : colors.border,
+                },
+              ]}
+              placeholder="8690000000000"
+              placeholderTextColor={`${colors.text}55`}
+              keyboardType="number-pad"
+              value={manualBarcode}
+              onChangeText={(text) => {
+                setManualBarcode(text.replace(/[^\d]/g, ''));
+                setManualError('');
+              }}
+              autoFocus
+              returnKeyType="done"
+              onSubmitEditing={handleManualSubmit}
+              maxLength={14}
+            />
+
+            {manualError ? <Text style={styles.errorText}>{manualError}</Text> : null}
+
+            <View style={styles.manualActions}>
+              <TouchableOpacity
+                style={[
+                  styles.actionBtn,
+                  styles.cancelBtn,
+                  { borderColor: colors.border },
+                ]}
+                onPress={closeManualMode}
+              >
+                <Text style={[styles.cancelBtnText, { color: colors.text }]}>
+                  {tt('cancel', 'İptal')}
                 </Text>
-                
-                <TextInput
-                  style={[styles.input, { color: colors.text, borderColor: colors.border }]}
-                  placeholder="8690000000000"
-                  placeholderTextColor={colors.text + '50'}
-                  keyboardType="number-pad"
-                  value={manualBarcode}
-                  onChangeText={(text) => {
-                    setManualBarcode(text);
-                    setManualError('');
-                  }}
-                  autoFocus
-                />
-                
-                {manualError ? <Text style={styles.errorText}>{manualError}</Text> : null}
+              </TouchableOpacity>
 
-                <View style={styles.manualActions}>
-                  <TouchableOpacity 
-                    style={[styles.actionBtn, styles.cancelBtn]} 
-                    onPress={() => {
-                      setIsManualMode(false);
-                      setManualError('');
-                      setManualBarcode('');
-                    }}
-                  >
-                    <Text style={styles.cancelBtnText}>{t('cancel') || 'İptal'}</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity 
-                    style={[styles.actionBtn, { backgroundColor: colors.primary }]} 
-                    onPress={handleManualSubmit}
-                  >
-                    <Text style={styles.submitBtnText}>{t('search') || 'Sorgula'}</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </KeyboardAvoidingView>
-          )}
-
-        </CameraView>
+              <TouchableOpacity
+                style={[styles.actionBtn, { backgroundColor: colors.primary }]}
+                onPress={handleManualSubmit}
+              >
+                <Text style={styles.submitBtnText}>
+                  {tt('search', 'Sorgula')}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       )}
     </View>
   );
 };
 
-// --- STİLLER ---
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
-  overlay: { flex: 1 },
-  darkArea: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center' },
-  middleRow: { flexDirection: 'row', height: 260 },
-  scannerFrame: { width: 260, height: 260, borderWidth: 0.5, backgroundColor: 'transparent', position: 'relative', overflow: 'hidden' },
-  scanLine: { height: 3, width: '100%', shadowColor: '#FFF', shadowOpacity: 0.5, shadowRadius: 10, elevation: 8 },
-  corner: { position: 'absolute', width: 25, height: 25, borderWidth: 5 },
-  topLeft: { top: -2, left: -2, borderRightWidth: 0, borderBottomWidth: 0 },
-  topRight: { top: -2, right: -2, borderLeftWidth: 0, borderBottomWidth: 0 },
-  bottomLeft: { bottom: -2, left: -2, borderRightWidth: 0, borderTopWidth: 0 },
-  bottomRight: { bottom: -2, right: -2, borderLeftWidth: 0, borderTopWidth: 0 },
-  infoText: { color: '#FFF', fontSize: 13, fontWeight: 'bold', textAlign: 'center', marginTop: 30, letterSpacing: 1, opacity: 0.8 },
-  
-  // Kontroller
-  controls: { position: 'absolute', bottom: 50, width: '100%', flexDirection: 'row', justifyContent: 'space-evenly', alignItems: 'center' },
-  controlBtn: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(255,255,255,0.1)', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
-  controlBtnCenter: { width: 75, height: 75, borderRadius: 37.5, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)' },
-  
-  // İzinler
-  permissionText: { textAlign: 'center', marginVertical: 25, fontSize: 15, lineHeight: 22, opacity: 0.7 },
-  btn: { paddingHorizontal: 40, paddingVertical: 18, borderRadius: 20 },
-  btnText: { color: '#000', fontWeight: '900', fontSize: 14 },
-
-  // Manuel Giriş Stilleri
-  manualOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 20, zIndex: 10 },
-  manualCard: { width: '100%', maxWidth: 350, borderRadius: 24, padding: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 10 },
-  manualTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 20, textAlign: 'center', letterSpacing: 0.5 },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 14, fontSize: 18, letterSpacing: 2, textAlign: 'center', marginBottom: 10 },
-  errorText: { color: '#FF4444', fontSize: 13, textAlign: 'center', marginBottom: 15, fontWeight: '600' },
-  manualActions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 },
-  actionBtn: { flex: 1, paddingVertical: 14, borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  cancelBtn: { backgroundColor: 'transparent', marginRight: 10, borderWidth: 1, borderColor: '#555' },
-  cancelBtnText: { color: '#999', fontSize: 15, fontWeight: 'bold' },
-  submitBtnText: { color: '#000', fontSize: 15, fontWeight: 'bold' }
+  container: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  permissionContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  permissionIconWrap: {
+    width: 110,
+    height: 110,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  permissionTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  permissionText: {
+    textAlign: 'center',
+    marginTop: 12,
+    marginBottom: 24,
+    fontSize: 15,
+    lineHeight: 23,
+    opacity: 0.78,
+  },
+  primaryBtn: {
+    minWidth: 220,
+    paddingHorizontal: 32,
+    paddingVertical: 17,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryBtnText: {
+    color: '#000',
+    fontWeight: '900',
+    fontSize: 14,
+    letterSpacing: 0.8,
+  },
+  secondaryGhostBtn: {
+    marginTop: 14,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+  },
+  secondaryGhostBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  topDarkArea: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    paddingTop: 58,
+    paddingHorizontal: 20,
+  },
+  topCloseBtn: {
+    alignSelf: 'flex-end',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sideDarkArea: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+  },
+  middleRow: {
+    flexDirection: 'row',
+    height: 260,
+  },
+  scannerFrame: {
+    width: 260,
+    height: 260,
+    borderWidth: 0.5,
+    backgroundColor: 'transparent',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  scanLine: {
+    height: 3,
+    width: '100%',
+    shadowColor: '#FFF',
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  corner: {
+    position: 'absolute',
+    width: 28,
+    height: 28,
+    borderWidth: 5,
+  },
+  topLeft: {
+    top: -2,
+    left: -2,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+  },
+  topRight: {
+    top: -2,
+    right: -2,
+    borderLeftWidth: 0,
+    borderBottomWidth: 0,
+  },
+  bottomLeft: {
+    bottom: -2,
+    left: -2,
+    borderRightWidth: 0,
+    borderTopWidth: 0,
+  },
+  bottomRight: {
+    bottom: -2,
+    right: -2,
+    borderLeftWidth: 0,
+    borderTopWidth: 0,
+  },
+  bottomDarkArea: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  infoTitle: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    opacity: 0.9,
+  },
+  infoText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 20,
+    opacity: 0.82,
+  },
+  controls: {
+    position: 'absolute',
+    bottom: 42,
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+  },
+  controlBtn: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+  },
+  controlBtnCenter: {
+    width: 94,
+    height: 94,
+    borderRadius: 47,
+    backgroundColor: 'rgba(0,0,0,0.68)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.30)',
+  },
+  controlLabel: {
+    marginTop: 4,
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
+    opacity: 0.85,
+  },
+  controlCenterLabel: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: '800',
+    textAlign: 'center',
+    paddingHorizontal: 6,
+  },
+  manualOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.86)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    zIndex: 10,
+  },
+  manualCard: {
+    width: '100%',
+    maxWidth: 360,
+    borderRadius: 24,
+    padding: 24,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  manualHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  manualTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 0.3,
+    flex: 1,
+    paddingRight: 10,
+  },
+  manualSubtitle: {
+    marginTop: 10,
+    marginBottom: 18,
+    fontSize: 13,
+    lineHeight: 20,
+    opacity: 0.75,
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 20,
+    letterSpacing: 1.5,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  errorText: {
+    color: '#FF4444',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 15,
+    fontWeight: '700',
+  },
+  manualActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 15,
+    gap: 10,
+  },
+  actionBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  cancelBtn: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+  },
+  cancelBtnText: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  submitBtnText: {
+    color: '#000',
+    fontSize: 15,
+    fontWeight: '900',
+  },
 });

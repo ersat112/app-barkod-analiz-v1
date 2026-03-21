@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { fetchFoodProduct } from '../api/foodApi';
-import { analyzeProduct, Product, AnalysisResult } from '../utils/analysis';
+import { analyzeProduct } from '../utils/analysis';
 import { saveProductToHistory } from '../services/db';
 import { useTranslation } from 'react-i18next';
 
@@ -30,7 +30,7 @@ export const useAnalysis = () => {
       const analysisResult = analyzeProduct(data);
       
       // 3. Yerel SQLite Kaydı (Asenkron)
-      await saveProductToHistory(data, data.score || 0);
+      saveProductToHistory(data, data.score || 0);
 
       return { product: data, analysis: analysisResult };
 

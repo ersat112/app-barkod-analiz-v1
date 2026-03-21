@@ -7,9 +7,7 @@
     "scheme": "erenesal",
     "userInterfaceStyle": "automatic",
     "icon": "./assets/icon.png",
-    "assetBundlePatterns": [
-      "**/*"
-    ],
+    "assetBundlePatterns": ["**/*"],
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -31,12 +29,7 @@
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#121212"
       },
-      "permissions": [
-        "CAMERA",
-        "INTERNET",
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
-      ]
+      "permissions": ["CAMERA", "INTERNET"]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -53,17 +46,14 @@
       [
         "react-native-google-mobile-ads",
         {
-          "androidAppId": "ca-app-pub-9503865696579023~2458617965",
+          "androidAppId": "ca-app-pub-3940256099942544~3347511713",
           "iosAppId": "ca-app-pub-3940256099942544~1458002511",
           "delayAppMeasurementInit": true
         }
       ]
     ],
     "extra": {
-      "firebaseProjectId": "barkodanaliz-5ed4b",
-      "eas": {
-        "projectId": "3294399e-b8b5-42fe-973b-b8e2609470a1"
-      }
+      "firebaseProjectId": "barkodanaliz-5ed4b"
     }
   }
 }

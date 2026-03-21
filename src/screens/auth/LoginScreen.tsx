@@ -1,224 +1,597 @@
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
   StyleSheet,
-  View,
   Text,
   TextInput,
   TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
-  ScrollView,
-  ActivityIndicator,
-  Alert,
+  View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
-import { Ionicons } from '@expo/vector-icons';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import * as WebBrowser from 'expo-web-browser';
+import * as Google from 'expo-auth-session/providers/google';
+import * as AppleAuthentication from 'expo-apple-authentication';
+import * as Crypto from 'expo-crypto';
+import {
+  GoogleAuthProvider,
+  OAuthProvider,
+  signInWithCredential,
+  signInWithEmailAndPassword,
+} from 'firebase/auth';
 
-// Context & Config
 import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
 
+WebBrowser.maybeCompleteAuthSession();
+
+const GOOGLE_CLIENT_IDS = {
+  android: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? '',
+  ios: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '',
+  web: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
+};
+
+const isGoogleConfiguredForPlatform = (): boolean => {
+  if (Platform.OS === 'android') return !!GOOGLE_CLIENT_IDS.android;
+  if (Platform.OS === 'ios') return !!GOOGLE_CLIENT_IDS.ios;
+  return !!GOOGLE_CLIENT_IDS.web;
+};
+
+const randomNonce = (length = 32): string => {
+  const chars =
+    '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+  let result = '';
+
+  for (let i = 0; i < length; i += 1) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+
+  return result;
+};
+
+type SocialButtonProps = {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress?: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  textColor?: string;
+  backgroundColor?: string;
+  borderColor?: string;
+};
+
+const SocialButton: React.FC<SocialButtonProps> = ({
+  icon,
+  label,
+  onPress,
+  disabled = false,
+  loading = false,
+  textColor = '#111',
+  backgroundColor = '#FFF',
+  borderColor = '#DDD',
+}) => {
+  return (
+    <TouchableOpacity
+      activeOpacity={disabled ? 1 : 0.86}
+      onPress={onPress}
+      disabled={disabled || loading}
+      style={[
+        styles.socialButton,
+        {
+          backgroundColor,
+          borderColor,
+          opacity: disabled ? 0.6 : 1,
+        },
+      ]}
+    >
+      {loading ? (
+        <ActivityIndicator size="small" color={textColor} />
+      ) : (
+        <Ionicons name={icon} size={20} color={textColor} />
+      )}
+      <Text style={[styles.socialButtonText, { color: textColor }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+};
+
+type GoogleAuthSectionProps = {
+  label: string;
+};
+
+const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({ label }) => {
+  const [loading, setLoading] = useState(false);
+
+  const config = useMemo(
+    () => ({
+      androidClientId: GOOGLE_CLIENT_IDS.android || undefined,
+      iosClientId: GOOGLE_CLIENT_IDS.ios || undefined,
+      webClientId: GOOGLE_CLIENT_IDS.web || undefined,
+    }),
+    []
+  );
+
+  const [request, response, promptAsync] = Google.useAuthRequest(config);
+
+  useEffect(() => {
+    const handleGoogleResponse = async () => {
+      if (response?.type !== 'success') return;
+
+      try {
+        setLoading(true);
+
+        const idToken =
+          response.authentication?.idToken ||
+          (typeof response.params?.id_token === 'string' ? response.params.id_token : null);
+
+        const accessToken =
+          response.authentication?.accessToken ||
+          (typeof response.params?.access_token === 'string'
+            ? response.params.access_token
+            : null);
+
+        if (!idToken && !accessToken) {
+          Alert.alert('Hata', 'Google kimlik doğrulama bilgisi alınamadı.');
+          return;
+        }
+
+        const credential = GoogleAuthProvider.credential(idToken, accessToken);
+        await signInWithCredential(auth, credential);
+      } catch (error: any) {
+        console.error('Google login failed:', error);
+        Alert.alert('Hata', error?.message || 'Google ile giriş başarısız oldu.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    handleGoogleResponse();
+  }, [response]);
+
+  return (
+    <SocialButton
+      icon="logo-google"
+      label={label}
+      onPress={() => promptAsync()}
+      disabled={!request}
+      loading={loading}
+      backgroundColor="#FFFFFF"
+      borderColor="#E5E5E5"
+      textColor="#111111"
+    />
+  );
+};
+
 export const LoginScreen: React.FC = () => {
   const { t } = useTranslation();
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const navigation = useNavigation<any>();
 
-  // Form States
-  const [email, setEmail] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
-  const [loading, setLoading] = useState<boolean>(false);
-  const [secureText, setSecureText] = useState<boolean>(true);
+  const tt = useCallback(
+    (key: string, fallback: string) => {
+      const value = t(key, { defaultValue: fallback });
+      return value === key ? fallback : value;
+    },
+    [t]
+  );
 
-  /**
-   * Email ve Şifre ile Giriş Algoritması
-   */
-  const handleEmailLogin = async () => {
-    if (!email.trim() || !password.trim()) {
-      Alert.alert(t('error_title'), t('fill_all_fields'));
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [securePassword, setSecurePassword] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
+
+  const isGoogleEnabled = useMemo(() => isGoogleConfiguredForPlatform(), []);
+  const isFormValid = email.trim().length > 0 && password.trim().length > 0;
+
+  const handleEmailLogin = useCallback(async () => {
+    if (!isFormValid) {
+      Alert.alert(
+        tt('error_title', 'Hata'),
+        tt('fill_all_fields', 'Lütfen tüm zorunlu alanları doldurun.')
+      );
       return;
     }
 
-    setLoading(true);
     try {
+      setLoading(true);
       await signInWithEmailAndPassword(auth, email.trim(), password);
-      // AuthContext üzerindeki onAuthStateChanged sayesinde otomatik yönlendirme tetiklenecektir.
     } catch (error: any) {
-      console.error("Login Error:", error.code);
-      let errorMessage = t('login_error_generic');
-      
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-        errorMessage = t('invalid_credentials');
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = t('invalid_email_format');
+      console.error('Login failed:', error);
+
+      let message = tt('login_error_generic', 'Giriş sırasında bir hata oluştu.');
+
+      if (error?.code === 'auth/invalid-email') {
+        message = tt('invalid_email_format', 'Geçersiz e-posta formatı.');
+      } else if (
+        error?.code === 'auth/invalid-credential' ||
+        error?.code === 'auth/user-not-found' ||
+        error?.code === 'auth/wrong-password'
+      ) {
+        message = tt('invalid_credentials', 'E-posta veya şifre hatalı.');
+      } else if (error?.code === 'auth/network-request-failed') {
+        message = tt('network_error', 'Ağ bağlantısı hatası.');
+      } else if (error?.code === 'auth/too-many-requests') {
+        message = tt(
+          'too_many_requests',
+          'Çok fazla deneme yapıldı. Lütfen daha sonra tekrar deneyin.'
+        );
       }
-      
-      Alert.alert(t('error_title'), errorMessage);
+
+      Alert.alert(tt('error_title', 'Hata'), message);
     } finally {
       setLoading(false);
     }
-  };
+  }, [email, isFormValid, password, tt]);
 
-  /**
-   * Google Social Login (Firebase Integration)
-   */
-  const handleGoogleLogin = async () => {
-    setLoading(true);
+  const handleAppleLogin = useCallback(async () => {
     try {
-      // Not: Expo ortamında Google Login için 'expo-auth-session' veya 'expo-google-app-auth' kurulumu gereklidir.
-      // Burada Firebase Auth yapısı kurgulanmıştır.
-      console.log("Initiating Google Login...");
-      // Buraya Google Sign-In yöntemi entegre edilecek.
-    } catch (error) {
-      Alert.alert(t('error_title'), t('social_login_error'));
+      setAppleLoading(true);
+
+      const rawNonce = randomNonce();
+      const hashedNonce = await Crypto.digestStringAsync(
+        Crypto.CryptoDigestAlgorithm.SHA256,
+        rawNonce
+      );
+
+      const appleCredential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+        nonce: hashedNonce,
+      });
+
+      if (!appleCredential.identityToken) {
+        Alert.alert('Hata', 'Apple kimlik doğrulama bilgisi alınamadı.');
+        return;
+      }
+
+      const provider = new OAuthProvider('apple.com');
+      const credential = provider.credential({
+        idToken: appleCredential.identityToken,
+        rawNonce,
+      });
+
+      await signInWithCredential(auth, credential);
+    } catch (error: any) {
+      if (error?.code === 'ERR_REQUEST_CANCELED') {
+        return;
+      }
+
+      console.error('Apple login failed:', error);
+      Alert.alert('Hata', error?.message || 'Apple ile giriş başarısız oldu.');
     } finally {
-      setLoading(false);
+      setAppleLoading(false);
     }
-  };
-
-  /**
-   * Apple Social Login
-   */
-  const handleAppleLogin = async () => {
-    try {
-      console.log("Initiating Apple Login...");
-      // Apple ID credential işlemleri buraya eklenecek.
-    } catch (error) {
-      Alert.alert(t('error_title'), t('social_login_error'));
-    }
-  };
+  }, []);
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.container, { backgroundColor: colors.background }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        
-        {/* Logo & Header */}
-        <View style={styles.headerSection}>
-          <Text style={[styles.logo, { color: colors.primary }]}>{t('app_name')}</Text>
-          <Text style={[styles.subtitle, { color: colors.text }]}>{t('login_subtitle')}</Text>
-        </View>
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
-        {/* Form Section */}
-        <View style={styles.formSection}>
-          <View style={styles.inputContainer}>
-            <Ionicons name="mail-outline" size={20} color={colors.primary} style={styles.inputIcon} />
-            <TextInput
-              placeholder={t('email')}
-              placeholderTextColor="#777"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              style={[styles.input, { color: colors.text, borderColor: colors.border }]}
-            />
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.hero}>
+          <View style={[styles.logoWrap, { backgroundColor: `${colors.primary}15` }]}>
+            <Ionicons name="barcode-outline" size={48} color={colors.primary} />
           </View>
 
-          <View style={styles.inputContainer}>
-            <Ionicons name="lock-closed-outline" size={20} color={colors.primary} style={styles.inputIcon} />
+          <Text style={[styles.title, { color: colors.primary }]}>
+            {tt('app_name', 'ErEnesAl®')}
+          </Text>
+
+          <Text style={[styles.subtitle, { color: colors.text }]}>
+            {tt('login_subtitle', 'Sağlıklı seçimler için ilk adımınız')}
+          </Text>
+        </View>
+
+        <View
+          style={[
+            styles.formCard,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <Text style={[styles.label, { color: colors.text }]}>
+            {tt('email', 'E-posta Adresi')}
+          </Text>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                color: colors.text,
+                borderColor: colors.border,
+                backgroundColor: isDark ? '#181818' : '#FAFAFA',
+              },
+            ]}
+            placeholder={tt('email', 'E-posta Adresi')}
+            placeholderTextColor={`${colors.text}55`}
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            autoCorrect={false}
+            textContentType="emailAddress"
+          />
+
+          <Text style={[styles.label, { color: colors.text }]}>
+            {tt('password', 'Şifre')}
+          </Text>
+          <View
+            style={[
+              styles.passwordWrap,
+              {
+                borderColor: colors.border,
+                backgroundColor: isDark ? '#181818' : '#FAFAFA',
+              },
+            ]}
+          >
             <TextInput
-              placeholder={t('password')}
-              placeholderTextColor="#777"
+              style={[styles.passwordInput, { color: colors.text }]}
+              placeholder={tt('password', 'Şifre')}
+              placeholderTextColor={`${colors.text}55`}
               value={password}
               onChangeText={setPassword}
-              secureTextEntry={secureText}
-              style={[styles.input, { color: colors.text, borderColor: colors.border }]}
+              secureTextEntry={securePassword}
+              autoCapitalize="none"
+              textContentType="password"
             />
-            <TouchableOpacity onPress={() => setSecureText(!secureText)} style={styles.eyeIcon}>
-              <Ionicons name={secureText ? "eye-off-outline" : "eye-outline"} size={20} color="#777" />
-            </TouchableOpacity>
+            <Pressable onPress={() => setSecurePassword((prev) => !prev)}>
+              <Ionicons
+                name={securePassword ? 'eye-off-outline' : 'eye-outline'}
+                size={22}
+                color={colors.text}
+              />
+            </Pressable>
           </View>
 
-          <TouchableOpacity 
-            style={[styles.loginButton, { backgroundColor: colors.primary }]} 
+          <TouchableOpacity
+            style={[
+              styles.primaryButton,
+              {
+                backgroundColor: isFormValid ? colors.primary : colors.border,
+                opacity: loading ? 0.7 : 1,
+              },
+            ]}
             onPress={handleEmailLogin}
-            disabled={loading}
+            disabled={!isFormValid || loading}
+            activeOpacity={0.9}
           >
-            {loading ? <ActivityIndicator color="#000" /> : <Text style={styles.loginButtonText}>{t('login').toUpperCase()}</Text>}
+            {loading ? (
+              <ActivityIndicator size="small" color="#000" />
+            ) : (
+              <Text style={styles.primaryButtonText}>
+                {tt('login', 'Giriş Yap')}
+              </Text>
+            )}
           </TouchableOpacity>
-        </View>
 
-        {/* Divider */}
-        <View style={styles.dividerContainer}>
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
-          <Text style={[styles.dividerText, { color: colors.text }]}>{t('or_continue_with')}</Text>
-          <View style={[styles.divider, { backgroundColor: colors.border }]} />
-        </View>
+          <View style={styles.dividerRow}>
+            <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+            <Text style={[styles.dividerText, { color: colors.text }]}>
+              {tt('or_continue_with', 'veya şununla devam et')}
+            </Text>
+            <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
+          </View>
 
-        {/* Social Buttons */}
-        <View style={styles.socialContainer}>
-          <TouchableOpacity style={[styles.socialButton, { borderColor: colors.border }]} onPress={handleGoogleLogin}>
-            <Ionicons name="logo-google" size={24} color="#EA4335" />
-          </TouchableOpacity>
-          
-          {Platform.OS === 'ios' && (
-            <TouchableOpacity style={[styles.socialButton, { borderColor: colors.border }]} onPress={handleAppleLogin}>
-              <Ionicons name="logo-apple" size={24} color={colors.text} />
-            </TouchableOpacity>
+          {isGoogleEnabled ? (
+            <GoogleAuthSection label={tt('google_sign_in', 'Google ile Giriş')} />
+          ) : (
+            <SocialButton
+              icon="logo-google"
+              label={tt('google_sign_in', 'Google ile Giriş')}
+              disabled
+              backgroundColor="#FFFFFF"
+              borderColor="#E5E5E5"
+              textColor="#111111"
+            />
           )}
+
+          {Platform.OS === 'ios' ? (
+            <TouchableOpacity
+              style={styles.appleButtonWrap}
+              onPress={handleAppleLogin}
+              disabled={appleLoading}
+              activeOpacity={0.9}
+            >
+              <AppleAuthentication.AppleAuthenticationButton
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                buttonStyle={
+                  isDark
+                    ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+                    : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                }
+                cornerRadius={16}
+                style={styles.appleButton}
+              />
+              {appleLoading ? (
+                <View style={styles.appleLoadingOverlay}>
+                  <ActivityIndicator size="small" color={isDark ? '#000' : '#FFF'} />
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          ) : null}
         </View>
 
-        {/* Footer */}
-        <TouchableOpacity style={styles.footerLink} onPress={() => navigation.navigate('SignUp')}>
+        <View style={styles.footerRow}>
           <Text style={[styles.footerText, { color: colors.text }]}>
-            {t('no_account')} <Text style={{ color: colors.primary, fontWeight: 'bold' }}>{t('signup')}</Text>
+            {tt('no_account', 'Hesabınız yok mu?')}
           </Text>
-        </TouchableOpacity>
+          <TouchableOpacity onPress={() => navigation.navigate('SignUp')}>
+            <Text style={[styles.footerLink, { color: colors.primary }]}>
+              {tt('signup', 'Kayıt Ol')}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
+        {!isGoogleEnabled ? (
+          <Text style={[styles.helperText, { color: colors.text }]}>
+            {tt(
+              'social_login_not_configured',
+              'Sosyal giriş henüz yapılandırılmadı.'
+            )}
+          </Text>
+        ) : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
-  scrollContent: { flexGrow: 1, justifyContent: 'center', padding: 25 },
-  headerSection: { alignItems: 'center', marginBottom: 40 },
-  logo: { fontSize: 38, fontWeight: '900', letterSpacing: 2 },
-  subtitle: { fontSize: 14, opacity: 0.7, marginTop: 5 },
-  formSection: { width: '100%' },
-  inputContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 15, position: 'relative' },
-  inputIcon: { position: 'absolute', left: 15, zIndex: 1 },
-  input: {
+  container: {
     flex: 1,
-    height: 60,
-    borderWidth: 1,
-    borderRadius: 15,
-    paddingLeft: 45,
-    paddingRight: 50,
-    fontSize: 16,
-    backgroundColor: 'rgba(255,255,255,0.02)'
   },
-  eyeIcon: { position: 'absolute', right: 15 },
-  loginButton: {
-    height: 60,
-    borderRadius: 15,
-    justifyContent: 'center',
+  scrollContent: {
+    paddingHorizontal: 22,
+    paddingTop: 68,
+    paddingBottom: 40,
+  },
+  hero: {
     alignItems: 'center',
-    marginTop: 10,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4.65,
-    elevation: 8,
+    marginBottom: 26,
   },
-  loginButtonText: { color: '#000', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
-  dividerContainer: { flexDirection: 'row', alignItems: 'center', marginVertical: 30 },
-  divider: { flex: 1, height: 1, opacity: 0.3 },
-  dividerText: { marginHorizontal: 10, fontSize: 12, opacity: 0.5 },
-  socialContainer: { flexDirection: 'row', justifyContent: 'center', gap: 20 },
+  logoWrap: {
+    width: 96,
+    height: 96,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+  },
+  title: {
+    fontSize: 30,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  subtitle: {
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 22,
+    textAlign: 'center',
+    opacity: 0.72,
+  },
+  formCard: {
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 18,
+  },
+  label: {
+    marginBottom: 8,
+    marginTop: 6,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 15,
+    marginBottom: 10,
+  },
+  passwordWrap: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  passwordInput: {
+    flex: 1,
+    fontSize: 15,
+    paddingVertical: 14,
+    paddingRight: 10,
+  },
+  primaryButton: {
+    marginTop: 8,
+    borderRadius: 18,
+    minHeight: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButtonText: {
+    color: '#000',
+    fontSize: 15,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  dividerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginVertical: 18,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+  },
+  dividerText: {
+    fontSize: 12,
+    fontWeight: '700',
+    opacity: 0.64,
+  },
   socialButton: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    minHeight: 54,
+    borderRadius: 16,
     borderWidth: 1,
-    justifyContent: 'center',
+    paddingHorizontal: 16,
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.03)'
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
   },
-  footerLink: { marginTop: 40, alignItems: 'center' },
-  footerText: { fontSize: 14 }
+  socialButtonText: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  appleButtonWrap: {
+    marginTop: 2,
+    position: 'relative',
+  },
+  appleButton: {
+    width: '100%',
+    height: 54,
+  },
+  appleLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  footerRow: {
+    marginTop: 22,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 14,
+    opacity: 0.75,
+  },
+  footerLink: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  helperText: {
+    marginTop: 16,
+    fontSize: 12,
+    lineHeight: 20,
+    textAlign: 'center',
+    opacity: 0.64,
+  },
 });

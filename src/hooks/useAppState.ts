@@ -1,16 +1,27 @@
-import { useEffect, useState } from 'react';
-import { AppState, AppStateStatus } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 
 /**
- * ErEnesAl® v1 - Sistem Durum Takip Hook'u
- * Uygulamanın aktif mi yoksa arka planda mı olduğunu izler.
+ * ErEnesAl® v1 - Uygulama Yaşam Döngüsü Hook'u
+ * Uygulamanın foreground / background / inactive durumunu takip eder.
  */
-export const useAppState = () => {
-  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
+
+export type AppStateValue = AppStateStatus | 'unknown';
+
+export type UseAppStateResult = {
+  appState: AppStateValue;
+  isActive: boolean;
+  isBackground: boolean;
+  isInactive: boolean;
+};
+
+export const useAppState = (): UseAppStateResult => {
+  const initialState = AppState.currentState ?? 'unknown';
+  const [appState, setAppState] = useState<AppStateValue>(initialState);
 
   useEffect(() => {
-    const subscription = AppState.addEventListener('change', nextAppState => {
-      setAppState(nextAppState);
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      setAppState(nextAppState ?? 'unknown');
     });
 
     return () => {
@@ -18,5 +29,13 @@ export const useAppState = () => {
     };
   }, []);
 
-  return appState;
+  return useMemo(
+    () => ({
+      appState,
+      isActive: appState === 'active',
+      isBackground: appState === 'background',
+      isInactive: appState === 'inactive',
+    }),
+    [appState]
+  );
 };

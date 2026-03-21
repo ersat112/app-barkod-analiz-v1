@@ -1,91 +1,61 @@
 import React, { useEffect } from 'react';
-import { LogBox, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
-import mobileAds from 'react-native-google-mobile-ads';
 
-// 🔌 Firebase Initialization
-// firebase.ts içindeki Singleton yapısının uygulama ayağa kalkarken tetiklenmesini sağlar.
-import './src/config/firebase';
-
-// 🧠 Context Providers
-// Veri akışının hiyerarşik ve tutarlı olması için doğru sarmalama sırası uygulanmıştır.
 import { AuthProvider } from './src/context/AuthContext';
-import { ThemeProvider } from './src/context/ThemeContext';
 import { LanguageProvider } from './src/context/LanguageContext';
-
-// 🚦 Navigation Center
+import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
+import { initDatabase } from './src/services/db';
+import { initializeAdMob, getAdMobRuntimeState } from './src/services/admobRuntime';
 
-/**
- * ErEnesAl® v1 - Ana Giriş Bileşeni (Entry Point)
- * Bu bileşen, uygulamanın tüm global state ve servis yönetimini üstlenir.
- */
-export default function App() {
-  
+const AppContent: React.FC = () => {
+  const { isDark } = useTheme();
+
   useEffect(() => {
-    /**
-     * 💰 Google Mobile Ads Başlatma
-     * Uygulama açıldığında reklam SDK'sını native katmanda hazırlar.
-     * 'initialize' işlemi asenkrondur ve uygulamanın açılış hızını etkilemez.
-     */
-    const initAds = async () => {
+    const bootstrap = async () => {
       try {
-        const adapterStatuses = await mobileAds().initialize();
-        console.log('AdMob Başlatıldı:', adapterStatuses);
+        await Promise.resolve(initDatabase());
+        console.log('SQLite: Hazır.');
       } catch (error) {
-        console.error('AdMob Başlatma Hatası:', error);
+        console.log('SQLite init failed:', error);
       }
+
+      try {
+        const initialized = await initializeAdMob();
+        console.log('AdMob initialized:', initialized);
+        console.log('AdMob runtime state:', getAdMobRuntimeState());
+      } catch (error) {
+        console.log('AdMob bootstrap failed:', error);
+      }
+
+      console.log('APP BOOT OK');
     };
 
-    initAds();
-
-    /**
-     * ⚙️ Geliştirme Günlüğü Yönetimi
-     * Firebase ve Timer kaynaklı, performansı etkilemeyen bazı uyarıları temizler.
-     */
-    LogBox.ignoreLogs([
-      'Setting a timer',
-      'AsyncStorage has been extracted from react-native core',
-      'Non-serializable values were found in the navigation state'
-    ]);
+    bootstrap();
   }, []);
 
   return (
-    /**
-     * 🟢 GestureHandlerRootView:
-     * 'Swipe-to-delete' gibi karmaşık dokunmatik hareketlerin Android/iOS'ta 
-     * pürüzsüz çalışması için en dış katman olmalıdır.
-     */
-    <GestureHandlerRootView style={styles.container}>
-      
-      {/* 🌍 Dil ve Yerelleştirme Katmanı */}
-      <LanguageProvider>
-        
-        {/* 🎨 Tema ve Karanlık Mod Katmanı */}
-        <ThemeProvider>
-          
-          {/* 🔐 Oturum ve Yetkilendirme Katmanı */}
-          <AuthProvider>
-            
-            {/* 🚦 Navigasyon ve Ekran Yönetimi */}
-            <AppNavigator />
-            
-            {/* 🔋 Durum Çubuğu Ayarı (Temaya Göre Otomatik Değişir) */}
-            <StatusBar style="auto" />
-            
-          </AuthProvider>
-          
-        </ThemeProvider>
-        
-      </LanguageProvider>
-      
+    <>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <AppNavigator />
+    </>
+  );
+};
+
+export default function App() {
+  return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaProvider>
+        <LanguageProvider>
+          <ThemeProvider>
+            <AuthProvider>
+              <AppContent />
+            </AuthProvider>
+          </ThemeProvider>
+        </LanguageProvider>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-});

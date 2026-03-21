@@ -1,48 +1,133 @@
 import axios from 'axios';
-import { Product } from '../utils/analysis';
+import type { Product } from '../utils/analysis';
 
 /**
- * ErEnesAl® v1 - Merkezi Kozmetik API Servisi
+ * Merkezi kozmetik API servisi
  * OpenBeautyFacts API üzerinden kozmetik ve kişisel bakım ürünlerini çeker.
  */
 
 const beautyClient = axios.create({
   baseURL: 'https://world.openbeautyfacts.org/api/v2',
-  timeout: 12000,
+  timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
-    'User-Agent': 'ErEnesAl - BeautyTracker/1.0'
-  }
+  },
 });
+
+const safeText = (value?: string | null, fallback = ''): string => {
+  if (typeof value !== 'string') return fallback;
+  const trimmed = value.trim();
+  return trimmed || fallback;
+};
+
+const resolveCountry = (product: any): string => {
+  return safeText(
+    product?.countries ||
+      product?.countries_tags?.[0] ||
+      product?.manufacturing_places ||
+      ''
+  );
+};
+
+const resolveOrigin = (product: any): string => {
+  return safeText(
+    product?.origins ||
+      product?.origins_tags?.[0] ||
+      product?.countries ||
+      ''
+  );
+};
 
 export const fetchBeautyProduct = async (barcode: string): Promise<Product | null> => {
   try {
-    console.log(`📡 Kozmetik API İsteği: ${barcode}`);
-    
-    const response = await beautyClient.get(`/product/${barcode}.json`);
+    console.log('[OpenBeautyFacts] request started:', barcode);
 
-    if (response.data.status === 1) {
+    const response = await beautyClient.get(`/product/${barcode}.json`, {
+      params: {
+        fields:
+          'code,product_name,product_name_tr,product_name_en,generic_name,generic_name_tr,generic_name_en,brands,image_url,image_front_url,ingredients_text,ingredients_text_tr,ingredients_text_en,ecoscore_grade,nutriscore_grade,score,usage,instructions,countries,countries_tags,origins,origins_tags,manufacturing_places',
+      },
+    });
+
+    if (response.data?.status === 1) {
       const p = response.data.product;
-      
-      return {
-        barcode: barcode,
-        name: p.product_name || p.product_name_tr || 'İsimsiz Kozmetik',
-        brand: p.brands || 'Bilinmeyen Marka',
-        image_url: p.image_front_url || p.image_url || '',
+
+      const resolvedName =
+        safeText(p?.product_name) ||
+        safeText(p?.product_name_tr) ||
+        safeText(p?.product_name_en) ||
+        safeText(p?.generic_name) ||
+        safeText(p?.generic_name_tr) ||
+        safeText(p?.generic_name_en) ||
+        'İsimsiz Kozmetik';
+
+      const product: Product = {
+        barcode,
+        name: resolvedName,
+        brand: safeText(p?.brands, 'Bilinmeyen Marka'),
+        image_url: safeText(p?.image_front_url || p?.image_url),
         type: 'beauty',
-        // Kozmetiklerde Nutri-Score yerine bazen Nova veya Eco-Score gelir, güvenli bir değer atıyoruz
-        grade: p.ecoscore_grade || 'c',
-        ingredients_text: p.ingredients_text || p.ingredients_text_tr || '',
-        // 🧴 Hata veren alan artık güvenli:
-        usage_instructions: p.usage || p.instructions || 'Kullanım talimatı belirtilmemiş.'
+        score: typeof p?.score === 'number' ? p.score : undefined,
+        grade: safeText(p?.ecoscore_grade || p?.nutriscore_grade || 'unknown'),
+        ingredients_text:
+          safeText(p?.ingredients_text) ||
+          safeText(p?.ingredients_text_tr) ||
+          safeText(p?.ingredients_text_en),
+        usage_instructions:
+          safeText(p?.usage) ||
+          safeText(p?.instructions) ||
+          'Kullanım talimatı belirtilmemiş.',
+        sourceName: 'openbeautyfacts',
+        country: resolveCountry(p),
+        origin: resolveOrigin(p),
       };
+
+      console.log('[OpenBeautyFacts] success:', {
+        barcode,
+        name: product.name,
+        grade: product.grade,
+        score: product.score,
+      });
+
+      return product;
     }
 
+    console.warn('[OpenBeautyFacts] product not found in dataset:', barcode);
     return null;
   } catch (error) {
     if (axios.isAxiosError(error)) {
-      console.error("Kozmetik API Hatası:", error.message);
+      const status = error.response?.status;
+      const responseProductType = error.response?.data?.product_type;
+      const responseBody = error.response?.data;
+
+      const isNotFound =
+        status === 404 ||
+        responseBody?.status === 0 ||
+        String(error.message || '').toLowerCase().includes('404');
+
+      if (isNotFound) {
+        console.warn('[OpenBeautyFacts] product not found:', {
+          barcode,
+          status,
+          productType: responseProductType,
+        });
+        return null;
+      }
+
+      console.error('[OpenBeautyFacts] request failed:', {
+        barcode,
+        message: error.message,
+        code: error.code,
+        status,
+        data: responseBody,
+        url: error.config?.url,
+        baseURL: error.config?.baseURL,
+        timeout: error.config?.timeout,
+      });
+    } else {
+      console.error('[OpenBeautyFacts] unknown error:', error);
     }
+
     return null;
   }
 };

@@ -1,66 +1,72 @@
 import { Platform } from 'react-native';
-import { TestIds, RequestOptions } from 'react-native-google-mobile-ads';
+
+type RequestOptions = {
+  requestNonPersonalizedAdsOnly?: boolean;
+  keywords?: string[];
+};
+
+const TEST_IDS = {
+  INTERSTITIAL: 'ca-app-pub-3940256099942544/1033173712',
+  BANNER: 'ca-app-pub-3940256099942544/6300978111',
+  REWARDED: 'ca-app-pub-3940256099942544/5224354917',
+} as const;
 
 /**
- * ErEnesAl® v1 - Merkezi AdMob Konfigürasyonu
- * Bu dosya, uygulama genelindeki tüm reklam birimlerinin kimliklerini
- * ve global reklam istek ayarlarını yönetir.
+ * Elimizde şu an sadece Android gerçek reklam kimlikleri var.
+ * iOS ve Rewarded için gerçek kimlik gelene kadar test ID kullanıyoruz.
  */
-
-// 🛠️ Gerçek Reklam Birimi Kimlikleri (AdMob Panelinden Alınanlar)
-// Yayın öncesi bu alanları kendi gerçek ID'lerinle doldurmalısın.
 const REAL_AD_UNITS = {
   INTERSTITIAL: {
-    android: 'ca-app-pub-xxxxxxxxxxxxxxxx/xxxxxxxxxx',
-    ios: 'ca-app-pub-xxxxxxxxxxxxxxxx/xxxxxxxxxx',
+    android: 'ca-app-pub-9503865696579023/3089173355',
+    ios: TEST_IDS.INTERSTITIAL,
   },
   BANNER: {
-    android: 'ca-app-pub-xxxxxxxxxxxxxxxx/xxxxxxxxxx',
-    ios: 'ca-app-pub-xxxxxxxxxxxxxxxx/xxxxxxxxxx',
+    android: 'ca-app-pub-9503865696579023/3580127941',
+    ios: TEST_IDS.BANNER,
   },
   REWARDED: {
-    android: 'ca-app-pub-xxxxxxxxxxxxxxxx/xxxxxxxxxx',
-    ios: 'ca-app-pub-xxxxxxxxxxxxxxxx/xxxxxxxxxx',
+    android: TEST_IDS.REWARDED,
+    ios: TEST_IDS.REWARDED,
   },
+} as const;
+
+const isDev = __DEV__;
+
+const getAdUnit = (
+  type: keyof typeof REAL_AD_UNITS,
+  testId: string
+): string => {
+  if (isDev) {
+    return testId;
+  }
+
+  return Platform.select({
+    android: REAL_AD_UNITS[type].android,
+    ios: REAL_AD_UNITS[type].ios,
+    default: testId,
+  }) as string;
 };
 
-/**
- * Ortama Duyarlı Reklam ID Seçici
- * __DEV__ (Geliştirme) modunda otomatik olarak Google'ın güvenli Test ID'lerini kullanır.
- */
-export const AD_UNIT_ID = __DEV__
-  ? {
-      INTERSTITIAL: TestIds.INTERSTITIAL,
-      BANNER: TestIds.BANNER,
-      REWARDED: TestIds.REWARDED,
-    }
-  : {
-      INTERSTITIAL: Platform.select({
-        ios: REAL_AD_UNITS.INTERSTITIAL.ios,
-        android: REAL_AD_UNITS.INTERSTITIAL.android,
-      }) as string,
-      BANNER: Platform.select({
-        ios: REAL_AD_UNITS.BANNER.ios,
-        android: REAL_AD_UNITS.BANNER.android,
-      }) as string,
-      REWARDED: Platform.select({
-        ios: REAL_AD_UNITS.REWARDED.ios,
-        android: REAL_AD_UNITS.REWARDED.android,
-      }) as string,
-    };
+export const AD_UNIT_ID = {
+  INTERSTITIAL: getAdUnit('INTERSTITIAL', TEST_IDS.INTERSTITIAL),
+  BANNER: getAdUnit('BANNER', TEST_IDS.BANNER),
+  REWARDED: getAdUnit('REWARDED', TEST_IDS.REWARDED),
+} as const;
 
-/**
- * Global Reklam İsteği Yapılandırması
- * Hedefleme ve içerik kısıtlamaları buradan merkezi olarak yönetilir.
- */
 export const GLOBAL_AD_CONFIG: RequestOptions = {
-  requestNonPersonalizedAdsOnly: true, // KVKK/GDPR uyumluluğu için kişiselleştirilmemiş reklamlar
-  keywords: ['health', 'food analysis', 'nutrition', 'barcode scanner', 'wellness'], // RPM artırmak için anahtar kelimeler
+  requestNonPersonalizedAdsOnly: true,
+  keywords: [
+    'health',
+    'food analysis',
+    'nutrition',
+    'barcode scanner',
+    'wellness',
+    'shopping',
+    'market',
+    'product'
+  ],
 };
 
-/**
- * Uygulama Genelinde Kullanılacak Reklam Birimi İsimleri
- */
 export enum AdUnitType {
   SCAN_INTERSTITIAL = 'SCAN_INTERSTITIAL',
   HISTORY_BANNER = 'HISTORY_BANNER',

@@ -1,81 +1,96 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-/**
- * ErEnesAl® v1 Reklam Yönetim Servisi
- * Bu servis, kullanıcıyı bıktırmadan reklam gösterme frekansını ve 
- * tarama sayaçlarını uygulama oturumları arasında senkronize eder.
- */
+const STORAGE_KEYS = {
+  TOTAL_SCAN_COUNT: 'ad_total_scan_count',
+  LAST_INTERSTITIAL_AT: 'ad_last_interstitial_at',
+} as const;
 
-const STORAGE_KEY = '@Erenesal:scan_ad_counter';
+type AdStats = {
+  totalScanCount: number;
+  lastInterstitialAt: number | null;
+};
 
-class AdService {
-  /**
-   * Mevcut tarama sayısını kalıcı hafızadan getirir.
-   * @returns {Promise<number>} Kayıtlı tarama sayısı
-   */
-  private async getScanCount(): Promise<number> {
+const parseNumber = (value: string | null, fallback = 0): number => {
+  if (value == null) return fallback;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+export const adService = {
+  async getStats(): Promise<AdStats> {
     try {
-      const count = await AsyncStorage.getItem(STORAGE_KEY);
-      return count ? parseInt(count, 10) : 0;
+      const [totalScanCountRaw, lastInterstitialAtRaw] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.TOTAL_SCAN_COUNT),
+        AsyncStorage.getItem(STORAGE_KEYS.LAST_INTERSTITIAL_AT),
+      ]);
+
+      const totalScanCount = parseNumber(totalScanCountRaw, 0);
+      const lastInterstitialAt =
+        lastInterstitialAtRaw == null ? null : parseNumber(lastInterstitialAtRaw, 0);
+
+      return {
+        totalScanCount,
+        lastInterstitialAt:
+          lastInterstitialAt && lastInterstitialAt > 0 ? lastInterstitialAt : null,
+      };
     } catch (error) {
-      console.error('AdService Error (getScanCount):', error);
-      return 0; // Hata durumunda güvenli varsayılan
+      console.log('[AdService] getStats failed:', error);
+      return {
+        totalScanCount: 0,
+        lastInterstitialAt: null,
+      };
     }
-  }
+  },
 
-  /**
-   * Tarama sayısını bir artırır ve kaydeder.
-   * @param {number} currentCount Mevcut sayı
-   */
-  private async incrementScanCount(currentCount: number): Promise<void> {
+  async reset(): Promise<void> {
     try {
-      await AsyncStorage.setItem(STORAGE_KEY, (currentCount + 1).toString());
+      await AsyncStorage.multiRemove([
+        STORAGE_KEYS.TOTAL_SCAN_COUNT,
+        STORAGE_KEYS.LAST_INTERSTITIAL_AT,
+      ]);
+
+      console.log('[AdService] counters reset');
     } catch (error) {
-      console.error('AdService Error (incrementScanCount):', error);
+      console.log('[AdService] reset failed:', error);
     }
-  }
+  },
 
   /**
-   * Reklam gösterilip gösterilmeyeceğine karar veren ana algoritma.
-   * Strateji: İlk taramada göster (Zınk etkisi), ardından her 2 taramada bir tekrarla.
-   * (1, 3, 5, 7... taramalarda reklam tetiklenir)
-   * * @returns {Promise<boolean>} Reklam gösterilmeli mi?
+   * Kural:
+   * 1. tarama => reklam
+   * 2. tarama => yok
+   * 3. tarama => reklam
+   * 4. tarama => yok
    */
-  public async shouldShowAd(): Promise<boolean> {
+  async shouldShowAd(): Promise<boolean> {
     try {
-      const currentCount = await this.getScanCount();
-      
-      // Mantık: 
-      // 0 (ilk tarama) -> GÖSTER (Zınk!)
-      // 2, 4, 6... -> GÖSTER (Mod 2 kontrolü)
-      const isInitialScan = currentCount === 0;
-      const isEverySecondScan = currentCount > 0 && currentCount % 2 === 0;
+      const stats = await this.getStats();
+      const nextCount = stats.totalScanCount + 1;
+      const shouldShow = nextCount % 2 === 1;
 
-      // Sayaç her durumda artırılır
-      await this.incrementScanCount(currentCount);
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.TOTAL_SCAN_COUNT,
+        String(nextCount)
+      );
 
-      if (isInitialScan || isEverySecondScan) {
-        return true;
+      if (shouldShow) {
+        await AsyncStorage.setItem(
+          STORAGE_KEYS.LAST_INTERSTITIAL_AT,
+          String(Date.now())
+        );
       }
 
-      return false;
+      console.log(
+        '[AdService] scan count:',
+        nextCount,
+        '| show interstitial:',
+        shouldShow
+      );
+
+      return shouldShow;
     } catch (error) {
-      // Beklenmedik bir hata durumunda kullanıcıyı bloklamamak için false dönülür
+      console.log('[AdService] shouldShowAd failed:', error);
       return false;
     }
-  }
-
-  /**
-   * Test veya özel durumlar için sayacı sıfırlama fonksiyonu.
-   */
-  public async resetCounter(): Promise<void> {
-    try {
-      await AsyncStorage.removeItem(STORAGE_KEY);
-    } catch (error) {
-      console.error('AdService Error (resetCounter):', error);
-    }
-  }
-}
-
-// Singleton pattern ile dışa aktarıyoruz
-export const adService = new AdService();
+  },
+};

@@ -1,41 +1,111 @@
 import { create } from 'zustand';
-import { Product, AnalysisResult } from '../utils/analysis';
+import type { AnalysisResult, Product } from '../utils/analysis';
 
-/**
- * ErEnesAl® v1 - Tarama Durum Yönetimi
- * Uygulama genelinde taranan ürünlerin ve analiz sonuçlarının senkronize kalmasını sağlar.
- */
+type LookupSource = 'openfoodfacts' | 'openbeautyfacts' | 'manual' | 'unknown';
 
-interface ScanState {
+type ScanStoreState = {
+  currentBarcode: string | null;
   currentProduct: Product | null;
   currentAnalysis: AnalysisResult | null;
-  isAnalyzing: boolean;
-  setAnalysis: (product: Product, analysis: AnalysisResult) => void;
-  resetScan: () => void;
-  setAnalyzing: (status: boolean) => void;
-}
 
-export const useScanStore = create<ScanState>((set) => ({
+  lastResolvedSource: LookupSource;
+  lastScanAt: string | null;
+
+  notFoundBarcode: string | null;
+  pendingDraftBarcode: string | null;
+
+  setCurrentBarcode: (barcode: string | null) => void;
+
+  setAnalysis: (product: Product, analysis: AnalysisResult) => void;
+
+  setScanResult: (params: {
+    barcode: string;
+    product: Product;
+    analysis: AnalysisResult;
+    source?: LookupSource;
+  }) => void;
+
+  markNotFound: (barcode: string) => void;
+  setPendingDraftBarcode: (barcode: string | null) => void;
+
+  clearCurrentProduct: () => void;
+  clearNotFoundState: () => void;
+  resetScanState: () => void;
+};
+
+export const useScanStore = create<ScanStoreState>((set) => ({
+  currentBarcode: null,
   currentProduct: null,
   currentAnalysis: null,
-  isAnalyzing: false,
 
-  /**
-   * Yeni bir analiz sonucu geldiğinde tüm bileşenleri günceller.
-   */
-  setAnalysis: (product, analysis) => set({ 
-    currentProduct: product, 
-    currentAnalysis: analysis,
-    isAnalyzing: false 
-  }),
+  lastResolvedSource: 'unknown',
+  lastScanAt: null,
 
-  /**
-   * Yeni bir tarama öncesi hafızayı temizler.
-   */
-  resetScan: () => set({ currentProduct: null, currentAnalysis: null }),
+  notFoundBarcode: null,
+  pendingDraftBarcode: null,
 
-  /**
-   * Analiz sürecinin (loading) durumunu kontrol eder.
-   */
-  setAnalyzing: (status) => set({ isAnalyzing: status }),
+  setCurrentBarcode: (barcode) =>
+    set({
+      currentBarcode: barcode,
+    }),
+
+  setAnalysis: (product, analysis) =>
+    set({
+      currentBarcode: product.barcode,
+      currentProduct: product,
+      currentAnalysis: analysis,
+      lastResolvedSource: product.sourceName ?? 'unknown',
+      lastScanAt: new Date().toISOString(),
+      notFoundBarcode: null,
+    }),
+
+  setScanResult: ({ barcode, product, analysis, source = 'unknown' }) =>
+    set({
+      currentBarcode: barcode,
+      currentProduct: product,
+      currentAnalysis: analysis,
+      lastResolvedSource: source,
+      lastScanAt: new Date().toISOString(),
+      notFoundBarcode: null,
+    }),
+
+  markNotFound: (barcode) =>
+    set({
+      currentBarcode: barcode,
+      currentProduct: null,
+      currentAnalysis: null,
+      notFoundBarcode: barcode,
+      pendingDraftBarcode: barcode,
+      lastResolvedSource: 'unknown',
+      lastScanAt: new Date().toISOString(),
+    }),
+
+  setPendingDraftBarcode: (barcode) =>
+    set({
+      pendingDraftBarcode: barcode,
+    }),
+
+  clearCurrentProduct: () =>
+    set({
+      currentBarcode: null,
+      currentProduct: null,
+      currentAnalysis: null,
+    }),
+
+  clearNotFoundState: () =>
+    set({
+      notFoundBarcode: null,
+      pendingDraftBarcode: null,
+    }),
+
+  resetScanState: () =>
+    set({
+      currentBarcode: null,
+      currentProduct: null,
+      currentAnalysis: null,
+      lastResolvedSource: 'unknown',
+      lastScanAt: null,
+      notFoundBarcode: null,
+      pendingDraftBarcode: null,
+    }),
 }));

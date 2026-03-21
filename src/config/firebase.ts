@@ -34,7 +34,7 @@ const auth: Auth = (() => {
       persistence: getReactNativePersistence(AsyncStorage)
     });
     return _auth;
-  } catch (error) {
+  } catch {
     // Expo hot-reload (Fast Refresh) tetiklendiğinde uygulama yeniden başlatılır.
     // Eğer auth zaten başlatılmışsa initializeAuth hata fırlatır, biz de catch bloğunda 
     // sorunsuz bir şekilde mevcut auth'u (getAuth) döndürürüz.

@@ -1,27 +1,58 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from '../config/firebase'; //
+import React, {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+import { onAuthStateChanged, type User } from 'firebase/auth';
 
-const AuthContext = createContext<any>(null);
+import { auth } from '../config/firebase';
 
-export const AuthProvider = ({ children }: any) => {
+type AuthContextValue = {
+  user: User | null;
+  loading: boolean;
+  isAuthenticated: boolean;
+};
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+type AuthProviderProps = {
+  children: ReactNode;
+};
+
+export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Firebase oturum durumunu dinle
     const unsubscribe = onAuthStateChanged(auth, (usr) => {
       setUser(usr);
       setLoading(false);
     });
+
     return unsubscribe;
   }, []);
 
-  return (
-    <AuthContext.Provider value={{ user, loading }}>
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo<AuthContextValue>(
+    () => ({
+      user,
+      loading,
+      isAuthenticated: !!user,
+    }),
+    [loading, user]
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
 
-export const useAuth = () => useContext(AuthContext);
+export const useAuth = (): AuthContextValue => {
+  const context = useContext(AuthContext);
+
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider.');
+  }
+
+  return context;
+};
