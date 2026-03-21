@@ -400,29 +400,25 @@ export const LoginScreen: React.FC = () => {
           )}
 
           {Platform.OS === 'ios' ? (
-            <TouchableOpacity
-              style={styles.appleButtonWrap}
-              onPress={handleAppleLogin}
-              disabled={appleLoading}
-              activeOpacity={0.9}
-            >
+            <View style={styles.appleButtonWrap}>
               <AppleAuthentication.AppleAuthenticationButton
-                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-                buttonStyle={
-                  isDark
+                 buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                 buttonStyle={
+                   isDark
                     ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
                     : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
-                }
-                cornerRadius={16}
-                style={styles.appleButton}
-              />
-              {appleLoading ? (
-                <View style={styles.appleLoadingOverlay}>
-                  <ActivityIndicator size="small" color={isDark ? '#000' : '#FFF'} />
-                </View>
-              ) : null}
-            </TouchableOpacity>
-          ) : null}
+              }
+              cornerRadius={16}
+              style={styles.appleButton}
+              onPress={appleLoading ? () => undefined : handleAppleLogin}
+            />
+            {appleLoading ? (
+              <View style={styles.appleLoadingOverlay}>
+                <ActivityIndicator size="small" color={isDark ? '#000' : '#FFF'} />
+              </View>
+            ) : null}
+          </View>
+        ) : null}
         </View>
 
         <View style={styles.footerRow}>
