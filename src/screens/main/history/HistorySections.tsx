@@ -1,0 +1,381 @@
+import React, { useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { Swipeable } from 'react-native-gesture-handler';
+
+import type { HistoryEntry } from '../../../services/db';
+import type { HistorySection } from '../../../hooks/usePaginatedHistory';
+
+type ThemeColors = {
+  background: string;
+  card: string;
+  text: string;
+  primary: string;
+  border: string;
+};
+
+type HistoryListItemProps = {
+  item: HistoryEntry;
+  timeLabel: string;
+  beautyLabel: string;
+  foodLabel: string;
+  fallbackBrand: string;
+  fallbackName: string;
+  scoreSuffix?: string;
+  onPress: () => void;
+  onDelete: () => void;
+  colors: ThemeColors;
+};
+
+type HistoryStateProps = {
+  title: string;
+  text: string;
+  actionLabel: string;
+  onActionPress: () => void;
+  colors: ThemeColors;
+};
+
+type HistoryHeaderProps = {
+  title: string;
+  subtitle: string;
+  colors: ThemeColors;
+};
+
+type HistoryFooterProps = {
+  loadingMore: boolean;
+  hasMore: boolean;
+  colors: ThemeColors;
+};
+
+const FALLBACK_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
+
+export const HistoryListHeader: React.FC<HistoryHeaderProps> = ({
+  title,
+  subtitle,
+  colors,
+}) => {
+  return (
+    <View style={styles.header}>
+      <Text style={[styles.headerTitle, { color: colors.primary }]}>{title}</Text>
+      <Text style={[styles.headerSubtitle, { color: colors.text }]}>{subtitle}</Text>
+    </View>
+  );
+};
+
+export const HistorySectionHeader: React.FC<{
+  section: HistorySection;
+  colors: ThemeColors;
+}> = ({ section, colors }) => {
+  return (
+    <View style={styles.sectionHeader}>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{section.title}</Text>
+    </View>
+  );
+};
+
+const HistoryItemImage: React.FC<{ uri?: string | null }> = ({ uri }) => {
+  const [failed, setFailed] = useState(false);
+
+  return (
+    <Image
+      source={{ uri: !uri || failed ? FALLBACK_IMAGE : uri }}
+      style={styles.itemImage}
+      onError={() => setFailed(true)}
+    />
+  );
+};
+
+export const HistoryListItem: React.FC<HistoryListItemProps> = ({
+  item,
+  timeLabel,
+  beautyLabel,
+  foodLabel,
+  fallbackBrand,
+  fallbackName,
+  onPress,
+  onDelete,
+  colors,
+}) => {
+  return (
+    <Swipeable
+      overshootRight={false}
+      renderRightActions={() => (
+        <TouchableOpacity
+          style={styles.deleteAction}
+          onPress={onDelete}
+          activeOpacity={0.82}
+        >
+          <Ionicons name="trash-outline" size={26} color="#FFF" />
+        </TouchableOpacity>
+      )}
+    >
+      <TouchableOpacity
+        style={[
+          styles.itemCard,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+        onPress={onPress}
+        activeOpacity={0.82}
+      >
+        <HistoryItemImage uri={item.image_url} />
+
+        <View style={styles.itemDetails}>
+          <Text style={[styles.itemBrand, { color: colors.primary }]} numberOfLines={1}>
+            {item.brand || fallbackBrand}
+          </Text>
+
+          <Text style={[styles.itemName, { color: colors.text }]} numberOfLines={2}>
+            {item.name || fallbackName}
+          </Text>
+
+          <View style={styles.itemMetaRow}>
+            <View style={[styles.inlineBadge, { backgroundColor: `${colors.primary}12` }]}>
+              <Text
+                style={[styles.inlineBadgeText, { color: colors.primary }]}
+                numberOfLines={1}
+              >
+                {item.score ?? '-'} / 100
+              </Text>
+            </View>
+
+            <View style={[styles.inlineBadge, { backgroundColor: `${colors.primary}12` }]}>
+              <Text
+                style={[styles.inlineBadgeText, { color: colors.primary }]}
+                numberOfLines={1}
+              >
+                {item.type === 'beauty' ? beautyLabel : foodLabel}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.itemRightArea}>
+          <Text style={[styles.itemTime, { color: colors.text }]}>{timeLabel}</Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.border} />
+        </View>
+      </TouchableOpacity>
+    </Swipeable>
+  );
+};
+
+export const HistoryLoadingState: React.FC<{
+  label: string;
+  colors: ThemeColors;
+}> = ({ label, colors }) => {
+  return (
+    <View style={[styles.center, { backgroundColor: colors.background }]}>
+      <ActivityIndicator size="large" color={colors.primary} />
+      <Text style={[styles.loadingText, { color: colors.primary }]}>
+        {label.toUpperCase()}
+      </Text>
+    </View>
+  );
+};
+
+export const HistoryEmptyState: React.FC<HistoryStateProps> = ({
+  title,
+  text,
+  actionLabel,
+  onActionPress,
+  colors,
+}) => {
+  return (
+    <View style={[styles.center, { backgroundColor: colors.background }]}>
+      <Ionicons name="time-outline" size={72} color={colors.border} />
+      <Text style={[styles.stateTitle, { color: colors.text }]}>{title}</Text>
+      <Text style={[styles.stateText, { color: colors.text }]}>{text}</Text>
+
+      <TouchableOpacity
+        style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
+        onPress={onActionPress}
+      >
+        <Text style={styles.primaryBtnText}>{actionLabel}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+export const HistoryErrorState: React.FC<HistoryStateProps> = ({
+  title,
+  text,
+  actionLabel,
+  onActionPress,
+  colors,
+}) => {
+  return (
+    <View style={[styles.center, { backgroundColor: colors.background }]}>
+      <Ionicons name="cloud-offline-outline" size={72} color={colors.border} />
+      <Text style={[styles.stateTitle, { color: colors.text }]}>{title}</Text>
+      <Text style={[styles.stateText, { color: colors.text }]}>{text}</Text>
+
+      <TouchableOpacity
+        style={[styles.primaryBtn, { backgroundColor: colors.primary }]}
+        onPress={onActionPress}
+      >
+        <Text style={styles.primaryBtnText}>{actionLabel}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+export const HistoryListFooter: React.FC<HistoryFooterProps> = ({
+  loadingMore,
+  hasMore,
+  colors,
+}) => {
+  if (loadingMore) {
+    return (
+      <View style={styles.footerLoading}>
+        <ActivityIndicator size="small" color={colors.primary} />
+      </View>
+    );
+  }
+
+  return <View style={{ height: hasMore ? 12 : 24 }} />;
+};
+
+const styles = StyleSheet.create({
+  header: {
+    paddingTop: 60,
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+  },
+  headerTitle: {
+    fontSize: 30,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  headerSubtitle: {
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 22,
+    opacity: 0.68,
+  },
+  sectionHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 10,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    opacity: 0.55,
+    letterSpacing: 1,
+  },
+  itemCard: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderRadius: 20,
+    borderWidth: 1,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  itemImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 18,
+    resizeMode: 'cover',
+  },
+  itemDetails: {
+    flex: 1,
+    marginLeft: 14,
+    marginRight: 10,
+  },
+  itemBrand: {
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  itemName: {
+    marginTop: 5,
+    fontSize: 15,
+    fontWeight: '800',
+    lineHeight: 21,
+  },
+  itemMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  inlineBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 10,
+    maxWidth: '100%',
+  },
+  inlineBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  itemRightArea: {
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    minHeight: 64,
+  },
+  itemTime: {
+    fontSize: 12,
+    fontWeight: '700',
+    opacity: 0.7,
+  },
+  deleteAction: {
+    marginRight: 16,
+    marginBottom: 12,
+    width: 88,
+    borderRadius: 20,
+    backgroundColor: '#FF4D4F',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  loadingText: {
+    marginTop: 14,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 3,
+  },
+  stateTitle: {
+    marginTop: 16,
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  stateText: {
+    marginTop: 10,
+    textAlign: 'center',
+    fontSize: 14,
+    lineHeight: 22,
+    opacity: 0.72,
+  },
+  primaryBtn: {
+    marginTop: 22,
+    paddingHorizontal: 26,
+    paddingVertical: 15,
+    borderRadius: 16,
+  },
+  primaryBtnText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  footerLoading: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
