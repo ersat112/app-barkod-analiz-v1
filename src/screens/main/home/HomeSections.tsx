@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -85,6 +86,25 @@ type InsightCardProps = {
 
 type LoadingStateProps = {
   label: string;
+  colors: ThemeColors;
+};
+
+type RecentProductsCarouselProps = {
+  title: string;
+  subtitle: string;
+  items: HistoryEntry[];
+  fallbackBrand: string;
+  fallbackName: string;
+  onItemPress: (barcode: string) => void;
+  colors: ThemeColors;
+};
+
+type QuickInsightsStripProps = {
+  items: Array<{
+    icon: keyof typeof Ionicons.glyphMap;
+    label: string;
+    value: string;
+  }>;
   colors: ThemeColors;
 };
 
@@ -271,9 +291,7 @@ export const ChallengeCard: React.FC<ChallengeCardProps> = ({
         </View>
         <View style={styles.challengeTextBox}>
           <Text style={[styles.challengeTitle, { color: colors.text }]}>{title}</Text>
-          <Text style={[styles.challengeSubtitle, { color: colors.text }]}>
-            {subtitle}
-          </Text>
+          <Text style={[styles.challengeSubtitle, { color: colors.text }]}>{subtitle}</Text>
         </View>
       </View>
 
@@ -374,6 +392,103 @@ export const LastProductCard: React.FC<LastProductCardProps> = ({
         </View>
       </View>
     </TouchableOpacity>
+  );
+};
+
+export const RecentProductsCarousel: React.FC<RecentProductsCarouselProps> = ({
+  title,
+  subtitle,
+  items,
+  fallbackBrand,
+  fallbackName,
+  onItemPress,
+  colors,
+}) => {
+  if (!items.length) {
+    return null;
+  }
+
+  return (
+    <View
+      style={[
+        styles.carouselSection,
+        { backgroundColor: colors.card, borderColor: colors.border },
+      ]}
+    >
+      <View style={styles.carouselHeader}>
+        <View style={[styles.challengeIconBox, { backgroundColor: `${colors.primary}15` }]}>
+          <Ionicons name="albums-outline" size={20} color={colors.primary} />
+        </View>
+        <View style={styles.challengeTextBox}>
+          <Text style={[styles.challengeTitle, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.challengeSubtitle, { color: colors.text }]}>{subtitle}</Text>
+        </View>
+      </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.carouselContent}
+      >
+        {items.map((item) => (
+          <TouchableOpacity
+            key={item.id}
+            style={[
+              styles.carouselItem,
+              { backgroundColor: colors.background, borderColor: colors.border },
+            ]}
+            activeOpacity={0.88}
+            onPress={() => onItemPress(item.barcode)}
+          >
+            <LastProductImage uri={item.image_url} />
+            <Text
+              style={[styles.carouselBrand, { color: colors.primary }]}
+              numberOfLines={1}
+            >
+              {item.brand || fallbackBrand}
+            </Text>
+            <Text
+              style={[styles.carouselName, { color: colors.text }]}
+              numberOfLines={2}
+            >
+              {item.name || fallbackName}
+            </Text>
+            <View style={[styles.inlineBadge, { backgroundColor: `${colors.primary}12` }]}>
+              <Text style={[styles.inlineBadgeText, { color: colors.primary }]}>
+                {item.score ?? '-'} / 100
+              </Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+};
+
+export const QuickInsightsStrip: React.FC<QuickInsightsStripProps> = ({
+  items,
+  colors,
+}) => {
+  return (
+    <View style={styles.quickInsightsRow}>
+      {items.map((item) => (
+        <View
+          key={`${item.icon}-${item.label}`}
+          style={[
+            styles.quickInsightCard,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
+        >
+          <Ionicons name={item.icon} size={18} color={colors.primary} />
+          <Text style={[styles.quickInsightValue, { color: colors.text }]} numberOfLines={1}>
+            {item.value}
+          </Text>
+          <Text style={[styles.quickInsightLabel, { color: colors.text }]} numberOfLines={2}>
+            {item.label}
+          </Text>
+        </View>
+      ))}
+    </View>
   );
 };
 
@@ -655,11 +770,71 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     maxWidth: '100%',
+    alignSelf: 'flex-start',
   },
   inlineBadgeText: {
     fontSize: 11,
     fontWeight: '800',
     flexShrink: 1,
+  },
+  carouselSection: {
+    borderWidth: 1,
+    borderRadius: 22,
+    paddingVertical: 18,
+    marginBottom: 18,
+  },
+  carouselHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    marginBottom: 14,
+  },
+  carouselContent: {
+    paddingHorizontal: 18,
+    gap: 12,
+  },
+  carouselItem: {
+    width: 156,
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 12,
+  },
+  carouselBrand: {
+    marginTop: 10,
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  carouselName: {
+    marginTop: 4,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 19,
+    minHeight: 38,
+  },
+  quickInsightsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 18,
+  },
+  quickInsightCard: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    minHeight: 92,
+  },
+  quickInsightValue: {
+    marginTop: 10,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  quickInsightLabel: {
+    marginTop: 4,
+    fontSize: 11,
+    lineHeight: 16,
+    opacity: 0.7,
   },
   quickActionCard: {
     flex: 1,
