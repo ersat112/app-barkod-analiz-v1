@@ -28,6 +28,11 @@ type CacheEntry = {
   createdAt: number;
 };
 
+type RemoteCandidate = {
+  source: 'food' | 'beauty';
+  product: Product;
+};
+
 const SUCCESS_CACHE_TTL = 1000 * 60 * 10;
 const NOT_FOUND_CACHE_TTL = 1000 * 60 * 3;
 
@@ -76,28 +81,110 @@ const setCachedResult = (barcode: string, result: ProductLookupResult): void => 
   });
 };
 
-const legacyRepositoryRemoteFetch = async (
+const safeTextLength = (value?: string | null): number => {
+  if (typeof value !== 'string') return 0;
+  return value.trim().length;
+};
+
+const safeObjectKeyCount = (value?: Record<string, unknown> | null): number => {
+  if (!value || typeof value !== 'object') return 0;
+  return Object.keys(value).length;
+};
+
+const getProductRichnessScore = (product: Product): number => {
+  let score = 0;
+
+  score += Math.min(safeTextLength(product.name), 80);
+  score += Math.min(safeTextLength(product.brand), 40);
+  score += Math.min(safeTextLength(product.image_url), 20);
+  score += Math.min(safeTextLength(product.ingredients_text), 120);
+  score += Math.min(safeTextLength(product.country), 20);
+  score += Math.min(safeTextLength(product.origin), 20);
+  score += Math.min(safeTextLength(product.usage_instructions), 60);
+
+  if (typeof product.score === 'number' && Number.isFinite(product.score)) {
+    score += 30;
+  }
+
+  if (safeTextLength(product.grade) > 0) {
+    score += 20;
+  }
+
+  if (Array.isArray(product.additives) && product.additives.length > 0) {
+    score += Math.min(product.additives.length * 4, 20);
+  }
+
+  if (Array.isArray(product.countries_tags) && product.countries_tags.length > 0) {
+    score += Math.min(product.countries_tags.length * 2, 10);
+  }
+
+  if (Array.isArray(product.origins_tags) && product.origins_tags.length > 0) {
+    score += Math.min(product.origins_tags.length * 2, 10);
+  }
+
+  score += Math.min(safeObjectKeyCount(product.nutriments), 20);
+  score += Math.min(safeObjectKeyCount(product.nutrient_levels), 10);
+
+  if (product.type === 'food') {
+    score += 8;
+  }
+
+  if (product.type === 'beauty' && safeTextLength(product.usage_instructions) > 0) {
+    score += 8;
+  }
+
+  return score;
+};
+
+const selectBestRemoteCandidate = (
+  candidates: RemoteCandidate[]
+): RemoteCandidate | null => {
+  if (!candidates.length) {
+    return null;
+  }
+
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+
+  const sorted = [...candidates].sort((left, right) => {
+    const scoreDiff =
+      getProductRichnessScore(right.product) - getProductRichnessScore(left.product);
+
+    if (scoreDiff !== 0) {
+      return scoreDiff;
+    }
+
+    if (left.source === right.source) {
+      return 0;
+    }
+
+    return left.source === 'food' ? -1 : 1;
+  });
+
+  return sorted[0] ?? null;
+};
+
+const fetchRemoteSourcesSequential = async (
   barcode: string
 ): Promise<ProductRepositoryRemoteFetchResult> => {
-  const normalizedBarcode = normalizeBarcode(barcode);
-
-  const foodProduct = await fetchFoodProduct(normalizedBarcode);
+  const foodProduct = await fetchFoodProduct(barcode);
 
   if (foodProduct) {
     return {
       found: true,
-      barcode: normalizedBarcode,
+      barcode,
       product: foodProduct,
       source: 'food',
     };
   }
 
-  const beautyProduct = await fetchBeautyProduct(normalizedBarcode);
+  const beautyProduct = await fetchBeautyProduct(barcode);
 
   if (beautyProduct) {
     return {
       found: true,
-      barcode: normalizedBarcode,
+      barcode,
       product: beautyProduct,
       source: 'beauty',
     };
@@ -105,9 +192,81 @@ const legacyRepositoryRemoteFetch = async (
 
   return {
     found: false,
-    barcode: normalizedBarcode,
+    barcode,
     reason: 'not_found',
   };
+};
+
+const fetchRemoteSourcesParallel = async (
+  barcode: string
+): Promise<ProductRepositoryRemoteFetchResult> => {
+  const [foodResult, beautyResult] = await Promise.allSettled([
+    fetchFoodProduct(barcode),
+    fetchBeautyProduct(barcode),
+  ]);
+
+  const candidates: RemoteCandidate[] = [];
+
+  if (foodResult.status === 'fulfilled' && foodResult.value) {
+    candidates.push({
+      source: 'food',
+      product: foodResult.value,
+    });
+  }
+
+  if (beautyResult.status === 'fulfilled' && beautyResult.value) {
+    candidates.push({
+      source: 'beauty',
+      product: beautyResult.value,
+    });
+  }
+
+  if (!candidates.length) {
+    return {
+      found: false,
+      barcode,
+      reason: 'not_found',
+    };
+  }
+
+  const selected = selectBestRemoteCandidate(candidates);
+
+  if (!selected) {
+    return {
+      found: false,
+      barcode,
+      reason: 'not_found',
+    };
+  }
+
+  if (candidates.length > 1) {
+    console.log('[ProductResolver] parallel conflict resolved:', {
+      barcode,
+      selectedSource: selected.source,
+      candidates: candidates.map((item) => ({
+        source: item.source,
+        type: item.product.type,
+        richnessScore: getProductRichnessScore(item.product),
+      })),
+    });
+  }
+
+  return {
+    found: true,
+    barcode,
+    product: selected.product,
+    source: selected.source,
+  };
+};
+
+const repositoryRemoteFetch = async (
+  barcode: string
+): Promise<ProductRepositoryRemoteFetchResult> => {
+  if (FEATURES.productRepository.remoteParallelFetchEnabled) {
+    return fetchRemoteSourcesParallel(barcode);
+  }
+
+  return fetchRemoteSourcesSequential(barcode);
 };
 
 const mapRepositoryResultToLookupResult = (
@@ -132,7 +291,9 @@ const mapRepositoryResultToLookupResult = (
   };
 };
 
-const tryFetchProduct = async (barcode: string): Promise<ProductLookupResult> => {
+const tryFetchProductLegacy = async (
+  barcode: string
+): Promise<ProductLookupResult> => {
   const normalizedBarcode = normalizeBarcode(barcode);
 
   if (!isValidBarcode(normalizedBarcode)) {
@@ -162,34 +323,20 @@ const tryFetchProduct = async (barcode: string): Promise<ProductLookupResult> =>
 
   const requestPromise = (async (): Promise<ProductLookupResult> => {
     try {
-      console.log('[ProductResolver] lookup started:', normalizedBarcode);
+      console.log('[ProductResolver] legacy lookup started:', normalizedBarcode);
 
-      const foodProduct = await fetchFoodProduct(normalizedBarcode);
+      const result = await fetchRemoteSourcesSequential(normalizedBarcode);
 
-      if (foodProduct) {
-        const result: ProductLookupResult = {
+      if (result.found) {
+        const lookupResult: ProductLookupResult = {
           found: true,
           barcode: normalizedBarcode,
-          product: foodProduct,
-          source: 'food',
+          product: result.product,
+          source: result.source,
         };
 
-        setCachedResult(normalizedBarcode, result);
-        return result;
-      }
-
-      const beautyProduct = await fetchBeautyProduct(normalizedBarcode);
-
-      if (beautyProduct) {
-        const result: ProductLookupResult = {
-          found: true,
-          barcode: normalizedBarcode,
-          product: beautyProduct,
-          source: 'beauty',
-        };
-
-        setCachedResult(normalizedBarcode, result);
-        return result;
+        setCachedResult(normalizedBarcode, lookupResult);
+        return lookupResult;
       }
 
       const notFoundResult: ProductLookupResult = {
@@ -199,7 +346,7 @@ const tryFetchProduct = async (barcode: string): Promise<ProductLookupResult> =>
       };
 
       console.warn(
-        '[ProductResolver] product not found in any source:',
+        '[ProductResolver] legacy product not found in any source:',
         normalizedBarcode
       );
       setCachedResult(normalizedBarcode, notFoundResult);
@@ -216,15 +363,15 @@ const tryFetchProduct = async (barcode: string): Promise<ProductLookupResult> =>
 export const fetchProductByBarcode = async (
   barcode: string
 ): Promise<ProductLookupResult> => {
-  if (FEATURES.productRepository.foundationEnabled) {
-    const repositoryResult = await resolveProductFromRepository(barcode, {
-      remoteFetch: legacyRepositoryRemoteFetch,
-    });
-
-    return mapRepositoryResultToLookupResult(repositoryResult);
+  if (!FEATURES.productRepository.foundationEnabled) {
+    return tryFetchProductLegacy(barcode);
   }
 
-  return tryFetchProduct(barcode);
+  const repositoryResult = await resolveProductFromRepository(barcode, {
+    remoteFetch: repositoryRemoteFetch,
+  });
+
+  return mapRepositoryResultToLookupResult(repositoryResult);
 };
 
 export const clearProductResolverCache = (): void => {
