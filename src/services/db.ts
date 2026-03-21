@@ -39,6 +39,9 @@ export interface HistoryEntry extends Product {
 }
 
 const HISTORY_TABLE = 'history';
+const PRODUCT_CACHE_TABLE = 'product_cache';
+
+export const getDatabase = (): SQLite.SQLiteDatabase => db;
 
 const safeText = (value?: string | null, fallback = ''): string =>
   typeof value === 'string' ? value.trim() || fallback : fallback;
@@ -61,6 +64,20 @@ const getTableColumns = (tableName: string): ColumnInfo[] => {
   } catch {
     return [];
   }
+};
+
+const ensureColumn = (
+  tableName: string,
+  currentColumns: ColumnInfo[],
+  columnName: string,
+  alterSql: string
+): ColumnInfo[] => {
+  if (currentColumns.some((column) => column.name === columnName)) {
+    return currentColumns;
+  }
+
+  db.execSync(alterSql);
+  return getTableColumns(tableName);
 };
 
 const createHistoryTable = (): void => {
@@ -96,6 +113,39 @@ const createHistoryTable = (): void => {
   db.execSync(`
     CREATE INDEX IF NOT EXISTS idx_history_score
     ON ${HISTORY_TABLE}(score);
+  `);
+};
+
+const createProductCacheTable = (): void => {
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS ${PRODUCT_CACHE_TABLE} (
+      barcode TEXT PRIMARY KEY NOT NULL,
+      cache_status TEXT NOT NULL DEFAULT 'found',
+      source_name TEXT,
+      product_type TEXT,
+      payload_json TEXT,
+      schema_version INTEGER NOT NULL DEFAULT 1,
+      fetched_at INTEGER NOT NULL DEFAULT 0,
+      expires_at INTEGER NOT NULL DEFAULT 0,
+      last_accessed_at INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  db.execSync(`
+    CREATE INDEX IF NOT EXISTS idx_product_cache_expires_at
+    ON ${PRODUCT_CACHE_TABLE}(expires_at);
+  `);
+
+  db.execSync(`
+    CREATE INDEX IF NOT EXISTS idx_product_cache_cache_status
+    ON ${PRODUCT_CACHE_TABLE}(cache_status);
+  `);
+
+  db.execSync(`
+    CREATE INDEX IF NOT EXISTS idx_product_cache_updated_at
+    ON ${PRODUCT_CACHE_TABLE}(updated_at DESC);
   `);
 };
 
@@ -198,6 +248,97 @@ const migrateLegacyHistoryIfNeeded = (): void => {
   db.execSync(`DROP TABLE IF EXISTS ${legacyTableName};`);
 };
 
+const migrateProductCacheIfNeeded = (): void => {
+  if (!tableExists(PRODUCT_CACHE_TABLE)) {
+    createProductCacheTable();
+    return;
+  }
+
+  createProductCacheTable();
+
+  let columns = getTableColumns(PRODUCT_CACHE_TABLE);
+
+  columns = ensureColumn(
+    PRODUCT_CACHE_TABLE,
+    columns,
+    'cache_status',
+    `ALTER TABLE ${PRODUCT_CACHE_TABLE} ADD COLUMN cache_status TEXT NOT NULL DEFAULT 'found';`
+  );
+
+  columns = ensureColumn(
+    PRODUCT_CACHE_TABLE,
+    columns,
+    'source_name',
+    `ALTER TABLE ${PRODUCT_CACHE_TABLE} ADD COLUMN source_name TEXT;`
+  );
+
+  columns = ensureColumn(
+    PRODUCT_CACHE_TABLE,
+    columns,
+    'product_type',
+    `ALTER TABLE ${PRODUCT_CACHE_TABLE} ADD COLUMN product_type TEXT;`
+  );
+
+  columns = ensureColumn(
+    PRODUCT_CACHE_TABLE,
+    columns,
+    'payload_json',
+    `ALTER TABLE ${PRODUCT_CACHE_TABLE} ADD COLUMN payload_json TEXT;`
+  );
+
+  columns = ensureColumn(
+    PRODUCT_CACHE_TABLE,
+    columns,
+    'schema_version',
+    `ALTER TABLE ${PRODUCT_CACHE_TABLE} ADD COLUMN schema_version INTEGER NOT NULL DEFAULT 1;`
+  );
+
+  columns = ensureColumn(
+    PRODUCT_CACHE_TABLE,
+    columns,
+    'fetched_at',
+    `ALTER TABLE ${PRODUCT_CACHE_TABLE} ADD COLUMN fetched_at INTEGER NOT NULL DEFAULT 0;`
+  );
+
+  columns = ensureColumn(
+    PRODUCT_CACHE_TABLE,
+    columns,
+    'expires_at',
+    `ALTER TABLE ${PRODUCT_CACHE_TABLE} ADD COLUMN expires_at INTEGER NOT NULL DEFAULT 0;`
+  );
+
+  columns = ensureColumn(
+    PRODUCT_CACHE_TABLE,
+    columns,
+    'last_accessed_at',
+    `ALTER TABLE ${PRODUCT_CACHE_TABLE} ADD COLUMN last_accessed_at INTEGER NOT NULL DEFAULT 0;`
+  );
+
+  columns = ensureColumn(
+    PRODUCT_CACHE_TABLE,
+    columns,
+    'created_at',
+    `ALTER TABLE ${PRODUCT_CACHE_TABLE} ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;`
+  );
+
+  ensureColumn(
+    PRODUCT_CACHE_TABLE,
+    columns,
+    'updated_at',
+    `ALTER TABLE ${PRODUCT_CACHE_TABLE} ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP;`
+  );
+
+  db.execSync(`
+    UPDATE ${PRODUCT_CACHE_TABLE}
+    SET
+      cache_status = COALESCE(cache_status, 'found'),
+      schema_version = COALESCE(schema_version, 1),
+      fetched_at = COALESCE(fetched_at, 0),
+      expires_at = COALESCE(expires_at, 0),
+      last_accessed_at = COALESCE(last_accessed_at, 0);
+  `);
+};
+
 /**
  * Veritabanını başlatır ve gerekiyorsa migration yapar.
  */
@@ -205,6 +346,7 @@ export const initDatabase = (): void => {
   try {
     db.execSync(`PRAGMA journal_mode = WAL;`);
     migrateLegacyHistoryIfNeeded();
+    migrateProductCacheIfNeeded();
     console.log('SQLite: Hazır.');
   } catch (error) {
     console.error('SQLite Başlatma Hatası:', error);
