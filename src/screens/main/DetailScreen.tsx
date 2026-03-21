@@ -1,18 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
-  Dimensions,
-  Image,
   ScrollView,
   Share,
   StyleSheet,
-  Text,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
-import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
 import { fetchProductByBarcode } from '../../api/productResolver';
@@ -27,9 +21,18 @@ import { barcodeDecoder } from '../../utils/barcodeDecoder';
 import { AdBanner } from '../../components/AdBanner';
 import { AlternativeCard } from '../../components/AlternativeCard';
 import { FamilyHealthAlert } from '../../components/organisms/FamilyHealthAlert';
-
-const { width } = Dimensions.get('window');
-const FALLBACK_IMAGE = 'https://via.placeholder.com/400?text=No+Image';
+import {
+  AdditivesSection,
+  DetailErrorState,
+  DetailHeroSection,
+  DetailLoadingState,
+  MetaChipsSection,
+  NoticeCard,
+  ProductHeadingSection,
+  ScoreOverviewCard,
+  SummarySection,
+  TextSection,
+} from './detail/DetailSections';
 
 type DetailRoute = RouteProp<RootStackParamList, 'Detail'>;
 
@@ -120,10 +123,6 @@ export const DetailScreen: React.FC = () => {
   const extendedProduct = displayedProduct as DisplayProduct | null;
   const analysisColor = displayedAnalysis?.color ?? '#888';
 
-  const productImageUri = imageError
-    ? FALLBACK_IMAGE
-    : displayedProduct?.image_url || FALLBACK_IMAGE;
-
   const sourceLabel = useMemo(() => {
     if (!extendedProduct?.sourceName) return tt('source_unknown', 'Bilinmeyen Kaynak');
 
@@ -169,11 +168,7 @@ export const DetailScreen: React.FC = () => {
       return tt('origin_not_available', 'Menşei bilgisi yok');
     }
 
-    return (
-      actualOriginRaw ||
-      originInfo.country ||
-      tt('international', 'Uluslararası')
-    );
+    return actualOriginRaw || originInfo.country || tt('international', 'Uluslararası');
   }, [
     actualOriginLabel,
     actualOriginRaw,
@@ -253,6 +248,32 @@ export const DetailScreen: React.FC = () => {
     if (!displayedAnalysis) return false;
     return displayedAnalysis.score < 75;
   }, [displayedAnalysis]);
+
+  const productImageUri = imageError
+    ? 'https://via.placeholder.com/400?text=No+Image'
+    : displayedProduct?.image_url || 'https://via.placeholder.com/400?text=No+Image';
+
+  const metaChipItems = useMemo(
+    () => [
+      {
+        icon: 'server-outline' as const,
+        label: sourceLabel,
+      },
+      {
+        icon: 'flag-outline' as const,
+        label: actualOriginLabel,
+      },
+      {
+        icon: 'barcode-outline' as const,
+        label: `GS1: ${gs1PrefixLabel}`,
+      },
+      {
+        icon: 'analytics-outline' as const,
+        label: `${tt('api_score', 'API Skoru')}: ${displayedProduct?.score ?? '-'}`,
+      },
+    ],
+    [actualOriginLabel, displayedProduct?.score, gs1PrefixLabel, sourceLabel, tt]
+  );
 
   const loadProduct = useCallback(async () => {
     if (!normalizedRouteBarcode) {
@@ -381,50 +402,23 @@ export const DetailScreen: React.FC = () => {
   ]);
 
   if (loading) {
-    return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={colors.primary} />
-        <Text style={[styles.loadingText, { color: colors.primary }]}>
-          {tt('analyzing', 'Analiz ediliyor').toUpperCase()}
-        </Text>
-      </View>
-    );
+    return <DetailLoadingState label={tt('analyzing', 'Analiz ediliyor')} colors={colors} />;
   }
 
   if (error || !displayedProduct || !displayedAnalysis) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
-        <Ionicons name="alert-circle-outline" size={80} color={colors.border} />
-        <Text style={[styles.errorText, { color: colors.text }]}>
-          {error || tt('product_not_found', 'Ürün bulunamadı')}
-        </Text>
-
-        <View style={styles.errorActions}>
-          <TouchableOpacity
-            style={[styles.secondaryBtn, { borderColor: colors.border }]}
-            onPress={() => navigation.goBack()}
-          >
-            <Text style={[styles.secondaryBtnText, { color: colors.text }]}>
-              {tt('go_back', 'Geri Dön')}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.backBtn, { backgroundColor: colors.primary }]}
-            onPress={() => navigation.navigate('MissingProduct', { barcode: normalizedRouteBarcode })}
-          >
-            <Text style={styles.backBtnText}>{tt('add_product', 'Ürünü Ekle')}</Text>
-          </TouchableOpacity>
-        </View>
-
-        {!error?.includes('Geçersiz') ? (
-          <TouchableOpacity style={styles.retryLink} onPress={handleRetry}>
-            <Text style={[styles.retryText, { color: colors.primary }]}>
-              {tt('retry', 'Tekrar Dene')}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
+      <DetailErrorState
+        text={error || tt('product_not_found', 'Ürün bulunamadı')}
+        secondaryLabel={tt('go_back', 'Geri Dön')}
+        primaryLabel={tt('add_product', 'Ürünü Ekle')}
+        onSecondaryPress={() => navigation.goBack()}
+        onPrimaryPress={() =>
+          navigation.navigate('MissingProduct', { barcode: normalizedRouteBarcode })
+        }
+        retryLabel={!error?.includes('Geçersiz') ? tt('retry', 'Tekrar Dene') : undefined}
+        onRetry={!error?.includes('Geçersiz') ? handleRetry : undefined}
+        colors={colors}
+      />
     );
   }
 
@@ -434,175 +428,43 @@ export const DetailScreen: React.FC = () => {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        <View
-          style={[
-            styles.imageSection,
-            { backgroundColor: isDark ? '#111' : '#F8F8F8' },
-          ]}
-        >
-          <Image
-            source={{ uri: productImageUri }}
-            style={styles.productImage}
-            onError={() => setImageError(true)}
-          />
-
-          <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.iconBtn} onPress={() => navigation.goBack()}>
-              <Ionicons name="chevron-back" size={26} color={colors.text} />
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.iconBtn} onPress={handleShare}>
-              <Ionicons name="share-social-outline" size={26} color={colors.primary} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.originBadge}>
-            <Ionicons
-              name={hasActualOrigin ? 'flag-outline' : 'barcode-outline'}
-              size={14}
-              color="#FFF"
-            />
-            <Text style={styles.originText} numberOfLines={1}>
-              {headerBadgeLabel}
-            </Text>
-          </View>
-        </View>
+        <DetailHeroSection
+          imageUri={productImageUri}
+          isDark={isDark}
+          badgeLabel={headerBadgeLabel}
+          hasActualOrigin={hasActualOrigin}
+          onBack={() => navigation.goBack()}
+          onShare={handleShare}
+          onImageError={() => setImageError(true)}
+          colors={colors}
+        />
 
         <View style={styles.content}>
-          <Text style={[styles.brandName, { color: colors.primary }]} numberOfLines={1}>
-            {displayedProduct.brand || tt('unknown_brand', 'Bilinmeyen Marka')}
-          </Text>
+          <ProductHeadingSection
+            brand={displayedProduct.brand || tt('unknown_brand', 'Bilinmeyen Marka')}
+            name={displayedProduct.name || tt('unnamed_product', 'İsimsiz Ürün')}
+            colors={colors}
+          />
 
-          <Text style={[styles.productName, { color: colors.text }]} numberOfLines={3}>
-            {displayedProduct.name || tt('unnamed_product', 'İsimsiz Ürün')}
-          </Text>
-
-          <View style={styles.metaRow}>
-            <View
-              style={[
-                styles.metaChip,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-            >
-              <Ionicons name="server-outline" size={14} color={colors.primary} />
-              <Text
-                style={[styles.metaChipText, { color: colors.text }]}
-                numberOfLines={1}
-              >
-                {sourceLabel}
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.metaChip,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-            >
-              <Ionicons name="flag-outline" size={14} color={colors.primary} />
-              <Text
-                style={[styles.metaChipText, { color: colors.text }]}
-                numberOfLines={1}
-              >
-                {actualOriginLabel}
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.metaChip,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-            >
-              <Ionicons name="barcode-outline" size={14} color={colors.primary} />
-              <Text
-                style={[styles.metaChipText, { color: colors.text }]}
-                numberOfLines={1}
-              >
-                {`GS1: ${gs1PrefixLabel}`}
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.metaChip,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-            >
-              <Ionicons name="analytics-outline" size={14} color={colors.primary} />
-              <Text
-                style={[styles.metaChipText, { color: colors.text }]}
-                numberOfLines={1}
-              >
-                {tt('api_score', 'API Skoru')}: {displayedProduct.score ?? '-'}
-              </Text>
-            </View>
-          </View>
+          <MetaChipsSection items={metaChipItems} colors={colors} />
 
           {FEATURES.productPresentation.gs1OriginLabelFixEnabled ? (
-            <View
-              style={[
-                styles.gs1InfoCard,
-                { backgroundColor: colors.card, borderColor: colors.border },
-              ]}
-            >
-              <Ionicons name="information-circle-outline" size={18} color={colors.primary} />
-              <Text style={[styles.gs1InfoText, { color: colors.text }]}>
-                {hasActualOrigin
+            <NoticeCard
+              text={
+                hasActualOrigin
                   ? `GS1 prefix bilgisi: ${gs1PrefixLabel}. Ürünün menşei alanı ayrıca gösterilir.`
-                  : `Gerçek menşei bilgisi bulunamadı. Gösterilen GS1 alanı barkodun kayıt bölgesidir: ${gs1PrefixLabel}.`}
-              </Text>
-            </View>
+                  : `Gerçek menşei bilgisi bulunamadı. Gösterilen GS1 alanı barkodun kayıt bölgesidir: ${gs1PrefixLabel}.`
+              }
+              colors={colors}
+            />
           ) : null}
 
-          <View
-            style={[
-              styles.scoreCard,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <View
-              style={[
-                styles.scoreCircle,
-                {
-                  borderColor: analysisColor,
-                  backgroundColor: `${analysisColor}15`,
-                },
-              ]}
-            >
-              <Text style={[styles.scoreNumber, { color: analysisColor }]}>
-                {displayScore}
-              </Text>
-              <Text style={[styles.scoreOverHundred, { color: colors.text }]}>
-                /100
-              </Text>
-            </View>
-
-            <View style={styles.scoreInfo}>
-              <View
-                style={[
-                  styles.gradeBadge,
-                  {
-                    backgroundColor: analysisColor,
-                  },
-                ]}
-              >
-                <Text style={styles.gradeBadgeText}>{displayGrade}</Text>
-              </View>
-
-              <Text style={[styles.scoreRiskTitle, { color: analysisColor }]}>
-                {(displayedAnalysis.riskLevel || tt('unknown', 'Bilinmiyor')).toUpperCase()} RİSK
-              </Text>
-
-              <Text style={[styles.scoreRecommendation, { color: colors.text }]}>
-                {displayedAnalysis.recommendation ||
-                  tt('no_recommendation', 'Öneri bulunamadı')}
-              </Text>
-            </View>
-          </View>
+          <ScoreOverviewCard
+            score={displayScore}
+            grade={displayGrade}
+            analysis={displayedAnalysis}
+            colors={colors}
+          />
 
           <FamilyHealthAlert items={familyAlerts} style={{ marginBottom: 24 }} />
 
@@ -632,105 +494,36 @@ export const DetailScreen: React.FC = () => {
             />
           ) : null}
 
-          <View style={styles.summaryBox}>
-            <Text style={[styles.summaryTitle, { color: colors.text }]}>
-              {tt('analysis_summary', 'Analiz Özeti')}
-            </Text>
-            <Text style={[styles.summaryText, { color: colors.text }]}>
-              {displayedAnalysis.summary}
-            </Text>
-          </View>
+          <SummarySection
+            title={tt('analysis_summary', 'Analiz Özeti')}
+            text={displayedAnalysis.summary}
+            colors={colors}
+          />
 
-          <View style={styles.sectionHeader}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {tt('additives', 'Katkı Maddeleri')}
-            </Text>
+          <AdditivesSection
+            title={tt('additives', 'Katkı Maddeleri')}
+            emptyLabel={tt('clean_content_detected', 'Belirgin katkı riski tespit edilmedi')}
+            items={displayedAnalysis.foundECodes ?? []}
+            analysisColor={analysisColor}
+            unknownLabel={tt('unknown', 'Bilinmiyor')}
+            colors={colors}
+          />
 
-            <View style={[styles.countBadge, { backgroundColor: analysisColor }]}>
-              <Text style={styles.countText}>
-                {displayedAnalysis.foundECodes?.length ?? 0}
-              </Text>
-            </View>
-          </View>
-
-          {displayedAnalysis.foundECodes?.length ? (
-            displayedAnalysis.foundECodes.map((item, index) => {
-              const isHighRisk = String(item.risk || '').toLowerCase() === 'yüksek';
-              const riskColor = isHighRisk ? '#FF4444' : '#FFD700';
-
-              return (
-                <View
-                  key={`${item.code}-${index}`}
-                  style={[
-                    styles.additiveItem,
-                    {
-                      backgroundColor: colors.card,
-                      borderLeftColor: riskColor,
-                    },
-                  ]}
-                >
-                  <View style={styles.additiveMain}>
-                    <Text
-                      style={[styles.additiveName, { color: colors.text }]}
-                      numberOfLines={2}
-                    >
-                      {item.code} - {item.name}
-                    </Text>
-
-                    <Text style={[styles.additiveRisk, { color: riskColor }]}>
-                      {item.risk || tt('unknown', 'Bilinmiyor')}
-                    </Text>
-                  </View>
-
-                  <Text style={[styles.additiveImpact, { color: colors.text }]}>
-                    {String(item.impact || '')}
-                  </Text>
-                </View>
-              );
-            })
-          ) : (
-            <View style={styles.cleanContentBox}>
-              <Ionicons name="shield-checkmark-outline" size={50} color="#1ED760" />
-              <Text style={[styles.cleanText, { color: colors.text }]}>
-                {tt('clean_content_detected', 'Belirgin katkı riski tespit edilmedi')}
-              </Text>
-            </View>
-          )}
-
-          <Text style={[styles.sectionTitle, styles.ingredientsTitle, { color: colors.text }]}>
-            {tt('ingredients', 'İçerik')}
-          </Text>
-
-          <View
-            style={[
-              styles.ingredientsBox,
-              { backgroundColor: colors.card, borderColor: colors.border },
-            ]}
-          >
-            <Text style={[styles.ingredientsText, { color: colors.text }]}>
-              {displayedProduct.ingredients_text ||
-                tt('no_ingredients_info', 'İçerik bilgisi bulunamadı')}
-            </Text>
-          </View>
+          <TextSection
+            title={tt('ingredients', 'İçerik')}
+            text={
+              displayedProduct.ingredients_text ||
+              tt('no_ingredients_info', 'İçerik bilgisi bulunamadı')
+            }
+            colors={colors}
+          />
 
           {displayedProduct.type === 'beauty' && displayedProduct.usage_instructions ? (
-            <>
-              <Text
-                style={[styles.sectionTitle, styles.ingredientsTitle, { color: colors.text }]}
-              >
-                {tt('usage_information', 'Kullanım Bilgisi')}
-              </Text>
-              <View
-                style={[
-                  styles.ingredientsBox,
-                  { backgroundColor: colors.card, borderColor: colors.border },
-                ]}
-              >
-                <Text style={[styles.ingredientsText, { color: colors.text }]}>
-                  {displayedProduct.usage_instructions}
-                </Text>
-              </View>
-            </>
+            <TextSection
+              title={tt('usage_information', 'Kullanım Bilgisi')}
+              text={displayedProduct.usage_instructions}
+              colors={colors}
+            />
           ) : null}
         </View>
       </ScrollView>
@@ -749,298 +542,13 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 100,
   },
-  center: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-  },
-  loadingText: {
-    marginTop: 15,
-    fontSize: 10,
-    fontWeight: '900',
-    letterSpacing: 4,
-  },
-  imageSection: {
-    width,
-    height: 380,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  productImage: {
-    width: '80%',
-    height: '80%',
-    resizeMode: 'contain',
-  },
-  headerActions: {
-    position: 'absolute',
-    top: 55,
-    left: 20,
-    right: 20,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  iconBtn: {
-    padding: 12,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  originBadge: {
-    position: 'absolute',
-    bottom: 25,
-    left: 25,
-    right: 25,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#222',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 12,
-  },
-  originText: {
-    color: '#FFF',
-    fontSize: 12,
-    fontWeight: 'bold',
-    marginLeft: 6,
-    flex: 1,
-  },
   content: {
     padding: 25,
-  },
-  brandName: {
-    fontSize: 13,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 2,
-  },
-  productName: {
-    fontSize: 28,
-    fontWeight: '900',
-    marginTop: 5,
-    marginBottom: 18,
-    lineHeight: 34,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 20,
-  },
-  metaChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 14,
-    borderWidth: 1,
-    gap: 6,
-    maxWidth: '100%',
-  },
-  metaChipText: {
-    fontSize: 12,
-    fontWeight: '600',
-    flexShrink: 1,
-  },
-  gs1InfoCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 14,
-    marginBottom: 20,
-  },
-  gs1InfoText: {
-    flex: 1,
-    fontSize: 12,
-    lineHeight: 18,
-    opacity: 0.8,
-  },
-  scoreCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-    borderRadius: 24,
-    borderWidth: 1,
-    marginBottom: 22,
-  },
-  scoreCircle: {
-    width: 108,
-    height: 108,
-    borderRadius: 54,
-    borderWidth: 4,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scoreNumber: {
-    fontSize: 34,
-    fontWeight: '900',
-    lineHeight: 38,
-  },
-  scoreOverHundred: {
-    fontSize: 12,
-    fontWeight: '700',
-    opacity: 0.7,
-    marginTop: 2,
-  },
-  scoreInfo: {
-    flex: 1,
-    marginLeft: 18,
-    justifyContent: 'center',
-  },
-  gradeBadge: {
-    alignSelf: 'flex-start',
-    minWidth: 48,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 14,
-    marginBottom: 10,
-  },
-  gradeBadgeText: {
-    color: '#000',
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  scoreRiskTitle: {
-    fontSize: 16,
-    fontWeight: '900',
-    marginBottom: 6,
-  },
-  scoreRecommendation: {
-    fontSize: 13,
-    lineHeight: 20,
-    opacity: 0.82,
-  },
-  summaryBox: {
-    marginBottom: 26,
-  },
-  summaryTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  summaryText: {
-    fontSize: 13,
-    lineHeight: 21,
-    opacity: 0.75,
-  },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  sectionTitle: {
-    fontSize: 19,
-    fontWeight: '900',
-  },
-  ingredientsTitle: {
-    marginTop: 35,
-  },
-  countBadge: {
-    marginLeft: 12,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-  },
-  countText: {
-    color: '#000',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  additiveItem: {
-    padding: 20,
-    borderRadius: 22,
-    marginBottom: 15,
-    borderLeftWidth: 6,
-  },
-  additiveMain: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-    gap: 12,
-  },
-  additiveName: {
-    flex: 1,
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
-  additiveRisk: {
-    fontSize: 11,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-  },
-  additiveImpact: {
-    fontSize: 13,
-    lineHeight: 22,
-    opacity: 0.7,
-  },
-  cleanContentBox: {
-    alignItems: 'center',
-    padding: 45,
-    gap: 15,
-  },
-  cleanText: {
-    fontWeight: '800',
-    fontSize: 16,
-    textAlign: 'center',
-  },
-  ingredientsBox: {
-    padding: 20,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-  },
-  ingredientsText: {
-    fontSize: 14,
-    lineHeight: 26,
-    opacity: 0.72,
   },
   adContainer: {
     position: 'absolute',
     bottom: 0,
     width: '100%',
     alignItems: 'center',
-  },
-  errorText: {
-    marginTop: 25,
-    fontSize: 16,
-    textAlign: 'center',
-    opacity: 0.7,
-  },
-  errorActions: {
-    flexDirection: 'row',
-    marginTop: 35,
-    gap: 12,
-  },
-  backBtn: {
-    paddingHorizontal: 28,
-    paddingVertical: 16,
-    borderRadius: 22,
-  },
-  backBtnText: {
-    color: '#000',
-    fontWeight: 'bold',
-    fontSize: 14,
-    letterSpacing: 1,
-  },
-  secondaryBtn: {
-    paddingHorizontal: 28,
-    paddingVertical: 16,
-    borderRadius: 22,
-    borderWidth: 1,
-  },
-  secondaryBtnText: {
-    fontWeight: 'bold',
-    fontSize: 14,
-    letterSpacing: 1,
-  },
-  retryLink: {
-    marginTop: 16,
-  },
-  retryText: {
-    fontWeight: '700',
-    fontSize: 14,
   },
 });
