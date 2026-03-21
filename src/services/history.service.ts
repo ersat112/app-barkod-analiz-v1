@@ -1,6 +1,7 @@
 import { deleteHistoryEntryById, getDatabase, type HistoryEntry } from './db';
 
 export const HISTORY_PAGE_SIZE = 20;
+export type HistoryFilterType = 'all' | 'food' | 'beauty';
 
 type HistoryRow = {
   id: number;
@@ -52,12 +53,43 @@ const normalizeHistoryRow = (row: HistoryRow): HistoryEntry => {
 export const getHistoryPage = ({
   limit = HISTORY_PAGE_SIZE,
   offset = 0,
+  query = '',
+  type = 'all',
 }: {
   limit?: number;
   offset?: number;
+  query?: string;
+  type?: HistoryFilterType;
 }): HistoryPageResult => {
   const safeLimit = Math.max(1, Math.min(limit, 100));
   const safeOffset = Math.max(0, offset);
+  const normalizedQuery = String(query || '').trim().toLowerCase();
+  const normalizedDigits = normalizedQuery.replace(/[^\d]/g, '');
+
+  const whereClauses: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (type === 'food' || type === 'beauty') {
+    whereClauses.push(`type = ?`);
+    params.push(type);
+  }
+
+  if (normalizedQuery) {
+    const likeQuery = `%${normalizedQuery}%`;
+
+    if (normalizedDigits) {
+      whereClauses.push(
+        `(LOWER(name) LIKE ? OR LOWER(brand) LIKE ? OR barcode LIKE ?)`
+      );
+      params.push(likeQuery, likeQuery, `%${normalizedDigits}%`);
+    } else {
+      whereClauses.push(`(LOWER(name) LIKE ? OR LOWER(brand) LIKE ?)`);
+      params.push(likeQuery, likeQuery);
+    }
+  }
+
+  const whereSql =
+    whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
   const rows = db.getAllSync<HistoryRow>(
     `SELECT
@@ -76,9 +108,10 @@ export const getHistoryPage = ({
       created_at,
       updated_at
      FROM history
+     ${whereSql}
      ORDER BY datetime(created_at) DESC, id DESC
      LIMIT ? OFFSET ?`,
-    [safeLimit + 1, safeOffset]
+    [...params, safeLimit + 1, safeOffset]
   );
 
   const hasMore = rows.length > safeLimit;
