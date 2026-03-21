@@ -2,17 +2,21 @@
  * ErEnesAl® v1 - Profesyonel Barkod Çözümleme ve GS1 Ön Ek Motoru
  *
  * Not:
- * GS1 prefix bilgisi her zaman gerçek üretim menşeini göstermez.
- * Daha çok barkodun kayıtlı olduğu GS1 organizasyonunu ifade eder.
+ * - GS1 prefix bilgisi gerçek üretim menşeini garanti etmez.
+ * - Bu bilgi çoğunlukla barkodun kayıtlı olduğu GS1 organizasyonunu ifade eder.
+ * - Ürün origin/country bilgisi varsa öncelik her zaman ürün datasındadır.
  */
 
 export interface BarcodeMetadata {
   isValid: boolean;
   type: 'EAN-13' | 'EAN-8' | 'UPC-A' | 'UPC-E' | 'UNKNOWN';
   country?: string;
+  gs1PrefixCountry?: string;
   normalizedData: string;
   prefix?: string;
   upcaEquivalent?: string;
+  hasGs1PrefixInfo: boolean;
+  registrationRegionLabel?: string;
 }
 
 type BarcodeType = BarcodeMetadata['type'];
@@ -209,6 +213,21 @@ const getCountryByPrefix = (prefix: number): string => {
   return match?.country || 'Uluslararası / Bilinmiyor';
 };
 
+const getRegistrationRegionLabel = (prefix?: string): string | undefined => {
+  if (!prefix) {
+    return undefined;
+  }
+
+  const parsed = parseInt(prefix, 10);
+
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  const gs1Country = getCountryByPrefix(parsed);
+  return `GS1 kayıt bölgesi: ${gs1Country}`;
+};
+
 const resolveType = (
   normalized: string,
   hintedType?: string
@@ -309,14 +328,19 @@ export const barcodeDecoder = {
     const prefix =
       prefixSource.length >= 3 ? prefixSource.substring(0, 3) : undefined;
 
+    const gs1PrefixCountry =
+      isValid && prefix ? getCountryByPrefix(parseInt(prefix, 10)) : undefined;
+
     return {
       isValid,
       type,
       normalizedData: normalized,
       prefix,
       upcaEquivalent,
-      country:
-        isValid && prefix ? getCountryByPrefix(parseInt(prefix, 10)) : undefined,
+      country: gs1PrefixCountry,
+      gs1PrefixCountry,
+      hasGs1PrefixInfo: !!gs1PrefixCountry,
+      registrationRegionLabel: getRegistrationRegionLabel(prefix),
     };
   },
 };
