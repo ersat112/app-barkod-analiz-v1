@@ -1,6 +1,14 @@
 import type { Product } from '../utils/analysis';
+import { FEATURES } from '../config/features';
 import { fetchFoodProduct } from './foodApi';
 import { fetchBeautyProduct } from './beautyApi';
+import {
+  clearProductRepositoryRuntimeState,
+  invalidateProductRepositoryBarcode,
+  resolveProductFromRepository,
+  type ProductRepositoryRemoteFetchResult,
+  type ProductRepositoryResolveResult,
+} from '../services/productRepository';
 
 export type ProductLookupResult =
   | {
@@ -68,6 +76,62 @@ const setCachedResult = (barcode: string, result: ProductLookupResult): void => 
   });
 };
 
+const legacyRepositoryRemoteFetch = async (
+  barcode: string
+): Promise<ProductRepositoryRemoteFetchResult> => {
+  const normalizedBarcode = normalizeBarcode(barcode);
+
+  const foodProduct = await fetchFoodProduct(normalizedBarcode);
+
+  if (foodProduct) {
+    return {
+      found: true,
+      barcode: normalizedBarcode,
+      product: foodProduct,
+      source: 'food',
+    };
+  }
+
+  const beautyProduct = await fetchBeautyProduct(normalizedBarcode);
+
+  if (beautyProduct) {
+    return {
+      found: true,
+      barcode: normalizedBarcode,
+      product: beautyProduct,
+      source: 'beauty',
+    };
+  }
+
+  return {
+    found: false,
+    barcode: normalizedBarcode,
+    reason: 'not_found',
+  };
+};
+
+const mapRepositoryResultToLookupResult = (
+  result: ProductRepositoryResolveResult
+): ProductLookupResult => {
+  if (result.found) {
+    return {
+      found: true,
+      barcode: result.barcode,
+      product: result.product,
+      source:
+        result.source === 'local_cache' || result.source === 'shared_cache'
+          ? 'cache'
+          : result.source,
+    };
+  }
+
+  return {
+    found: false,
+    barcode: result.barcode,
+    reason: result.reason,
+  };
+};
+
 const tryFetchProduct = async (barcode: string): Promise<ProductLookupResult> => {
   const normalizedBarcode = normalizeBarcode(barcode);
 
@@ -82,7 +146,11 @@ const tryFetchProduct = async (barcode: string): Promise<ProductLookupResult> =>
 
   const cachedResult = getCachedResult(normalizedBarcode);
   if (cachedResult) {
-    console.log('[ProductResolver] cache hit:', normalizedBarcode, cachedResult.found ? 'found' : 'not-found');
+    console.log(
+      '[ProductResolver] cache hit:',
+      normalizedBarcode,
+      cachedResult.found ? 'found' : 'not-found'
+    );
     return cachedResult;
   }
 
@@ -130,7 +198,10 @@ const tryFetchProduct = async (barcode: string): Promise<ProductLookupResult> =>
         reason: 'not_found',
       };
 
-      console.warn('[ProductResolver] product not found in any source:', normalizedBarcode);
+      console.warn(
+        '[ProductResolver] product not found in any source:',
+        normalizedBarcode
+      );
       setCachedResult(normalizedBarcode, notFoundResult);
       return notFoundResult;
     } finally {
@@ -145,16 +216,26 @@ const tryFetchProduct = async (barcode: string): Promise<ProductLookupResult> =>
 export const fetchProductByBarcode = async (
   barcode: string
 ): Promise<ProductLookupResult> => {
+  if (FEATURES.productRepository.foundationEnabled) {
+    const repositoryResult = await resolveProductFromRepository(barcode, {
+      remoteFetch: legacyRepositoryRemoteFetch,
+    });
+
+    return mapRepositoryResultToLookupResult(repositoryResult);
+  }
+
   return tryFetchProduct(barcode);
 };
 
 export const clearProductResolverCache = (): void => {
   resultCache.clear();
   inFlightRequests.clear();
+  clearProductRepositoryRuntimeState();
 };
 
 export const invalidateProductResolverBarcode = (barcode: string): void => {
   const normalizedBarcode = normalizeBarcode(barcode);
   resultCache.delete(normalizedBarcode);
   inFlightRequests.delete(normalizedBarcode);
+  invalidateProductRepositoryBarcode(normalizedBarcode);
 };
