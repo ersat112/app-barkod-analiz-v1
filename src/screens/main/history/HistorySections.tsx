@@ -47,6 +47,7 @@ type HistoryHeaderProps = {
   title: string;
   subtitle: string;
   colors: ThemeColors;
+  topPadding?: number;
 };
 
 type HistoryFooterProps = {
@@ -76,9 +77,10 @@ export const HistoryListHeader: React.FC<HistoryHeaderProps> = ({
   title,
   subtitle,
   colors,
+  topPadding = 60,
 }) => {
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, { paddingTop: topPadding }]}>
       <Text style={[styles.headerTitle, { color: colors.primary }]}>{title}</Text>
       <Text style={[styles.headerSubtitle, { color: colors.text }]}>{subtitle}</Text>
     </View>
@@ -347,7 +349,6 @@ export const HistoryListFooter: React.FC<HistoryFooterProps> = ({
 
 const styles = StyleSheet.create({
   header: {
-    paddingTop: 60,
     paddingHorizontal: 20,
     paddingBottom: 12,
   },
