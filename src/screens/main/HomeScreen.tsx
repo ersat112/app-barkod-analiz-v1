@@ -24,6 +24,8 @@ import {
   LastProductCard,
   MissionCard,
   QuickActionCard,
+  QuickInsightsStrip,
+  RecentProductsCarousel,
   StatCard,
   SummaryCard,
 } from './home/HomeSections';
@@ -254,6 +256,27 @@ export const HomeScreen: React.FC = () => {
       .replace('{{goal}}', String(WEEKLY_GOAL));
   }, [snapshot.weeklyScanTotal, tt]);
 
+  const quickInsights = useMemo(
+    () => [
+      {
+        icon: 'albums-outline' as keyof typeof Ionicons.glyphMap,
+        value: String(snapshot.totalHistoryCount),
+        label: tt('products_label', 'Toplam Kayıt'),
+      },
+      {
+        icon: 'calendar-outline' as keyof typeof Ionicons.glyphMap,
+        value: String(snapshot.weeklyActiveDays),
+        label: tt('weekly_active_days_short', 'Aktif Gün'),
+      },
+      {
+        icon: 'bar-chart-outline' as keyof typeof Ionicons.glyphMap,
+        value: String(snapshot.weeklyScanTotal),
+        label: tt('weekly_scans_short', 'Haftalık Tarama'),
+      },
+    ],
+    [snapshot.totalHistoryCount, snapshot.weeklyActiveDays, snapshot.weeklyScanTotal, tt]
+  );
+
   if (loading) {
     return <HomeLoadingState label={tt('home', 'Ana Sayfa')} colors={colors} />;
   }
@@ -330,6 +353,8 @@ export const HomeScreen: React.FC = () => {
         />
       </View>
 
+      <QuickInsightsStrip items={quickInsights} colors={colors} />
+
       <SummaryCard
         icon="stats-chart-outline"
         title={tt('history_overview', 'Geçmiş Özeti')}
@@ -376,6 +401,16 @@ export const HomeScreen: React.FC = () => {
           colors={colors}
         />
       ) : null}
+
+      <RecentProductsCarousel
+        title={tt('recent_products', 'Son Ürünler')}
+        subtitle={tt('recent_products_subtitle', 'Son taradığınız ürünlere hızlı dönün')}
+        items={snapshot.recentProducts}
+        fallbackBrand={tt('unknown_brand', 'Bilinmeyen Marka')}
+        fallbackName={tt('unnamed_product', 'İsimsiz Ürün')}
+        onItemPress={(barcode) => navigation.navigate('Detail', { barcode })}
+        colors={colors}
+      />
 
       <View style={styles.quickActionsRow}>
         <QuickActionCard
