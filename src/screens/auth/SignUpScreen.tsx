@@ -748,28 +748,24 @@ export const SignUpScreen: React.FC = () => {
           )}
 
           {Platform.OS === 'ios' ? (
-            <TouchableOpacity
-              style={styles.appleButtonWrap}
-              onPress={handleAppleLogin}
-              disabled={appleLoading}
-              activeOpacity={0.9}
-            >
+            <View style={styles.appleButtonWrap}>
               <AppleAuthentication.AppleAuthenticationButton
-                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
-                buttonStyle={
-                  isDark
-                    ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
-                    : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
-                }
-                cornerRadius={16}
-                style={styles.appleButton}
+                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
+                  buttonStyle={
+                    isDark
+                       ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+                       : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                 }
+                 cornerRadius={16}
+                 style={styles.appleButton}
+                 onPress={appleLoading ? () => undefined : handleAppleLogin}
               />
-              {appleLoading ? (
-                <View style={styles.appleLoadingOverlay}>
-                  <ActivityIndicator size="small" color={isDark ? '#000' : '#FFF'} />
-                </View>
-              ) : null}
-            </TouchableOpacity>
+               {appleLoading ? (
+                  <View style={styles.appleLoadingOverlay}>
+                     <ActivityIndicator size="small" color={isDark ? '#000' : '#FFF'} />
+                  </View>
+               ) : null}
+              </View>
           ) : null}
         </View>
 
