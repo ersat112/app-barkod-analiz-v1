@@ -271,6 +271,7 @@ export const ScannerScreen: React.FC = () => {
 
   const topInsetPadding = Math.max(insets.top + 8, 24);
   const bottomControlsOffset = Math.max(insets.bottom + 16, 28);
+  const infoPanelBottomOffset = bottomControlsOffset + 116;
 
   return (
     <View style={styles.container}>
@@ -324,15 +325,17 @@ export const ScannerScreen: React.FC = () => {
           <View style={styles.sideDarkArea} />
         </View>
 
-        <View style={styles.bottomDarkArea}>
+        <View style={styles.bottomDarkArea} />
+      </View>
+
+      {!isManualMode && (
+        <View style={[styles.infoPanel, { bottom: infoPanelBottomOffset }]}>
           <Text style={styles.infoTitle}>{tt('scan_now', 'Şimdi Tara')}</Text>
           <Text style={styles.infoText}>
-            {isManualMode
-              ? ''
-              : tt('align_barcode_instruction', 'Barkodu çerçeveye hizalayın')}
+            {tt('align_barcode_instruction', 'Barkodu çerçeveye hizalayın')}
           </Text>
         </View>
-      </View>
+      )}
 
       {!isManualMode && (
         <View
@@ -589,9 +592,14 @@ const styles = StyleSheet.create({
   bottomDarkArea: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.72)',
-    justifyContent: 'center',
+  },
+  infoPanel: {
+    position: 'absolute',
+    left: 24,
+    right: 24,
     alignItems: 'center',
-    paddingHorizontal: 32,
+    justifyContent: 'center',
+    zIndex: 3,
   },
   infoTitle: {
     color: '#FFF',
@@ -617,6 +625,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-evenly',
     alignItems: 'center',
     paddingHorizontal: 14,
+    zIndex: 4,
   },
   controlBtn: {
     width: 72,
