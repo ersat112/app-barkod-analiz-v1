@@ -1,9 +1,10 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type HistoryEntry } from '../services/db';
 import {
   getHistoryPage,
   HISTORY_PAGE_SIZE,
   removeHistoryEntry,
+  type HistoryFilterType,
 } from '../services/history.service';
 
 export type HistorySection = {
@@ -87,10 +88,20 @@ export const usePaginatedHistory = (
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(true);
 
+  const [searchQuery, setSearchQueryState] = useState('');
+  const [selectedType, setSelectedTypeState] =
+    useState<HistoryFilterType>('all');
+
   const offsetRef = useRef(0);
   const busyRef = useRef(false);
+  const initializedFilterEffectRef = useRef(false);
+  const searchQueryRef = useRef('');
+  const selectedTypeRef = useRef<HistoryFilterType>('all');
 
   const sections = useMemo(() => groupHistoryByDate(items, t), [items, t]);
+  const hasActiveFilters = useMemo(() => {
+    return searchQuery.trim().length > 0 || selectedType !== 'all';
+  }, [searchQuery, selectedType]);
 
   const loadInitial = useCallback(async () => {
     if (busyRef.current) {
@@ -108,6 +119,8 @@ export const usePaginatedHistory = (
         getHistoryPage({
           limit: HISTORY_PAGE_SIZE,
           offset: 0,
+          query: searchQueryRef.current,
+          type: selectedTypeRef.current,
         })
       );
 
@@ -148,6 +161,8 @@ export const usePaginatedHistory = (
         getHistoryPage({
           limit: HISTORY_PAGE_SIZE,
           offset: offsetRef.current,
+          query: searchQueryRef.current,
+          type: selectedTypeRef.current,
         })
       );
 
@@ -170,6 +185,32 @@ export const usePaginatedHistory = (
     [loadInitial]
   );
 
+  const setSearchQuery = useCallback((value: string) => {
+    searchQueryRef.current = value;
+    setSearchQueryState(value);
+  }, []);
+
+  const setSelectedType = useCallback((value: HistoryFilterType) => {
+    selectedTypeRef.current = value;
+    setSelectedTypeState(value);
+  }, []);
+
+  const clearFilters = useCallback(() => {
+    searchQueryRef.current = '';
+    selectedTypeRef.current = 'all';
+    setSearchQueryState('');
+    setSelectedTypeState('all');
+  }, []);
+
+  useEffect(() => {
+    if (!initializedFilterEffectRef.current) {
+      initializedFilterEffectRef.current = true;
+      return;
+    }
+
+    loadInitial();
+  }, [searchQuery, selectedType, loadInitial]);
+
   return {
     items,
     sections,
@@ -178,10 +219,16 @@ export const usePaginatedHistory = (
     refreshing,
     loadError,
     hasMore,
+    searchQuery,
+    selectedType,
+    hasActiveFilters,
     loadInitial,
     refresh,
     loadMore,
     deleteEntry,
+    setSearchQuery,
+    setSelectedType,
+    clearFilters,
     parseCreatedAt,
   };
 };
