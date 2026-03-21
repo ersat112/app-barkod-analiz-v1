@@ -14,10 +14,10 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AD_UNIT_ID, GLOBAL_AD_CONFIG } from '../../config/admob';
 import { useTheme } from '../../context/ThemeContext';
+import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { adService } from '../../services/adService';
 import { getAdMobModule } from '../../services/admobRuntime';
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
@@ -27,7 +27,13 @@ export const ScannerScreen: React.FC = () => {
   const { colors } = useTheme();
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
-  const insets = useSafeAreaInsets();
+
+  const layout = useAppScreenLayout({
+    topInsetExtra: 8,
+    topInsetMin: 24,
+    floatingBottomExtra: 16,
+    floatingBottomMin: 28,
+  });
 
   const tt = useCallback(
     (key: string, fallback: string) => {
@@ -160,14 +166,25 @@ export const ScannerScreen: React.FC = () => {
       setScanned(true);
 
       try {
-        const shouldShow = await adService.shouldShowAd();
+        const decision = await adService.evaluateScanInterstitialOpportunity();
 
-        if (shouldShow && adLoaded && interstitialRef.current) {
-          console.log('[Interstitial] show requested');
+        if (decision.shouldShow && adLoaded && interstitialRef.current) {
+          console.log('[Interstitial] show requested', decision);
+
           await interstitialRef.current.show();
+
+          await adService.recordInterstitialShown({
+            shownAt: Date.now(),
+            successfulScanCount: decision.successfulScanCount,
+          });
+        } else {
+          console.log('[Interstitial] skipped', {
+            reason: decision.reason,
+            adLoaded,
+          });
         }
       } catch (error) {
-        console.error('Ad showing failed:', error);
+        console.error('Ad policy / show failed:', error);
       } finally {
         setIsManualMode(false);
         setManualBarcode('');
@@ -269,8 +286,8 @@ export const ScannerScreen: React.FC = () => {
     );
   }
 
-  const topInsetPadding = Math.max(insets.top + 8, 24);
-  const bottomControlsOffset = Math.max(insets.bottom + 16, 28);
+  const topInsetPadding = layout.headerTopPadding;
+  const bottomControlsOffset = layout.floatingBottomOffset;
   const infoPanelBottomOffset = bottomControlsOffset + 116;
 
   return (
