@@ -14,7 +14,10 @@ import {
 } from '../config/features';
 import { db as firestoreDb } from '../config/firebase';
 import type { Product, ProductSource, ProductType } from '../utils/analysis';
-import { isValidBarcode, normalizeBarcode } from './productCache.service';
+import {
+  isProductCacheBarcodeValid,
+  normalizeProductCacheBarcode,
+} from './db/productCache.repository';
 
 type FirestoreProductCacheDocument = {
   barcode?: string;
@@ -110,9 +113,9 @@ export const getRemoteCachedProduct = async (
     return null;
   }
 
-  const normalizedBarcode = normalizeBarcode(barcode);
+  const normalizedBarcode = normalizeProductCacheBarcode(barcode);
 
-  if (!isValidBarcode(normalizedBarcode)) {
+  if (!isProductCacheBarcodeValid(normalizedBarcode)) {
     return null;
   }
 
@@ -183,9 +186,9 @@ export const setRemoteCachedProductFound = async ({
     return false;
   }
 
-  const normalizedBarcode = normalizeBarcode(barcode);
+  const normalizedBarcode = normalizeProductCacheBarcode(barcode);
 
-  if (!isValidBarcode(normalizedBarcode)) {
+  if (!isProductCacheBarcodeValid(normalizedBarcode)) {
     return false;
   }
 
@@ -239,9 +242,9 @@ export const setRemoteCachedProductNotFound = async ({
     return false;
   }
 
-  const normalizedBarcode = normalizeBarcode(barcode);
+  const normalizedBarcode = normalizeProductCacheBarcode(barcode);
 
-  if (!isValidBarcode(normalizedBarcode)) {
+  if (!isProductCacheBarcodeValid(normalizedBarcode)) {
     return false;
   }
 

@@ -28,6 +28,11 @@ type RemoteCandidate = {
   product: Product;
 };
 
+export type ProductRepositoryServiceResolveOptions = {
+  now?: number;
+  remoteFetch?: (barcode: string) => Promise<ProductRepositoryRemoteFetchResult>;
+};
+
 const inFlightRequests = new Map<string, Promise<ProductRepositoryResolveResult>>();
 
 const safeTextLength = (value?: string | null): number => {
@@ -214,7 +219,7 @@ const fetchRemoteSourcesParallel = async (
   };
 };
 
-const fetchRemoteSources = async (
+const defaultRemoteFetch = async (
   barcode: string
 ): Promise<ProductRepositoryRemoteFetchResult> => {
   if (FEATURES.productRepository.remoteParallelFetchEnabled) {
@@ -310,7 +315,7 @@ const backfillLocalCacheFromRemoteHit = (
 
 export const resolveProductFromRepository = async (
   barcode: string,
-  options?: { now?: number }
+  options?: ProductRepositoryServiceResolveOptions
 ): Promise<ProductRepositoryResolveResult> => {
   const normalizedBarcode = normalizeProductCacheBarcode(barcode);
 
@@ -354,7 +359,7 @@ export const resolveProductFromRepository = async (
     let remoteResult: ProductRepositoryRemoteFetchResult;
 
     try {
-      remoteResult = await fetchRemoteSources(normalizedBarcode);
+      remoteResult = await (options?.remoteFetch ?? defaultRemoteFetch)(normalizedBarcode);
     } catch (error) {
       console.error('[ProductRepositoryService] remote fetch failed:', error);
 
