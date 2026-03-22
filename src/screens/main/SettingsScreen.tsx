@@ -26,6 +26,10 @@ import { useLanguage } from '../../context/LanguageContext';
 import { AdBanner } from '../../components/AdBanner';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useAdDiagnostics } from '../../hooks/useAdDiagnostics';
+import {
+  getRemoteProductCacheDiagnostics,
+  type RemoteProductCacheDiagnosticsSnapshot,
+} from '../../services/productRemoteCache.service';
 
 const APP_VERSION = 'v1.0.4';
 
@@ -114,6 +118,39 @@ function formatDuration(ms: number): string {
   return `${hours} sa ${minutes} dk`;
 }
 
+function formatTimeValue(value?: string | number | null): string {
+  if (value === null || value === undefined) {
+    return '-';
+  }
+
+  try {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return '-';
+    }
+
+    return date.toLocaleTimeString('tr-TR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '-';
+  }
+}
+
+function boolStateText(value: boolean): string {
+  return value ? 'ON' : 'OFF';
+}
+
+function formatOptionalText(value?: string | null): string {
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+
+  return '-';
+}
+
 export const SettingsScreen: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -128,7 +165,8 @@ export const SettingsScreen: React.FC = () => {
     horizontalPadding: 25,
   });
 
-  const diagnosticsEnabled = FEATURES.ads.diagnosticsLoggingEnabled;
+  const adDiagnosticsEnabled = FEATURES.ads.diagnosticsLoggingEnabled;
+  const sharedCacheDiagnosticsEnabled = FEATURES.firebase.diagnosticsLoggingEnabled;
 
   const {
     snapshot: adDiagnostics,
@@ -137,7 +175,7 @@ export const SettingsScreen: React.FC = () => {
     error: diagnosticsError,
     refresh: refreshDiagnostics,
   } = useAdDiagnostics({
-    enabled: diagnosticsEnabled,
+    enabled: adDiagnosticsEnabled,
   });
 
   const tt = useCallback(
@@ -153,6 +191,15 @@ export const SettingsScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [logoutLoading, setLogoutLoading] = useState(false);
+
+  const [sharedCacheDiagnostics, setSharedCacheDiagnostics] =
+    useState<RemoteProductCacheDiagnosticsSnapshot | null>(null);
+  const [sharedCacheDiagnosticsLoading, setSharedCacheDiagnosticsLoading] =
+    useState<boolean>(sharedCacheDiagnosticsEnabled);
+  const [sharedCacheDiagnosticsRefreshing, setSharedCacheDiagnosticsRefreshing] =
+    useState(false);
+  const [sharedCacheDiagnosticsError, setSharedCacheDiagnosticsError] =
+    useState<string | null>(null);
 
   const loadUserProfile = useCallback(async () => {
     try {
@@ -179,6 +226,43 @@ export const SettingsScreen: React.FC = () => {
     }
   }, [tt, user]);
 
+  const loadSharedCacheDiagnostics = useCallback(
+    async (options?: { refresh?: boolean }) => {
+      if (!sharedCacheDiagnosticsEnabled) {
+        setSharedCacheDiagnostics(null);
+        setSharedCacheDiagnosticsLoading(false);
+        setSharedCacheDiagnosticsRefreshing(false);
+        setSharedCacheDiagnosticsError(null);
+        return;
+      }
+
+      const isRefresh = Boolean(options?.refresh);
+
+      if (isRefresh) {
+        setSharedCacheDiagnosticsRefreshing(true);
+      } else {
+        setSharedCacheDiagnosticsLoading(true);
+      }
+
+      try {
+        setSharedCacheDiagnosticsError(null);
+        const snapshot = await getRemoteProductCacheDiagnostics();
+        setSharedCacheDiagnostics(snapshot);
+      } catch (error) {
+        console.error('Shared cache diagnostics load error:', error);
+        setSharedCacheDiagnosticsError(
+          error instanceof Error && error.message.trim()
+            ? error.message
+            : 'Shared cache diagnostics yüklenemedi'
+        );
+      } finally {
+        setSharedCacheDiagnosticsLoading(false);
+        setSharedCacheDiagnosticsRefreshing(false);
+      }
+    },
+    [sharedCacheDiagnosticsEnabled]
+  );
+
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
@@ -200,18 +284,19 @@ export const SettingsScreen: React.FC = () => {
       };
 
       void fetchProfile();
+      void loadSharedCacheDiagnostics();
 
       return () => {
         isActive = false;
       };
-    }, [loadUserProfile])
+    }, [loadSharedCacheDiagnostics, loadUserProfile])
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadUserProfile();
+    await Promise.all([loadUserProfile(), loadSharedCacheDiagnostics({ refresh: true })]);
     setRefreshing(false);
-  }, [loadUserProfile]);
+  }, [loadSharedCacheDiagnostics, loadUserProfile]);
 
   const handleSafeOpenUrl = useCallback(
     async (url: string, fallbackMessage?: string) => {
@@ -318,19 +403,12 @@ export const SettingsScreen: React.FC = () => {
   }, [tt, user?.emailVerified]);
 
   const diagnosticsFetchedAtText = useMemo(() => {
-    if (!adDiagnostics?.fetchedAt) {
-      return '-';
-    }
-
-    try {
-      return new Date(adDiagnostics.fetchedAt).toLocaleTimeString('tr-TR', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return '-';
-    }
+    return formatTimeValue(adDiagnostics?.fetchedAt);
   }, [adDiagnostics?.fetchedAt]);
+
+  const sharedCacheFetchedAtText = useMemo(() => {
+    return formatTimeValue(sharedCacheDiagnostics?.fetchedAt);
+  }, [sharedCacheDiagnostics?.fetchedAt]);
 
   return (
     <ScrollView
@@ -522,7 +600,7 @@ export const SettingsScreen: React.FC = () => {
         }
       />
 
-      {diagnosticsEnabled ? (
+      {adDiagnosticsEnabled ? (
         <>
           <Text
             style={[
@@ -633,8 +711,7 @@ export const SettingsScreen: React.FC = () => {
                         },
                       ]}
                     >
-                      {tt('interstitial', 'Interstitial')}:{' '}
-                      {adDiagnostics.policy.interstitialEnabled ? 'ON' : 'OFF'}
+                      {tt('interstitial', 'Interstitial')}: {boolStateText(adDiagnostics.policy.interstitialEnabled)}
                     </Text>
                   </View>
 
@@ -658,7 +735,7 @@ export const SettingsScreen: React.FC = () => {
                         },
                       ]}
                     >
-                      {tt('banner', 'Banner')}: {adDiagnostics.policy.bannerEnabled ? 'ON' : 'OFF'}
+                      {tt('banner', 'Banner')}: {boolStateText(adDiagnostics.policy.bannerEnabled)}
                     </Text>
                   </View>
                 </View>
@@ -751,6 +828,287 @@ export const SettingsScreen: React.FC = () => {
         </>
       ) : null}
 
+      {sharedCacheDiagnosticsEnabled ? (
+        <>
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: colors.text, marginHorizontal: layout.horizontalPadding, marginTop: 10 },
+            ]}
+          >
+            {tt('firebase_shared_cache_diagnostics', 'Firebase / Shared Cache Tanılama')}
+          </Text>
+
+          <View
+            style={[
+              styles.diagnosticsCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                marginHorizontal: layout.horizontalPadding,
+              },
+            ]}
+          >
+            <View style={styles.diagnosticsHeader}>
+              <View style={styles.diagnosticsHeaderLeft}>
+                <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
+                  <Ionicons name="server-outline" size={20} color={colors.primary} />
+                </View>
+
+                <View style={styles.diagnosticsHeaderTextWrap}>
+                  <Text style={[styles.diagnosticsTitle, { color: colors.text }]}>
+                    {tt('firebase_shared_cache_runtime', 'Runtime + queue state')}
+                  </Text>
+                  <Text style={[styles.diagnosticsSubtitle, { color: colors.text }]}>
+                    {tt('last_refresh', 'Son yenileme')}: {sharedCacheFetchedAtText}
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.diagnosticsRefreshButton,
+                  sharedCacheDiagnosticsRefreshing && styles.diagnosticsRefreshButtonDisabled,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: `${colors.primary}10`,
+                  },
+                ]}
+                onPress={() => {
+                  void loadSharedCacheDiagnostics({ refresh: true });
+                }}
+                disabled={sharedCacheDiagnosticsRefreshing}
+                activeOpacity={0.85}
+              >
+                {sharedCacheDiagnosticsRefreshing ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons name="refresh" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {sharedCacheDiagnosticsLoading ? (
+              <View style={styles.diagnosticsLoadingWrap}>
+                <ActivityIndicator size="small" color={colors.primary} />
+              </View>
+            ) : null}
+
+            {sharedCacheDiagnosticsError ? (
+              <Text style={styles.diagnosticsErrorText}>{sharedCacheDiagnosticsError}</Text>
+            ) : null}
+
+            {sharedCacheDiagnostics ? (
+              <>
+                <View style={styles.diagnosticsPillsRow}>
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      {
+                        backgroundColor: sharedCacheDiagnostics.runtimeReady
+                          ? `${colors.primary}14`
+                          : '#FF444414',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        {
+                          color: sharedCacheDiagnostics.runtimeReady
+                            ? colors.primary
+                            : '#FF4444',
+                        },
+                      ]}
+                    >
+                      Runtime: {boolStateText(sharedCacheDiagnostics.runtimeReady)}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      {
+                        backgroundColor: sharedCacheDiagnostics.writeFeatureEnabled
+                          ? `${colors.primary}14`
+                          : `${colors.border}55`,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        {
+                          color: sharedCacheDiagnostics.writeFeatureEnabled
+                            ? colors.primary
+                            : colors.text,
+                        },
+                      ]}
+                    >
+                      Write: {boolStateText(sharedCacheDiagnostics.writeFeatureEnabled)}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      {
+                        backgroundColor:
+                          sharedCacheDiagnostics.queueSize > 0
+                            ? `${colors.border}55`
+                            : `${colors.primary}14`,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        {
+                          color:
+                            sharedCacheDiagnostics.queueSize > 0
+                              ? colors.text
+                              : colors.primary,
+                        },
+                      ]}
+                    >
+                      Queue: {sharedCacheDiagnostics.queueSize}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.diagnosticsGrid}>
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Project
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(sharedCacheDiagnostics.projectId)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Effective source
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {sharedCacheDiagnostics.effectiveSource}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Read feature
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(sharedCacheDiagnostics.readFeatureEnabled)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Write feature
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(sharedCacheDiagnostics.writeFeatureEnabled)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Read validation
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(sharedCacheDiagnostics.readValidationEnabled)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Write validation
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(sharedCacheDiagnostics.writeValidationEnabled)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Queue ready / blocked
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {sharedCacheDiagnostics.readyQueueSize} / {sharedCacheDiagnostics.blockedQueueSize}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Lifecycle attached
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(sharedCacheDiagnostics.lifecycleAttached)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Last flush
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatTimeValue(sharedCacheDiagnostics.lastFlushAt)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Last flush reason
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(sharedCacheDiagnostics.lastFlushReason)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Consecutive failures
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {sharedCacheDiagnostics.consecutiveFailureCount}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Last read failure
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(sharedCacheDiagnostics.lastReadFailure)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Last write failure
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(sharedCacheDiagnostics.lastWriteFailure)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Queue flush error
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(sharedCacheDiagnostics.lastFlushError)}
+                    </Text>
+                  </View>
+                </View>
+              </>
+            ) : null}
+          </View>
+        </>
+      ) : null}
+
       <TouchableOpacity
         style={[styles.logoutBtn, logoutLoading && styles.logoutBtnDisabled]}
         onPress={handleLogout}
@@ -767,7 +1125,7 @@ export const SettingsScreen: React.FC = () => {
       <View style={styles.adBox}>
         <AdBanner
           placement="settings_footer"
-          showPlaceholderWhenUnavailable={diagnosticsEnabled}
+          showPlaceholderWhenUnavailable={adDiagnosticsEnabled}
         />
       </View>
 
@@ -994,6 +1352,7 @@ const styles = StyleSheet.create({
     opacity: 0.72,
   },
   diagnosticsValue: {
+    flex: 1,
     fontSize: 13,
     fontWeight: '800',
     textAlign: 'right',
