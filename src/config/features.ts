@@ -24,6 +24,12 @@ export const FEATURES = Object.freeze({
     firestoreWriteEnabled: false,
     remoteParallelFetchEnabled: true,
   }),
+  firebase: Object.freeze({
+    runtimeValidationEnabled: true,
+    sharedCacheReadValidationEnabled: true,
+    sharedCacheWriteValidationEnabled: true,
+    diagnosticsLoggingEnabled: __DEV__,
+  }),
   missingProduct: Object.freeze({
     firestoreContributionSyncEnabled: false,
   }),
