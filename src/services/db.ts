@@ -26,6 +26,15 @@ export {
   resolveProductCacheExpiry,
   upsertProductCache,
 } from './db/productCache.repository';
+export {
+  addFavoriteBarcode,
+  clearAllFavorites,
+  getAllFavoriteBarcodes,
+  getFavoriteCount,
+  isFavoriteBarcode,
+  removeFavoriteBarcode,
+  toggleFavoriteBarcode,
+} from './db/favorites.repository';
 
 export type {
   BestScoreRow,
