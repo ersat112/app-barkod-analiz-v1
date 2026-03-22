@@ -3,18 +3,9 @@ import {
   getHomeDashboardSnapshot,
   type HomeDashboardSnapshot,
 } from '../services/homeDashboard.service';
+import { createEmptyHomeDashboardSnapshot } from '../types/history';
 
-const emptySnapshot: HomeDashboardSnapshot = {
-  todayCount: 0,
-  todayUniqueCount: 0,
-  totalHistoryCount: 0,
-  bestScoreToday: null,
-  weeklyScanTotal: 0,
-  weeklyActiveDays: 0,
-  streakCount: 0,
-  lastScannedProduct: null,
-  recentProducts: [],
-};
+const emptySnapshot: HomeDashboardSnapshot = createEmptyHomeDashboardSnapshot();
 
 export const useHomeDashboard = () => {
   const [snapshot, setSnapshot] = useState<HomeDashboardSnapshot>(emptySnapshot);
