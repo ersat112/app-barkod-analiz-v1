@@ -2,17 +2,29 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
-    },
-    "skipLibCheck": true,
-    // 🎯 İŞTE SİHİRLİ DOKUNUŞ BURADA:
-    "moduleResolution": "bundler"
+      "@/*": [
+        "src/*"
+      ]
+    }
   },
   "include": [
-    "**/*.ts",
-    "**/*.tsx",
-    "App.tsx"
+    "App.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "babel.config.js",
+    "metro.config.js",
+    "eslint.config.js"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".expo",
+    "android",
+    "ios"
   ]
 }

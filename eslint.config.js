@@ -7,6 +7,13 @@ const compat = new FlatCompat({
 module.exports = [
   ...compat.extends('expo'),
   {
-    ignores: ['node_modules/**', 'dist/**'],
+    ignores: [
+      'node_modules/**',
+      '.expo/**',
+      'dist/**',
+      'coverage/**',
+      'android/**',
+      'ios/**'
+    ],
   },
 ];
