@@ -11,6 +11,22 @@ import { initDatabase } from './src/services/db';
 import { initializeAdMob, getAdMobRuntimeState } from './src/services/admobRuntime';
 import { adService } from './src/services/adService';
 
+const databaseBootstrapState = (() => {
+  try {
+    initDatabase();
+    return {
+      ready: true,
+      error: null as unknown,
+    };
+  } catch (error) {
+    console.log('SQLite init failed:', error);
+    return {
+      ready: false,
+      error,
+    };
+  }
+})();
+
 const AppContent: React.FC = () => {
   const { isDark } = useTheme();
 
@@ -18,11 +34,10 @@ const AppContent: React.FC = () => {
     let mounted = true;
 
     const bootstrap = async () => {
-      try {
-        await Promise.resolve(initDatabase());
-        console.log('SQLite: Hazır.');
-      } catch (error) {
-        console.log('SQLite init failed:', error);
+      if (databaseBootstrapState.ready) {
+        console.log('SQLite bootstrap completed before first render.');
+      } else {
+        console.log('SQLite bootstrap state contains error:', databaseBootstrapState.error);
       }
 
       try {
