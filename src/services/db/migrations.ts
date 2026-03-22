@@ -7,9 +7,52 @@ import {
   tableExists,
 } from './core';
 
+type UserVersionRow = {
+  user_version?: number | null;
+};
+
+type MigrationDefinition = {
+  version: number;
+  key: 'history_foundation' | 'favorites_foundation' | 'product_cache_foundation';
+  label: string;
+  run: () => void;
+};
+
+type TableDiagnosticsSnapshot = {
+  exists: boolean;
+  columnCount: number;
+  columns: string[];
+};
+
+export type DatabaseDiagnosticsSnapshot = {
+  fetchedAt: string;
+  initialized: boolean;
+  targetVersion: number;
+  userVersion: number;
+  pendingMigrationCount: number;
+  pendingMigrationVersions: number[];
+  lastAppliedMigrationVersions: number[];
+  lastInitializedAt: string | null;
+  lastError: string | null;
+  tables: {
+    history: TableDiagnosticsSnapshot;
+    favorites: TableDiagnosticsSnapshot;
+    productCache: TableDiagnosticsSnapshot;
+  };
+  migrations: Array<{
+    version: number;
+    key: MigrationDefinition['key'];
+    label: string;
+    applied: boolean;
+  }>;
+};
+
 const db = getDatabase();
 
 let initialized = false;
+let lastInitializedAt: string | null = null;
+let lastError: string | null = null;
+let lastAppliedMigrationVersions: number[] = [];
 
 const createHistoryTable = (): void => {
   db.execSync(`
@@ -333,21 +376,149 @@ const migrateProductCacheIfNeeded = (): void => {
   `);
 };
 
+const MIGRATIONS: readonly MigrationDefinition[] = Object.freeze([
+  {
+    version: 1,
+    key: 'history_foundation',
+    label: 'History foundation',
+    run: migrateLegacyHistoryIfNeeded,
+  },
+  {
+    version: 2,
+    key: 'favorites_foundation',
+    label: 'Favorites foundation',
+    run: migrateFavoritesIfNeeded,
+  },
+  {
+    version: 3,
+    key: 'product_cache_foundation',
+    label: 'Product cache foundation',
+    run: migrateProductCacheIfNeeded,
+  },
+]);
+
+export const DATABASE_SCHEMA_VERSION =
+  MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
+
+const toErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+
+  return 'Bilinmeyen migration hatası';
+};
+
+const getUserVersion = (): number => {
+  try {
+    const row = db.getFirstSync<UserVersionRow>('PRAGMA user_version');
+    const value = row?.user_version;
+
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return Math.max(0, Math.floor(value));
+    }
+
+    return 0;
+  } catch {
+    return 0;
+  }
+};
+
+const setUserVersion = (version: number): void => {
+  const safeVersion = Math.max(0, Math.floor(version));
+  db.execSync(`PRAGMA user_version = ${safeVersion};`);
+};
+
+const getPendingMigrationVersions = (userVersion: number): number[] => {
+  return MIGRATIONS.filter((migration) => migration.version > userVersion).map(
+    (migration) => migration.version
+  );
+};
+
+const getTableDiagnostics = (tableName: string): TableDiagnosticsSnapshot => {
+  const exists = tableExists(tableName);
+  const columns = exists ? getTableColumns(tableName).map((column) => column.name) : [];
+
+  return {
+    exists,
+    columnCount: columns.length,
+    columns,
+  };
+};
+
 export const initDatabase = (): void => {
-  if (initialized) {
+  if (initialized && getUserVersion() >= DATABASE_SCHEMA_VERSION) {
     return;
   }
 
   try {
     applyDatabasePragmas();
-    migrateLegacyHistoryIfNeeded();
-    migrateFavoritesIfNeeded();
-    migrateProductCacheIfNeeded();
+
+    let currentVersion = getUserVersion();
+    const appliedVersions: number[] = [];
+
+    MIGRATIONS.forEach((migration) => {
+      if (migration.version <= currentVersion) {
+        return;
+      }
+
+      migration.run();
+      setUserVersion(migration.version);
+      currentVersion = migration.version;
+      appliedVersions.push(migration.version);
+    });
+
     initialized = true;
-    console.log('SQLite: Hazır.');
+    lastInitializedAt = new Date().toISOString();
+    lastAppliedMigrationVersions = appliedVersions;
+    lastError = null;
+
+    console.log('SQLite: Hazır.', {
+      userVersion: currentVersion,
+      targetVersion: DATABASE_SCHEMA_VERSION,
+      appliedMigrations: appliedVersions,
+    });
   } catch (error) {
     initialized = false;
+    lastError = toErrorMessage(error);
     console.error('SQLite Başlatma Hatası:', error);
     throw error;
   }
+};
+
+export const getDatabaseDiagnosticsSnapshot = (): DatabaseDiagnosticsSnapshot => {
+  try {
+    initDatabase();
+  } catch {
+    // Hata bilgisi lastError içine yazılıyor; snapshot yine de üretilecek.
+  }
+
+  const userVersion = getUserVersion();
+  const pendingMigrationVersions = getPendingMigrationVersions(userVersion);
+
+  return {
+    fetchedAt: new Date().toISOString(),
+    initialized,
+    targetVersion: DATABASE_SCHEMA_VERSION,
+    userVersion,
+    pendingMigrationCount: pendingMigrationVersions.length,
+    pendingMigrationVersions,
+    lastAppliedMigrationVersions: [...lastAppliedMigrationVersions],
+    lastInitializedAt,
+    lastError,
+    tables: {
+      history: getTableDiagnostics(TABLES.HISTORY),
+      favorites: getTableDiagnostics(TABLES.FAVORITES),
+      productCache: getTableDiagnostics(TABLES.PRODUCT_CACHE),
+    },
+    migrations: MIGRATIONS.map((migration) => ({
+      version: migration.version,
+      key: migration.key,
+      label: migration.label,
+      applied: userVersion >= migration.version,
+    })),
+  };
 };
