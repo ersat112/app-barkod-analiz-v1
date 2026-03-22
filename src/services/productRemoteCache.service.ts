@@ -1,15 +1,7 @@
-import {
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-  Timestamp,
-} from 'firebase/firestore';
+import { doc, getDoc, Timestamp } from 'firebase/firestore';
 
 import {
-  CACHE_POLICY,
   FEATURES,
-  PRODUCT_CACHE_SCHEMA_VERSION,
   SHARED_PRODUCT_CACHE_COLLECTION,
 } from '../config/features';
 import {
@@ -22,6 +14,11 @@ import {
   isProductCacheBarcodeValid,
   normalizeProductCacheBarcode,
 } from './db/productCache.repository';
+import {
+  enqueueRemoteProductCacheFoundWrite,
+  enqueueRemoteProductCacheNotFoundWrite,
+  getRemoteProductCacheWriteQueueDiagnostics,
+} from './productRemoteWriteQueue.service';
 
 type FirestoreProductCacheDocument = {
   barcode?: string;
@@ -63,6 +60,14 @@ export type RemoteProductCacheDiagnosticsSnapshot = {
   writeFeatureEnabled: boolean;
   readValidationEnabled: boolean;
   writeValidationEnabled: boolean;
+  queueSize: number;
+  readyQueueSize: number;
+  blockedQueueSize: number;
+  lifecycleAttached: boolean;
+  lastFlushAt: string | null;
+  lastFlushReason: string | null;
+  lastFlushError: string | null;
+  consecutiveFailureCount: number;
   lastReadFailure: string | null;
   lastWriteFailure: string | null;
 };
@@ -70,27 +75,6 @@ export type RemoteProductCacheDiagnosticsSnapshot = {
 let lastReadFailure: string | null = null;
 let lastWriteFailure: string | null = null;
 let hasLoggedReadValidationFailure = false;
-let hasLoggedWriteValidationFailure = false;
-
-const stripUndefinedDeep = <T>(value: T): T => {
-  if (Array.isArray(value)) {
-    return value.map((item) => stripUndefinedDeep(item)) as T;
-  }
-
-  if (value && typeof value === 'object') {
-    const result: Record<string, unknown> = {};
-
-    Object.entries(value as Record<string, unknown>).forEach(([key, entryValue]) => {
-      if (entryValue !== undefined) {
-        result[key] = stripUndefinedDeep(entryValue);
-      }
-    });
-
-    return result as T;
-  }
-
-  return value;
-};
 
 const toEpochMs = (value: unknown): number => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -156,6 +140,7 @@ const canUseRemoteRead = (): boolean => {
 
   if (!ready && !hasLoggedReadValidationFailure) {
     hasLoggedReadValidationFailure = true;
+    lastReadFailure = 'firebase_runtime_not_ready';
     console.warn('[ProductRemoteCache] firestore read disabled by runtime validation', {
       diagnostics: getFirebaseServicesDiagnosticsSnapshot(),
     });
@@ -164,33 +149,15 @@ const canUseRemoteRead = (): boolean => {
   return ready;
 };
 
-const canUseRemoteWrite = (): boolean => {
-  if (!FEATURES.productRepository.firestoreWriteEnabled) {
-    return false;
-  }
-
-  if (!FEATURES.firebase.runtimeValidationEnabled) {
-    return true;
-  }
-
-  if (!FEATURES.firebase.sharedCacheWriteValidationEnabled) {
-    return true;
-  }
-
-  const ready = isFirebaseServicesReady();
-
-  if (!ready && !hasLoggedWriteValidationFailure) {
-    hasLoggedWriteValidationFailure = true;
-    console.warn('[ProductRemoteCache] firestore write disabled by runtime validation', {
-      diagnostics: getFirebaseServicesDiagnosticsSnapshot(),
-    });
-  }
-
-  return ready;
+export const resetRemoteProductCacheDiagnostics = (): void => {
+  lastReadFailure = null;
+  lastWriteFailure = null;
+  hasLoggedReadValidationFailure = false;
 };
 
 export const getRemoteProductCacheDiagnostics =
-  (): RemoteProductCacheDiagnosticsSnapshot => {
+  async (): Promise<RemoteProductCacheDiagnosticsSnapshot> => {
+    const queueDiagnostics = await getRemoteProductCacheWriteQueueDiagnostics();
     const firebaseDiagnostics = getFirebaseServicesDiagnosticsSnapshot();
 
     return {
@@ -206,17 +173,19 @@ export const getRemoteProductCacheDiagnostics =
       writeValidationEnabled:
         FEATURES.firebase.runtimeValidationEnabled &&
         FEATURES.firebase.sharedCacheWriteValidationEnabled,
+      queueSize: queueDiagnostics.queueSize,
+      readyQueueSize: queueDiagnostics.readyQueueSize,
+      blockedQueueSize: queueDiagnostics.blockedQueueSize,
+      lifecycleAttached: queueDiagnostics.lifecycleAttached,
+      lastFlushAt: queueDiagnostics.lastFlushAt,
+      lastFlushReason: queueDiagnostics.lastFlushReason,
+      lastFlushError: queueDiagnostics.lastFlushError,
+      consecutiveFailureCount: queueDiagnostics.consecutiveFailureCount,
       lastReadFailure,
-      lastWriteFailure,
+      lastWriteFailure:
+        lastWriteFailure || queueDiagnostics.lastFlushError || null,
     };
   };
-
-export const resetRemoteProductCacheDiagnostics = (): void => {
-  lastReadFailure = null;
-  lastWriteFailure = null;
-  hasLoggedReadValidationFailure = false;
-  hasLoggedWriteValidationFailure = false;
-};
 
 export const getRemoteCachedProduct = async (
   barcode: string,
@@ -295,15 +264,13 @@ export const getRemoteCachedProduct = async (
 export const setRemoteCachedProductFound = async ({
   barcode,
   product,
-  ttlMs = CACHE_POLICY.sharedFoundTtlMs,
-  now = Date.now(),
 }: {
   barcode: string;
   product: Product;
   ttlMs?: number;
   now?: number;
 }): Promise<boolean> => {
-  if (!canUseRemoteWrite()) {
+  if (!FEATURES.productRepository.firestoreWriteEnabled) {
     return false;
   }
 
@@ -313,55 +280,29 @@ export const setRemoteCachedProductFound = async ({
     return false;
   }
 
-  const expiresAt = now + Math.max(1, ttlMs);
-  const productPayload = stripUndefinedDeep<Product>({
-    ...product,
-    barcode: normalizedBarcode,
-  });
-
   try {
-    const ref = doc(
-      firestoreDb,
-      SHARED_PRODUCT_CACHE_COLLECTION,
-      normalizedBarcode
-    );
+    const accepted = await enqueueRemoteProductCacheFoundWrite({
+      barcode: normalizedBarcode,
+      product,
+    });
 
-    await setDoc(
-      ref,
-      {
-        barcode: normalizedBarcode,
-        cacheStatus: 'found',
-        sourceName: product.sourceName ?? null,
-        productType: product.type ?? null,
-        productPayload,
-        schemaVersion: PRODUCT_CACHE_SCHEMA_VERSION,
-        fetchedAt: now,
-        expiresAt,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
-
-    lastWriteFailure = null;
-    return true;
+    lastWriteFailure = accepted ? null : 'remote_write_queue_rejected';
+    return accepted;
   } catch (error) {
     lastWriteFailure = toErrorMessage(error);
-    console.warn('[ProductRemoteCache] write(found) failed:', error);
+    console.warn('[ProductRemoteCache] queue(found) failed:', error);
     return false;
   }
 };
 
 export const setRemoteCachedProductNotFound = async ({
   barcode,
-  ttlMs = CACHE_POLICY.sharedNotFoundTtlMs,
-  now = Date.now(),
 }: {
   barcode: string;
   ttlMs?: number;
   now?: number;
 }): Promise<boolean> => {
-  if (!canUseRemoteWrite()) {
+  if (!FEATURES.productRepository.firestoreWriteEnabled) {
     return false;
   }
 
@@ -371,37 +312,16 @@ export const setRemoteCachedProductNotFound = async ({
     return false;
   }
 
-  const expiresAt = now + Math.max(1, ttlMs);
-
   try {
-    const ref = doc(
-      firestoreDb,
-      SHARED_PRODUCT_CACHE_COLLECTION,
-      normalizedBarcode
-    );
+    const accepted = await enqueueRemoteProductCacheNotFoundWrite({
+      barcode: normalizedBarcode,
+    });
 
-    await setDoc(
-      ref,
-      {
-        barcode: normalizedBarcode,
-        cacheStatus: 'not_found',
-        sourceName: null,
-        productType: null,
-        productPayload: null,
-        schemaVersion: PRODUCT_CACHE_SCHEMA_VERSION,
-        fetchedAt: now,
-        expiresAt,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
-
-    lastWriteFailure = null;
-    return true;
+    lastWriteFailure = accepted ? null : 'remote_write_queue_rejected';
+    return accepted;
   } catch (error) {
     lastWriteFailure = toErrorMessage(error);
-    console.warn('[ProductRemoteCache] write(not_found) failed:', error);
+    console.warn('[ProductRemoteCache] queue(not_found) failed:', error);
     return false;
   }
 };
