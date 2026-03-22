@@ -1,5 +1,8 @@
 import { Platform } from 'react-native';
 
+import { ADMOB_RUNTIME } from '../config/adRuntime';
+import { APP_RUNTIME } from '../config/appRuntime';
+
 type AdMobModuleType = typeof import('react-native-google-mobile-ads');
 
 let cachedModule: AdMobModuleType | null = null;
@@ -7,26 +10,13 @@ let cachedReason: string | null = null;
 let initStarted = false;
 let initCompleted = false;
 
-const ADS_RUNTIME_ENABLED = true;
-
-const isExpoGo = (): boolean => {
-  try {
-    // expo-constants varsa kullan
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const constants = require('expo-constants').default;
-    return constants?.executionEnvironment === 'storeClient';
-  } catch {
-    return false;
-  }
-};
-
 const loadModule = (): AdMobModuleType | null => {
-  if (!ADS_RUNTIME_ENABLED) {
+  if (!ADMOB_RUNTIME.enabled) {
     cachedReason = 'Ads runtime disabled.';
     return null;
   }
 
-  if (isExpoGo()) {
+  if (APP_RUNTIME.isExpoGo) {
     cachedReason =
       'Expo Go does not support react-native-google-mobile-ads. Use a dev build or release build.';
     return null;
@@ -48,21 +38,32 @@ const loadModule = (): AdMobModuleType | null => {
     cachedModule = mod;
     cachedReason = null;
     return cachedModule;
-  } catch (error: any) {
+  } catch (error: unknown) {
     cachedReason =
-      error?.message || 'react-native-google-mobile-ads could not be loaded.';
+      error instanceof Error
+        ? error.message
+        : 'react-native-google-mobile-ads could not be loaded.';
     return null;
   }
 };
 
 export const isAdMobAvailable = (): boolean => {
-  return !!loadModule();
+  return Boolean(loadModule());
 };
 
 export const getAdMobUnavailableReason = (): string => {
-  if (cachedReason) return cachedReason;
-  if (!ADS_RUNTIME_ENABLED) return 'Ads runtime disabled.';
-  if (isExpoGo()) return 'Expo Go does not support native ads module.';
+  if (cachedReason) {
+    return cachedReason;
+  }
+
+  if (!ADMOB_RUNTIME.enabled) {
+    return 'Ads runtime disabled.';
+  }
+
+  if (APP_RUNTIME.isExpoGo) {
+    return 'Expo Go does not support native ads module.';
+  }
+
   return 'Unknown reason.';
 };
 
@@ -133,12 +134,16 @@ export const initializeAdMob = async (): Promise<boolean> => {
 
 export const getAdMobRuntimeState = () => {
   return {
-    enabled: ADS_RUNTIME_ENABLED,
+    enabled: ADMOB_RUNTIME.enabled,
+    useTestIds: ADMOB_RUNTIME.useTestIds,
     platform: Platform.OS,
-    expoGo: isExpoGo(),
+    appEnvironment: APP_RUNTIME.appEnvironment,
+    expoGo: APP_RUNTIME.isExpoGo,
     available: isAdMobAvailable(),
     reason: getAdMobUnavailableReason(),
     initStarted,
     initCompleted,
+    hasAndroidAppId: Boolean(ADMOB_RUNTIME.appIds.android),
+    hasIosAppId: Boolean(ADMOB_RUNTIME.appIds.ios),
   };
 };
