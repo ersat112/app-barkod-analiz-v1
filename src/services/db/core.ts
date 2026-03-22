@@ -9,6 +9,7 @@ const db = SQLite.openDatabaseSync(DATABASE_NAME);
 
 export const TABLES = Object.freeze({
   HISTORY: 'history',
+  FAVORITES: 'favorites',
   PRODUCT_CACHE: PRODUCT_CACHE_TABLE_NAME,
 });
 

@@ -1,39 +1,18 @@
-import { getDatabase, safeText } from './core';
+import { TABLES, getDatabase, safeText } from './core';
+import { initDatabase } from './migrations';
 
 type FavoriteRow = {
   barcode: string;
 };
 
 const db = getDatabase();
-const FAVORITES_TABLE = 'favorites';
 
-let ensured = false;
-
-const ensureFavoritesTable = (): void => {
-  if (ensured) {
-    return;
-  }
-
-  db.execSync(`
-    CREATE TABLE IF NOT EXISTS ${FAVORITES_TABLE} (
-      barcode TEXT PRIMARY KEY NOT NULL,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-  `);
-
-  db.execSync(`
-    CREATE INDEX IF NOT EXISTS idx_favorites_updated_at
-    ON ${FAVORITES_TABLE}(updated_at DESC);
-  `);
-
-  ensured = true;
+export const ensureFavoritesTableReady = (): void => {
+  initDatabase();
 };
 
 export const getAllFavoriteBarcodes = (limit?: number): string[] => {
   try {
-    ensureFavoritesTable();
-
     const safeLimit =
       typeof limit === 'number' && Number.isFinite(limit) && limit > 0
         ? Math.min(Math.round(limit), 100)
@@ -42,14 +21,14 @@ export const getAllFavoriteBarcodes = (limit?: number): string[] => {
     const rows = safeLimit
       ? db.getAllSync<FavoriteRow>(
           `SELECT barcode
-           FROM ${FAVORITES_TABLE}
+           FROM ${TABLES.FAVORITES}
            ORDER BY datetime(updated_at) DESC, barcode ASC
            LIMIT ?`,
           [safeLimit]
         )
       : db.getAllSync<FavoriteRow>(
           `SELECT barcode
-           FROM ${FAVORITES_TABLE}
+           FROM ${TABLES.FAVORITES}
            ORDER BY datetime(updated_at) DESC, barcode ASC`
         );
 
@@ -66,8 +45,6 @@ export const getRecentFavoriteBarcodes = (limit = 8): string[] => {
 
 export const isFavoriteBarcode = (barcode: string): boolean => {
   try {
-    ensureFavoritesTable();
-
     const normalizedBarcode = safeText(barcode);
 
     if (!normalizedBarcode) {
@@ -76,7 +53,7 @@ export const isFavoriteBarcode = (barcode: string): boolean => {
 
     const row = db.getFirstSync<FavoriteRow>(
       `SELECT barcode
-       FROM ${FAVORITES_TABLE}
+       FROM ${TABLES.FAVORITES}
        WHERE barcode = ?
        LIMIT 1`,
       [normalizedBarcode]
@@ -91,8 +68,6 @@ export const isFavoriteBarcode = (barcode: string): boolean => {
 
 export const addFavoriteBarcode = (barcode: string): void => {
   try {
-    ensureFavoritesTable();
-
     const normalizedBarcode = safeText(barcode);
 
     if (!normalizedBarcode) {
@@ -100,7 +75,7 @@ export const addFavoriteBarcode = (barcode: string): void => {
     }
 
     db.runSync(
-      `INSERT INTO ${FAVORITES_TABLE} (
+      `INSERT INTO ${TABLES.FAVORITES} (
         barcode,
         created_at,
         updated_at
@@ -116,15 +91,13 @@ export const addFavoriteBarcode = (barcode: string): void => {
 
 export const removeFavoriteBarcode = (barcode: string): void => {
   try {
-    ensureFavoritesTable();
-
     const normalizedBarcode = safeText(barcode);
 
     if (!normalizedBarcode) {
       return;
     }
 
-    db.runSync(`DELETE FROM ${FAVORITES_TABLE} WHERE barcode = ?`, [normalizedBarcode]);
+    db.runSync(`DELETE FROM ${TABLES.FAVORITES} WHERE barcode = ?`, [normalizedBarcode]);
   } catch (error) {
     console.error('Favorite remove error:', error);
   }
@@ -150,10 +123,8 @@ export const toggleFavoriteBarcode = (barcode: string): boolean => {
 
 export const getFavoriteCount = (): number => {
   try {
-    ensureFavoritesTable();
-
     const row = db.getFirstSync<{ count: number }>(
-      `SELECT COUNT(*) as count FROM ${FAVORITES_TABLE}`
+      `SELECT COUNT(*) as count FROM ${TABLES.FAVORITES}`
     );
 
     return row?.count ?? 0;
@@ -165,8 +136,7 @@ export const getFavoriteCount = (): number => {
 
 export const clearAllFavorites = (): void => {
   try {
-    ensureFavoritesTable();
-    db.runSync(`DELETE FROM ${FAVORITES_TABLE}`);
+    db.runSync(`DELETE FROM ${TABLES.FAVORITES}`);
   } catch (error) {
     console.error('Favorites clear error:', error);
   }

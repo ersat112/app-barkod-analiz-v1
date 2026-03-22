@@ -1,6 +1,15 @@
-import { TABLES, applyDatabasePragmas, ensureColumn, getDatabase, getTableColumns, tableExists } from './core';
+import {
+  TABLES,
+  applyDatabasePragmas,
+  ensureColumn,
+  getDatabase,
+  getTableColumns,
+  tableExists,
+} from './core';
 
 const db = getDatabase();
+
+let initialized = false;
 
 const createHistoryTable = (): void => {
   db.execSync(`
@@ -35,6 +44,36 @@ const createHistoryTable = (): void => {
   db.execSync(`
     CREATE INDEX IF NOT EXISTS idx_history_score
     ON ${TABLES.HISTORY}(score);
+  `);
+
+  db.execSync(`
+    CREATE INDEX IF NOT EXISTS idx_history_barcode_created_at
+    ON ${TABLES.HISTORY}(barcode, created_at DESC, id DESC);
+  `);
+
+  db.execSync(`
+    CREATE INDEX IF NOT EXISTS idx_history_type_created_at
+    ON ${TABLES.HISTORY}(type, created_at DESC, id DESC);
+  `);
+};
+
+const createFavoritesTable = (): void => {
+  db.execSync(`
+    CREATE TABLE IF NOT EXISTS ${TABLES.FAVORITES} (
+      barcode TEXT PRIMARY KEY NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+
+  db.execSync(`
+    CREATE INDEX IF NOT EXISTS idx_favorites_updated_at
+    ON ${TABLES.FAVORITES}(updated_at DESC);
+  `);
+
+  db.execSync(`
+    CREATE INDEX IF NOT EXISTS idx_favorites_created_at
+    ON ${TABLES.FAVORITES}(created_at DESC);
   `);
 };
 
@@ -112,6 +151,7 @@ const migrateLegacyHistoryIfNeeded = (): void => {
       }
     });
 
+    createHistoryTable();
     return;
   }
 
@@ -168,6 +208,38 @@ const migrateLegacyHistoryIfNeeded = (): void => {
   `);
 
   db.execSync(`DROP TABLE IF EXISTS ${legacyTableName};`);
+};
+
+const migrateFavoritesIfNeeded = (): void => {
+  if (!tableExists(TABLES.FAVORITES)) {
+    createFavoritesTable();
+    return;
+  }
+
+  createFavoritesTable();
+
+  let columns = getTableColumns(TABLES.FAVORITES);
+
+  columns = ensureColumn(
+    TABLES.FAVORITES,
+    columns,
+    'created_at',
+    `ALTER TABLE ${TABLES.FAVORITES} ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP;`
+  );
+
+  ensureColumn(
+    TABLES.FAVORITES,
+    columns,
+    'updated_at',
+    `ALTER TABLE ${TABLES.FAVORITES} ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP;`
+  );
+
+  db.execSync(`
+    UPDATE ${TABLES.FAVORITES}
+    SET
+      created_at = COALESCE(created_at, CURRENT_TIMESTAMP),
+      updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP);
+  `);
 };
 
 const migrateProductCacheIfNeeded = (): void => {
@@ -262,12 +334,20 @@ const migrateProductCacheIfNeeded = (): void => {
 };
 
 export const initDatabase = (): void => {
+  if (initialized) {
+    return;
+  }
+
   try {
     applyDatabasePragmas();
     migrateLegacyHistoryIfNeeded();
+    migrateFavoritesIfNeeded();
     migrateProductCacheIfNeeded();
+    initialized = true;
     console.log('SQLite: Hazır.');
   } catch (error) {
+    initialized = false;
     console.error('SQLite Başlatma Hatası:', error);
+    throw error;
   }
 };
