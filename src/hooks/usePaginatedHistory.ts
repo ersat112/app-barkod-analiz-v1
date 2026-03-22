@@ -6,13 +6,101 @@ import {
   removeHistoryEntry,
   type HistoryFilterType,
 } from '../services/history.service';
-import {
-  groupHistoryEntriesByDate,
-  parseHistoryCreatedAt,
-  type HistorySection,
-} from '../types/history';
 
-export type { HistorySection };
+export type HistorySection = {
+  title: string;
+  rawDate: string;
+  data: HistoryEntry[];
+};
+
+const getLocalDateKey = (date = new Date()): string => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const parseCreatedAt = (createdAt?: string | null) => {
+  if (!createdAt) {
+    return { datePart: '', timePart: '--:--' };
+  }
+
+  const iso = createdAt.replace(' ', 'T');
+  const date = new Date(iso);
+
+  if (Number.isNaN(date.getTime())) {
+    const [datePart = '', timePart = ''] = createdAt.split(' ');
+    return {
+      datePart,
+      timePart: timePart ? timePart.slice(0, 5) : '--:--',
+    };
+  }
+
+  const datePart = `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
+  const timePart = `${`${date.getHours()}`.padStart(2, '0')}:${`${date.getMinutes()}`.padStart(2, '0')}`;
+
+  return { datePart, timePart };
+};
+
+const formatDateTitle = (
+  rawDate: string,
+  t: (key: string, fallback: string) => string
+): string => {
+  const today = getLocalDateKey();
+  const yesterday = getLocalDateKey(new Date(Date.now() - 86400000));
+
+  if (rawDate === today) return t('today', 'Bugün');
+  if (rawDate === yesterday) return t('yesterday', 'Dün');
+
+  return rawDate;
+};
+
+const groupHistoryByDate = (
+  data: HistoryEntry[],
+  t: (key: string, fallback: string) => string
+): HistorySection[] => {
+  const grouped = data.reduce<Record<string, HistorySection>>((acc, item) => {
+    const { datePart } = parseCreatedAt(item.created_at);
+    const rawDate = datePart || 'unknown-date';
+
+    if (!acc[rawDate]) {
+      acc[rawDate] = {
+        title: formatDateTitle(rawDate, t),
+        rawDate,
+        data: [],
+      };
+    }
+
+    acc[rawDate].data.push(item);
+    return acc;
+  }, {});
+
+  return Object.values(grouped).sort((a, b) => b.rawDate.localeCompare(a.rawDate));
+};
+
+const areHistoryEntriesEqual = (
+  left: HistoryEntry[],
+  right: HistoryEntry[]
+): boolean => {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  for (let index = 0; index < left.length; index += 1) {
+    const current = left[index];
+    const next = right[index];
+
+    if (
+      current.id !== next.id ||
+      current.barcode !== next.barcode ||
+      current.updated_at !== next.updated_at
+    ) {
+      return false;
+    }
+  }
+
+  return true;
+};
 
 export const usePaginatedHistory = (
   t: (key: string, fallback: string) => string
@@ -34,11 +122,7 @@ export const usePaginatedHistory = (
   const searchQueryRef = useRef('');
   const selectedTypeRef = useRef<HistoryFilterType>('all');
 
-  const sections = useMemo(
-    () => groupHistoryEntriesByDate(items, t),
-    [items, t]
-  );
-
+  const sections = useMemo(() => groupHistoryByDate(items, t), [items, t]);
   const hasActiveFilters = useMemo(() => {
     return searchQuery.trim().length > 0 || selectedType !== 'all';
   }, [searchQuery, selectedType]);
@@ -64,7 +148,14 @@ export const usePaginatedHistory = (
         })
       );
 
-      setItems(page.items);
+      setItems((current) => {
+        if (areHistoryEntriesEqual(current, page.items)) {
+          return current;
+        }
+
+        return page.items;
+      });
+
       setHasMore(page.hasMore);
       offsetRef.current = page.nextOffset;
     } catch (error) {
@@ -106,7 +197,20 @@ export const usePaginatedHistory = (
         })
       );
 
-      setItems((prev) => [...prev, ...page.items]);
+      setItems((prev) => {
+        if (!page.items.length) {
+          return prev;
+        }
+
+        const merged = [...prev, ...page.items];
+
+        if (areHistoryEntriesEqual(prev, merged)) {
+          return prev;
+        }
+
+        return merged;
+      });
+
       setHasMore(page.hasMore);
       offsetRef.current = page.nextOffset;
     } catch (error) {
@@ -126,16 +230,28 @@ export const usePaginatedHistory = (
   );
 
   const setSearchQuery = useCallback((value: string) => {
+    if (searchQueryRef.current === value) {
+      return;
+    }
+
     searchQueryRef.current = value;
     setSearchQueryState(value);
   }, []);
 
   const setSelectedType = useCallback((value: HistoryFilterType) => {
+    if (selectedTypeRef.current === value) {
+      return;
+    }
+
     selectedTypeRef.current = value;
     setSelectedTypeState(value);
   }, []);
 
   const clearFilters = useCallback(() => {
+    if (searchQueryRef.current === '' && selectedTypeRef.current === 'all') {
+      return;
+    }
+
     searchQueryRef.current = '';
     selectedTypeRef.current = 'all';
     setSearchQueryState('');
@@ -169,6 +285,6 @@ export const usePaginatedHistory = (
     setSearchQuery,
     setSelectedType,
     clearFilters,
-    parseCreatedAt: parseHistoryCreatedAt,
+    parseCreatedAt,
   };
 };
