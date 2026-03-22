@@ -20,6 +20,10 @@ import type {
   ProductRepositoryLookupMeta,
   ProductRepositorySource,
 } from '../types/productRepository';
+import {
+  canWriteAnalyticsEvents,
+  getFirebaseAccessSnapshot,
+} from './firebaseAccess.service';
 
 const QUEUE_SCHEMA_VERSION = 1;
 const MAX_QUEUE_LENGTH = 100;
@@ -192,6 +196,9 @@ export const analyticsService = {
     }
 
     const installationId = await getOrCreateInstallationId();
+    const authUid = FEATURES.firebase.authenticatedUserRequired
+      ? auth.currentUser?.uid ?? null
+      : auth.currentUser?.uid ?? null;
 
     const record: AnalyticsEventRecord = {
       eventId: createId('evt'),
@@ -203,6 +210,7 @@ export const analyticsService = {
         sessionId,
         platform: Platform.OS,
         environment: getEnvironmentLabel(),
+        authUid,
       },
     };
 
@@ -276,14 +284,25 @@ export const analyticsService = {
       return 0;
     }
 
+    const canWrite = await canWriteAnalyticsEvents();
+
+    if (!canWrite) {
+      return 0;
+    }
+
     if (flushPromise) {
       return flushPromise;
     }
 
     flushPromise = (async () => {
       const state = await readQueueState();
+      const accessSnapshot = await getFirebaseAccessSnapshot();
 
       if (!state.items.length) {
+        return 0;
+      }
+
+      if (!accessSnapshot.authUid) {
         return 0;
       }
 
@@ -304,6 +323,7 @@ export const analyticsService = {
             clientCreatedAt: item.createdAt,
             receivedAt: serverTimestamp(),
             payload: item.payload,
+            authUid: accessSnapshot.authUid,
           });
 
           sentCount += 1;
@@ -347,3 +367,5 @@ export const analyticsService = {
     }
   },
 };
+
+import { auth } from '../config/firebase';

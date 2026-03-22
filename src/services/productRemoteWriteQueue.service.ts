@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   AppState,
+  Platform,
   type AppStateStatus,
   type NativeEventSubscription,
 } from 'react-native';
@@ -13,9 +14,12 @@ import {
   REMOTE_PRODUCT_CACHE_WRITE_QUEUE_STORAGE_KEY,
   SHARED_PRODUCT_CACHE_COLLECTION,
 } from '../config/features';
-import { FIREBASE_RUNTIME } from '../config/firebaseRuntime';
 import { db as firestoreDb } from '../config/firebase';
 import { analyticsService } from './analytics.service';
+import {
+  canWriteSharedProductCache,
+  getFirebaseAccessSnapshot,
+} from './firebaseAccess.service';
 import type { Product } from '../utils/analysis';
 
 type QueueFlushReason =
@@ -64,6 +68,11 @@ export type RemoteWriteQueueDiagnostics = {
   runtimeReady: boolean;
   runtimeSource: string;
   projectId: string;
+  isAuthenticated: boolean;
+  authUid: string | null;
+  sharedCacheWriteAllowed: boolean;
+  rolloutSource: string;
+  rolloutVersion: number;
   lastFlushAt: string | null;
   lastFlushReason: QueueFlushReason | null;
   lastFlushError: string | null;
@@ -124,39 +133,6 @@ const stripUndefinedDeep = <T>(value: T): T => {
   }
 
   return value;
-};
-
-const isFirebaseRuntimeReady = (): boolean => {
-  const config = FIREBASE_RUNTIME.config;
-
-  return Boolean(
-    config.apiKey?.trim() &&
-      config.authDomain?.trim() &&
-      config.projectId?.trim() &&
-      config.storageBucket?.trim() &&
-      config.messagingSenderId?.trim() &&
-      config.appId?.trim()
-  );
-};
-
-const canAcceptWrites = (): boolean => {
-  return FEATURES.productRepository.firestoreWriteEnabled;
-};
-
-const canFlushWrites = (): boolean => {
-  if (!FEATURES.productRepository.firestoreWriteEnabled) {
-    return false;
-  }
-
-  if (!FEATURES.firebase.runtimeValidationEnabled) {
-    return true;
-  }
-
-  if (!FEATURES.firebase.sharedCacheWriteValidationEnabled) {
-    return true;
-  }
-
-  return isFirebaseRuntimeReady();
 };
 
 const getRetryDelayMs = (attemptCount: number): number => {
@@ -298,7 +274,11 @@ const trackItemFailed = (item: RemoteWriteQueueItem, error: string): void => {
   );
 };
 
-const writeFoundItem = async (item: QueueFoundItem, now: number): Promise<void> => {
+const writeFoundItem = async (
+  item: QueueFoundItem,
+  now: number,
+  authUid: string
+): Promise<void> => {
   const expiresAt = now + Math.max(1, item.ttlMs);
 
   const productPayload = stripUndefinedDeep<Product>({
@@ -319,8 +299,9 @@ const writeFoundItem = async (item: QueueFoundItem, now: number): Promise<void> 
       schemaVersion: PRODUCT_CACHE_SCHEMA_VERSION,
       fetchedAt: now,
       expiresAt,
-      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      writerUid: authUid,
+      writerPlatform: Platform.OS,
     },
     { merge: true }
   );
@@ -328,7 +309,8 @@ const writeFoundItem = async (item: QueueFoundItem, now: number): Promise<void> 
 
 const writeNotFoundItem = async (
   item: QueueNotFoundItem,
-  now: number
+  now: number,
+  authUid: string
 ): Promise<void> => {
   const expiresAt = now + Math.max(1, item.ttlMs);
   const ref = doc(firestoreDb, SHARED_PRODUCT_CACHE_COLLECTION, item.barcode);
@@ -344,8 +326,9 @@ const writeNotFoundItem = async (
       schemaVersion: PRODUCT_CACHE_SCHEMA_VERSION,
       fetchedAt: now,
       expiresAt,
-      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      writerUid: authUid,
+      writerPlatform: Platform.OS,
     },
     { merge: true }
   );
@@ -363,9 +346,22 @@ const flushInternal = async (reason: QueueFlushReason): Promise<number> => {
     return 0;
   }
 
-  if (!canFlushWrites()) {
+  const accessSnapshot = await getFirebaseAccessSnapshot();
+
+  if (!accessSnapshot.sharedCacheWriteAllowed) {
     lastFlushAt = nowIso();
-    lastFlushError = 'firebase_runtime_not_ready';
+    lastFlushError = 'shared_cache_write_not_allowed';
+    trackFlushFailed({
+      reason,
+      queueSize: queue.length,
+      error: lastFlushError,
+    });
+    return 0;
+  }
+
+  if (!accessSnapshot.authUid) {
+    lastFlushAt = nowIso();
+    lastFlushError = 'firebase_auth_uid_missing';
     trackFlushFailed({
       reason,
       queueSize: queue.length,
@@ -391,9 +387,9 @@ const flushInternal = async (reason: QueueFlushReason): Promise<number> => {
   for (const item of eligible) {
     try {
       if (item.kind === 'found') {
-        await writeFoundItem(item, now);
+        await writeFoundItem(item, now, accessSnapshot.authUid);
       } else {
-        await writeNotFoundItem(item, now);
+        await writeNotFoundItem(item, now, accessSnapshot.authUid);
       }
 
       nextQueue = nextQueue.filter((queued) => queued.id !== item.id);
@@ -500,7 +496,9 @@ export const enqueueRemoteProductCacheFoundWrite = async ({
   product: Product;
   ttlMs?: number;
 }): Promise<boolean> => {
-  if (!canAcceptWrites()) {
+  const canWrite = await canWriteSharedProductCache();
+
+  if (!FEATURES.productRepository.firestoreWriteEnabled || !canWrite) {
     return false;
   }
 
@@ -533,7 +531,9 @@ export const enqueueRemoteProductCacheNotFoundWrite = async ({
   barcode: string;
   ttlMs?: number;
 }): Promise<boolean> => {
-  if (!canAcceptWrites()) {
+  const canWrite = await canWriteSharedProductCache();
+
+  if (!FEATURES.productRepository.firestoreWriteEnabled || !canWrite) {
     return false;
   }
 
@@ -582,6 +582,7 @@ export const getRemoteProductCacheWriteQueueDiagnostics =
     const now = Date.now();
     const readyQueueSize = queue.filter((item) => item.nextAttemptAt <= now).length;
     const blockedQueueSize = Math.max(0, queue.length - readyQueueSize);
+    const accessSnapshot = await getFirebaseAccessSnapshot();
 
     return {
       fetchedAt: nowIso(),
@@ -589,9 +590,14 @@ export const getRemoteProductCacheWriteQueueDiagnostics =
       readyQueueSize,
       blockedQueueSize,
       lifecycleAttached,
-      runtimeReady: isFirebaseRuntimeReady(),
-      runtimeSource: FIREBASE_RUNTIME.source,
-      projectId: FIREBASE_RUNTIME.config.projectId?.trim() || '',
+      runtimeReady: accessSnapshot.runtimeReady,
+      runtimeSource: accessSnapshot.runtimeSource,
+      projectId: accessSnapshot.projectId,
+      isAuthenticated: accessSnapshot.isAuthenticated,
+      authUid: accessSnapshot.authUid,
+      sharedCacheWriteAllowed: accessSnapshot.sharedCacheWriteAllowed,
+      rolloutSource: accessSnapshot.firestoreRuntimeConfigSource,
+      rolloutVersion: accessSnapshot.firestoreRuntimeConfigVersion,
       lastFlushAt,
       lastFlushReason,
       lastFlushError,

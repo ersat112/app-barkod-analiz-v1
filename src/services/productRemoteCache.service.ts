@@ -1,15 +1,10 @@
-import {
-  doc,
-  getDoc,
-  Timestamp,
-} from 'firebase/firestore';
+import { doc, getDoc, Timestamp } from 'firebase/firestore';
 
 import {
   FEATURES,
   SHARED_PRODUCT_CACHE_COLLECTION,
 } from '../config/features';
 import { db as firestoreDb } from '../config/firebase';
-import { FIREBASE_RUNTIME } from '../config/firebaseRuntime';
 import type { Product, ProductSource, ProductType } from '../utils/analysis';
 import {
   isProductCacheBarcodeValid,
@@ -20,6 +15,11 @@ import {
   enqueueRemoteProductCacheNotFoundWrite,
   getRemoteProductCacheWriteQueueDiagnostics,
 } from './productRemoteWriteQueue.service';
+import {
+  canReadSharedProductCache,
+  canWriteSharedProductCache,
+  getFirebaseAccessSnapshot,
+} from './firebaseAccess.service';
 
 type FirestoreProductCacheDocument = {
   barcode?: string;
@@ -32,6 +32,8 @@ type FirestoreProductCacheDocument = {
   expiresAt?: number | null;
   createdAt?: unknown;
   updatedAt?: unknown;
+  writerUid?: string | null;
+  writerPlatform?: string | null;
 };
 
 export type RemoteProductCacheHit =
@@ -57,10 +59,16 @@ export type RemoteProductCacheDiagnosticsSnapshot = {
   runtimeReady: boolean;
   runtimeSource: string;
   projectId: string;
+  isAuthenticated: boolean;
+  authUid: string | null;
   readFeatureEnabled: boolean;
   writeFeatureEnabled: boolean;
   readValidationEnabled: boolean;
   writeValidationEnabled: boolean;
+  sharedCacheReadAllowed: boolean;
+  sharedCacheWriteAllowed: boolean;
+  rolloutSource: string;
+  rolloutVersion: number;
   queueSize: number;
   readyQueueSize: number;
   blockedQueueSize: number;
@@ -75,7 +83,6 @@ export type RemoteProductCacheDiagnosticsSnapshot = {
 
 let lastReadFailure: string | null = null;
 let lastWriteFailure: string | null = null;
-let hasLoggedReadValidationFailure = false;
 
 const toEpochMs = (value: unknown): number => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -124,61 +131,23 @@ const toErrorMessage = (error: unknown): string => {
   return 'unknown_remote_cache_error';
 };
 
-const isFirebaseRuntimeReady = (): boolean => {
-  const config = FIREBASE_RUNTIME.config;
-
-  return Boolean(
-    config.apiKey?.trim() &&
-      config.authDomain?.trim() &&
-      config.projectId?.trim() &&
-      config.storageBucket?.trim() &&
-      config.messagingSenderId?.trim() &&
-      config.appId?.trim()
-  );
-};
-
-const canUseRemoteRead = (): boolean => {
-  if (!FEATURES.productRepository.firestoreReadEnabled) {
-    return false;
-  }
-
-  if (!FEATURES.firebase.runtimeValidationEnabled) {
-    return true;
-  }
-
-  if (!FEATURES.firebase.sharedCacheReadValidationEnabled) {
-    return true;
-  }
-
-  const ready = isFirebaseRuntimeReady();
-
-  if (!ready && !hasLoggedReadValidationFailure) {
-    hasLoggedReadValidationFailure = true;
-    lastReadFailure = 'firebase_runtime_not_ready';
-    console.warn('[ProductRemoteCache] firestore read disabled by runtime validation', {
-      projectId: FIREBASE_RUNTIME.config.projectId,
-      source: FIREBASE_RUNTIME.source,
-    });
-  }
-
-  return ready;
-};
-
 export const resetRemoteProductCacheDiagnostics = (): void => {
   lastReadFailure = null;
   lastWriteFailure = null;
-  hasLoggedReadValidationFailure = false;
 };
 
 export const getRemoteProductCacheDiagnostics =
   async (): Promise<RemoteProductCacheDiagnosticsSnapshot> => {
     const queueDiagnostics = await getRemoteProductCacheWriteQueueDiagnostics();
+    const accessSnapshot = await getFirebaseAccessSnapshot();
 
     return {
       fetchedAt: new Date().toISOString(),
-      runtimeReady: queueDiagnostics.runtimeReady,
-      runtimeSource: queueDiagnostics.runtimeSource,
-      projectId: queueDiagnostics.projectId,
+      runtimeReady: accessSnapshot.runtimeReady,
+      runtimeSource: accessSnapshot.runtimeSource,
+      projectId: accessSnapshot.projectId,
+      isAuthenticated: accessSnapshot.isAuthenticated,
+      authUid: accessSnapshot.authUid,
       readFeatureEnabled: FEATURES.productRepository.firestoreReadEnabled,
       writeFeatureEnabled: FEATURES.productRepository.firestoreWriteEnabled,
       readValidationEnabled:
@@ -187,6 +156,10 @@ export const getRemoteProductCacheDiagnostics =
       writeValidationEnabled:
         FEATURES.firebase.runtimeValidationEnabled &&
         FEATURES.firebase.sharedCacheWriteValidationEnabled,
+      sharedCacheReadAllowed: accessSnapshot.sharedCacheReadAllowed,
+      sharedCacheWriteAllowed: accessSnapshot.sharedCacheWriteAllowed,
+      rolloutSource: accessSnapshot.firestoreRuntimeConfigSource,
+      rolloutVersion: accessSnapshot.firestoreRuntimeConfigVersion,
       queueSize: queueDiagnostics.queueSize,
       readyQueueSize: queueDiagnostics.readyQueueSize,
       blockedQueueSize: queueDiagnostics.blockedQueueSize,
@@ -204,7 +177,9 @@ export const getRemoteCachedProduct = async (
   barcode: string,
   now = Date.now()
 ): Promise<RemoteProductCacheHit | null> => {
-  if (!canUseRemoteRead()) {
+  const canRead = await canReadSharedProductCache();
+
+  if (!canRead) {
     return null;
   }
 
@@ -284,7 +259,9 @@ export const setRemoteCachedProductFound = async ({
   ttlMs?: number;
   now?: number;
 }): Promise<boolean> => {
-  if (!FEATURES.productRepository.firestoreWriteEnabled) {
+  const canWrite = await canWriteSharedProductCache();
+
+  if (!FEATURES.productRepository.firestoreWriteEnabled || !canWrite) {
     return false;
   }
 
@@ -318,7 +295,9 @@ export const setRemoteCachedProductNotFound = async ({
   ttlMs?: number;
   now?: number;
 }): Promise<boolean> => {
-  if (!FEATURES.productRepository.firestoreWriteEnabled) {
+  const canWrite = await canWriteSharedProductCache();
+
+  if (!FEATURES.productRepository.firestoreWriteEnabled || !canWrite) {
     return false;
   }
 
