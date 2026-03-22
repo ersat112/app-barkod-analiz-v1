@@ -5,6 +5,8 @@ export const MISSING_PRODUCT_CONTRIBUTIONS_COLLECTION =
 export const MISSING_PRODUCT_DRAFTS_STORAGE_KEY =
   'erenesal_missing_product_drafts' as const;
 export const PRODUCT_CACHE_SCHEMA_VERSION = 1 as const;
+export const REMOTE_PRODUCT_CACHE_WRITE_QUEUE_STORAGE_KEY =
+  'erenesal_remote_product_cache_write_queue_v1' as const;
 
 export const AD_REMOTE_POLICY_COLLECTION = 'runtime_config' as const;
 export const AD_REMOTE_POLICY_DOCUMENT = 'ad_policy' as const;

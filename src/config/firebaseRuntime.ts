@@ -29,7 +29,7 @@ export type FirebaseRuntimeDiagnosticsSnapshot = {
   };
 };
 
-export const FIREBASE_FALLBACK_CONFIG: FirebaseOptions = Object.freeze({
+const FALLBACK_FIREBASE_CONFIG: FirebaseOptions = Object.freeze({
   apiKey: 'AIzaSyCGQQASVvLt9XbXOt2GSb3Vlg5gf95IosU',
   authDomain: 'barkodanaliz-5ed4b.firebaseapp.com',
   projectId: 'barkodanaliz-5ed4b',
@@ -41,27 +41,27 @@ export const FIREBASE_FALLBACK_CONFIG: FirebaseOptions = Object.freeze({
 const runtimeConfig: FirebaseOptions = Object.freeze({
   apiKey: getEnvString(
     'EXPO_PUBLIC_FIREBASE_API_KEY',
-    FIREBASE_FALLBACK_CONFIG.apiKey ?? ''
+    FALLBACK_FIREBASE_CONFIG.apiKey ?? ''
   ),
   authDomain: getEnvString(
     'EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN',
-    FIREBASE_FALLBACK_CONFIG.authDomain ?? ''
+    FALLBACK_FIREBASE_CONFIG.authDomain ?? ''
   ),
   projectId: getEnvString(
     'EXPO_PUBLIC_FIREBASE_PROJECT_ID',
-    FIREBASE_FALLBACK_CONFIG.projectId ?? ''
+    FALLBACK_FIREBASE_CONFIG.projectId ?? ''
   ),
   storageBucket: getEnvString(
     'EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET',
-    FIREBASE_FALLBACK_CONFIG.storageBucket ?? ''
+    FALLBACK_FIREBASE_CONFIG.storageBucket ?? ''
   ),
   messagingSenderId: getEnvString(
     'EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID',
-    FIREBASE_FALLBACK_CONFIG.messagingSenderId ?? ''
+    FALLBACK_FIREBASE_CONFIG.messagingSenderId ?? ''
   ),
   appId: getEnvString(
     'EXPO_PUBLIC_FIREBASE_APP_ID',
-    FIREBASE_FALLBACK_CONFIG.appId ?? ''
+    FALLBACK_FIREBASE_CONFIG.appId ?? ''
   ),
 });
 
@@ -74,8 +74,6 @@ const hasRuntimeOverrides = [
   'EXPO_PUBLIC_FIREBASE_APP_ID',
 ].some((key) => Boolean(process.env[key]?.trim()));
 
-const source: FirebaseRuntimeSource = hasRuntimeOverrides ? 'env_override' : 'fallback';
-
 const configPresence = Object.freeze({
   apiKey: Boolean(runtimeConfig.apiKey?.trim()),
   authDomain: Boolean(runtimeConfig.authDomain?.trim()),
@@ -86,30 +84,20 @@ const configPresence = Object.freeze({
 });
 
 const missingKeys = Object.entries(configPresence)
-  .filter(([, value]) => !value)
+  .filter(([, exists]) => !exists)
   .map(([key]) => key);
 
 const isConfigComplete = missingKeys.length === 0;
 const hasInvalidRuntimeOverride = hasRuntimeOverrides && !isConfigComplete;
 
 const effectiveConfig: FirebaseOptions = hasInvalidRuntimeOverride
-  ? FIREBASE_FALLBACK_CONFIG
+  ? FALLBACK_FIREBASE_CONFIG
   : runtimeConfig;
 
+const source: FirebaseRuntimeSource = hasRuntimeOverrides ? 'env_override' : 'fallback';
 const effectiveSource: FirebaseRuntimeEffectiveSource = hasInvalidRuntimeOverride
   ? 'fallback_recovery'
   : source;
-
-const effectiveConfigPresence = Object.freeze({
-  apiKey: Boolean(effectiveConfig.apiKey?.trim()),
-  authDomain: Boolean(effectiveConfig.authDomain?.trim()),
-  projectId: Boolean(effectiveConfig.projectId?.trim()),
-  storageBucket: Boolean(effectiveConfig.storageBucket?.trim()),
-  messagingSenderId: Boolean(effectiveConfig.messagingSenderId?.trim()),
-  appId: Boolean(effectiveConfig.appId?.trim()),
-});
-
-const isEffectiveConfigComplete = Object.values(effectiveConfigPresence).every(Boolean);
 
 export const FIREBASE_RUNTIME = Object.freeze({
   source,
@@ -120,26 +108,34 @@ export const FIREBASE_RUNTIME = Object.freeze({
   hasRuntimeOverrides,
   hasInvalidRuntimeOverride,
   isConfigComplete,
-  isEffectiveConfigComplete,
+  isEffectiveConfigComplete: Boolean(
+    effectiveConfig.apiKey?.trim() &&
+      effectiveConfig.authDomain?.trim() &&
+      effectiveConfig.projectId?.trim() &&
+      effectiveConfig.storageBucket?.trim() &&
+      effectiveConfig.messagingSenderId?.trim() &&
+      effectiveConfig.appId?.trim()
+  ),
   missingKeys,
 });
 
-export function isFirebaseRuntimeReady(): boolean {
+export const isFirebaseRuntimeReady = (): boolean => {
   return FIREBASE_RUNTIME.isEffectiveConfigComplete;
-}
+};
 
-export function getFirebaseRuntimeDiagnosticsSnapshot(): FirebaseRuntimeDiagnosticsSnapshot {
-  return {
-    fetchedAt: new Date().toISOString(),
-    source: FIREBASE_RUNTIME.source,
-    effectiveSource: FIREBASE_RUNTIME.effectiveSource,
-    authPersistenceEnabled: FIREBASE_RUNTIME.authPersistenceEnabled,
-    hasRuntimeOverrides: FIREBASE_RUNTIME.hasRuntimeOverrides,
-    hasInvalidRuntimeOverride: FIREBASE_RUNTIME.hasInvalidRuntimeOverride,
-    isConfigComplete: FIREBASE_RUNTIME.isConfigComplete,
-    isEffectiveConfigComplete: FIREBASE_RUNTIME.isEffectiveConfigComplete,
-    missingKeys: [...FIREBASE_RUNTIME.missingKeys],
-    projectId: FIREBASE_RUNTIME.effectiveConfig.projectId?.trim() || '',
-    configPresence,
+export const getFirebaseRuntimeDiagnosticsSnapshot =
+  (): FirebaseRuntimeDiagnosticsSnapshot => {
+    return {
+      fetchedAt: new Date().toISOString(),
+      source: FIREBASE_RUNTIME.source,
+      effectiveSource: FIREBASE_RUNTIME.effectiveSource,
+      authPersistenceEnabled: FIREBASE_RUNTIME.authPersistenceEnabled,
+      hasRuntimeOverrides: FIREBASE_RUNTIME.hasRuntimeOverrides,
+      hasInvalidRuntimeOverride: FIREBASE_RUNTIME.hasInvalidRuntimeOverride,
+      isConfigComplete: FIREBASE_RUNTIME.isConfigComplete,
+      isEffectiveConfigComplete: FIREBASE_RUNTIME.isEffectiveConfigComplete,
+      missingKeys: [...FIREBASE_RUNTIME.missingKeys],
+      projectId: FIREBASE_RUNTIME.effectiveConfig.projectId?.trim() || '',
+      configPresence,
+    };
   };
-}

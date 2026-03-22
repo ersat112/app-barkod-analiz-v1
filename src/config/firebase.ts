@@ -43,20 +43,21 @@ const auth: Auth = createFirebaseAuth(app);
 const db: Firestore = getFirestore(app);
 const storage: FirebaseStorage = getStorage(app);
 
-function getFirebaseServicesDiagnosticsSnapshot(): FirebaseServicesDiagnosticsSnapshot {
-  const runtimeSnapshot = getFirebaseRuntimeDiagnosticsSnapshot();
-
-  return {
-    ...runtimeSnapshot,
-    appName: app.name,
-    firestoreEnabled: isFirebaseRuntimeReady(),
-    storageEnabled: isFirebaseRuntimeReady(),
-  };
-}
-
-function isFirebaseServicesReady(): boolean {
+const isFirebaseServicesReady = (): boolean => {
   return isFirebaseRuntimeReady();
-}
+};
+
+const getFirebaseServicesDiagnosticsSnapshot =
+  (): FirebaseServicesDiagnosticsSnapshot => {
+    const runtimeSnapshot = getFirebaseRuntimeDiagnosticsSnapshot();
+
+    return {
+      ...runtimeSnapshot,
+      appName: app.name,
+      firestoreEnabled: isFirebaseServicesReady(),
+      storageEnabled: isFirebaseServicesReady(),
+    };
+  };
 
 export {
   app,
