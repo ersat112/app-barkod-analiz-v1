@@ -30,21 +30,38 @@ const ensureFavoritesTable = (): void => {
   ensured = true;
 };
 
-export const getAllFavoriteBarcodes = (): string[] => {
+export const getAllFavoriteBarcodes = (limit?: number): string[] => {
   try {
     ensureFavoritesTable();
 
-    const rows = db.getAllSync<FavoriteRow>(
-      `SELECT barcode
-       FROM ${FAVORITES_TABLE}
-       ORDER BY datetime(updated_at) DESC, barcode ASC`
-    );
+    const safeLimit =
+      typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.round(limit), 100)
+        : null;
+
+    const rows = safeLimit
+      ? db.getAllSync<FavoriteRow>(
+          `SELECT barcode
+           FROM ${FAVORITES_TABLE}
+           ORDER BY datetime(updated_at) DESC, barcode ASC
+           LIMIT ?`,
+          [safeLimit]
+        )
+      : db.getAllSync<FavoriteRow>(
+          `SELECT barcode
+           FROM ${FAVORITES_TABLE}
+           ORDER BY datetime(updated_at) DESC, barcode ASC`
+        );
 
     return rows.map((row) => row.barcode);
   } catch (error) {
     console.error('Favorites read error:', error);
     return [];
   }
+};
+
+export const getRecentFavoriteBarcodes = (limit = 8): string[] => {
+  return getAllFavoriteBarcodes(limit);
 };
 
 export const isFavoriteBarcode = (barcode: string): boolean => {
