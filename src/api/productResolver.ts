@@ -1,4 +1,7 @@
-import type { Product } from '../utils/analysis';
+import type {
+  ProductRepositoryLookupResult,
+  ProductRepositoryResolveResult,
+} from '../types/productRepository';
 import { FEATURES } from '../config/features';
 import { fetchFoodProduct } from './foodApi';
 import { fetchBeautyProduct } from './beautyApi';
@@ -6,11 +9,7 @@ import {
   clearProductRepositoryRuntimeState,
   invalidateProductRepositoryBarcode,
   resolveProductFromRepository,
-} from '../services/productRepository.service';
-import type {
-  ProductRepositoryLookupResult,
-  ProductRepositoryResolveResult,
-} from '../types/productRepository';
+} from '../services/productRepository';
 
 export type ProductLookupResult = ProductRepositoryLookupResult;
 
@@ -94,7 +93,7 @@ export const fetchProductByBarcode = async (
     return tryFetchProductLegacy(barcode);
   }
 
-  const repositoryResult = await resolveProductFromRepository(barcode);
+  const repositoryResult = await resolveProductFromRepository(barcode, {});
   return mapRepositoryResultToLookupResult(repositoryResult);
 };
 
