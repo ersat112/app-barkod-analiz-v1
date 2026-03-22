@@ -1,0 +1,235 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function firestoreRolloutPath() {
+      return /databases/$(database)/documents/runtime_config/firestore_rollout;
+    }
+
+    function firestoreRolloutExists() {
+      return exists(firestoreRolloutPath());
+    }
+
+    function allowClientSharedCacheWrites() {
+      return firestoreRolloutExists()
+        && get(firestoreRolloutPath()).data.allowClientSharedCacheWrites == true;
+    }
+
+    function allowClientSharedCacheReads() {
+      return firestoreRolloutExists()
+        && get(firestoreRolloutPath()).data.allowSharedCacheReads == true;
+    }
+
+    function allowClientAnalyticsWrites() {
+      return !firestoreRolloutExists()
+        || get(firestoreRolloutPath()).data.allowClientAnalyticsWrites == true;
+    }
+
+    function allowMissingProductContributionWrites() {
+      return firestoreRolloutExists()
+        && get(firestoreRolloutPath()).data.allowMissingProductContributionWrites == true;
+    }
+
+    function allowRuntimeConfigRead(docId) {
+      return isSignedIn() && (docId == 'ad_policy' || docId == 'firestore_rollout');
+    }
+
+    function isValidBarcodeId(barcode) {
+      return barcode is string && barcode.matches('^[0-9]{8,14}$');
+    }
+
+    function isAllowedPlatform(value) {
+      return value is string
+        && (value == 'ios' || value == 'android' || value == 'web' || value == 'native');
+    }
+
+    function isAllowedEnvironment(value) {
+      return value is string
+        && (value == 'development' || value == 'production');
+    }
+
+    function isOptionalString(value) {
+      return value == null || value is string;
+    }
+
+    function isOptionalNumber(value) {
+      return value == null || value is int || value is float;
+    }
+
+    function isOptionalTimestamp(value) {
+      return value == null || value is timestamp;
+    }
+
+    function isValidSharedCacheStatus(value) {
+      return value is string && (value == 'found' || value == 'not_found');
+    }
+
+    function isValidSharedCachePayload(data, barcode) {
+      return data.keys().hasOnly([
+          'barcode',
+          'cacheStatus',
+          'sourceName',
+          'productType',
+          'productPayload',
+          'schemaVersion',
+          'fetchedAt',
+          'expiresAt',
+          'createdAt',
+          'updatedAt',
+          'writerUid',
+          'writerPlatform'
+        ])
+        && data.barcode == barcode
+        && isValidBarcodeId(data.barcode)
+        && isValidSharedCacheStatus(data.cacheStatus)
+        && isOptionalString(data.sourceName)
+        && isOptionalString(data.productType)
+        && (data.productPayload == null || data.productPayload is map)
+        && (data.schemaVersion is int || data.schemaVersion is float)
+        && (data.fetchedAt is int || data.fetchedAt is float)
+        && (data.expiresAt is int || data.expiresAt is float)
+        && isOptionalTimestamp(data.createdAt)
+        && isOptionalTimestamp(data.updatedAt)
+        && data.writerUid is string
+        && data.writerUid == request.auth.uid
+        && isAllowedPlatform(data.writerPlatform)
+        && (
+          (data.cacheStatus == 'found' && data.productPayload is map)
+          || (data.cacheStatus == 'not_found' && data.productPayload == null)
+        );
+    }
+
+    function isValidAnalyticsEvent(data) {
+      return data.keys().hasOnly([
+          'eventId',
+          'eventName',
+          'installationId',
+          'sessionId',
+          'platform',
+          'environment',
+          'clientCreatedAt',
+          'receivedAt',
+          'payload',
+          'authUid'
+        ])
+        && data.eventId is string
+        && data.eventName is string
+        && data.installationId is string
+        && data.sessionId is string
+        && isAllowedPlatform(data.platform)
+        && isAllowedEnvironment(data.environment)
+        && (data.clientCreatedAt is int || data.clientCreatedAt is float)
+        && data.receivedAt is timestamp
+        && data.payload is map
+        && data.authUid is string
+        && data.authUid == request.auth.uid;
+    }
+
+    function isValidMissingProductContribution(data) {
+      return data.keys().hasOnly([
+          'barcode',
+          'status',
+          'name',
+          'brand',
+          'category',
+          'notes',
+          'createdAt',
+          'updatedAt',
+          'authorUid'
+        ])
+        && isValidBarcodeId(data.barcode)
+        && data.status is string
+        && isOptionalString(data.name)
+        && isOptionalString(data.brand)
+        && isOptionalString(data.category)
+        && isOptionalString(data.notes)
+        && isOptionalTimestamp(data.createdAt)
+        && isOptionalTimestamp(data.updatedAt)
+        && data.authorUid is string
+        && data.authorUid == request.auth.uid;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+
+      allow create, update: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          'firstName',
+          'lastName',
+          'phone',
+          'city',
+          'district',
+          'address',
+          'email',
+          'kvkkAccepted',
+          'createdAt',
+          'updatedAt'
+        ])
+        && isOptionalString(request.resource.data.firstName)
+        && isOptionalString(request.resource.data.lastName)
+        && isOptionalString(request.resource.data.phone)
+        && isOptionalString(request.resource.data.city)
+        && isOptionalString(request.resource.data.district)
+        && isOptionalString(request.resource.data.address)
+        && isOptionalString(request.resource.data.email)
+        && (request.resource.data.kvkkAccepted == null || request.resource.data.kvkkAccepted is bool)
+        && (
+          request.resource.data.createdAt == null
+          || request.resource.data.createdAt is string
+          || request.resource.data.createdAt is timestamp
+        )
+        && (
+          request.resource.data.updatedAt == null
+          || request.resource.data.updatedAt is string
+          || request.resource.data.updatedAt is timestamp
+        );
+
+      allow delete: if false;
+    }
+
+    match /runtime_config/{docId} {
+      allow read: if allowRuntimeConfigRead(docId);
+      allow write: if false;
+    }
+
+    match /shared_product_cache/{barcode} {
+      allow read: if isSignedIn()
+        && isValidBarcodeId(barcode)
+        && allowClientSharedCacheReads();
+
+      allow create, update: if isSignedIn()
+        && isValidBarcodeId(barcode)
+        && allowClientSharedCacheWrites()
+        && isValidSharedCachePayload(request.resource.data, barcode);
+
+      allow delete: if false;
+    }
+
+    match /analytics_events/{eventId} {
+      allow read: if false;
+
+      allow create: if isSignedIn()
+        && allowClientAnalyticsWrites()
+        && isValidAnalyticsEvent(request.resource.data);
+
+      allow update, delete: if false;
+    }
+
+    match /missing_product_contributions/{docId} {
+      allow create: if isSignedIn()
+        && allowMissingProductContributionWrites()
+        && isValidMissingProductContribution(request.resource.data);
+
+      allow read: if isSignedIn()
+        && resource.data.authorUid is string
+        && resource.data.authorUid == request.auth.uid;
+
+      allow update, delete: if false;
+    }
+  }
+}

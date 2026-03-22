@@ -3,83 +3,28 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
-import { AuthProvider } from './src/context/AuthContext';
+import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { LanguageProvider } from './src/context/LanguageContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
-import { initDatabase } from './src/services/db';
-import { initializeAdMob, getAdMobRuntimeState } from './src/services/admobRuntime';
-import { adService } from './src/services/adService';
 import {
-  flushRemoteProductCacheWriteQueue,
-  initializeRemoteProductCacheWriteQueue,
-} from './src/services/productRemoteWriteQueue.service';
-
-const databaseBootstrapState = (() => {
-  try {
-    initDatabase();
-    return {
-      ready: true,
-      error: null as unknown,
-    };
-  } catch (error) {
-    console.log('SQLite init failed:', error);
-    return {
-      ready: false,
-      error,
-    };
-  }
-})();
+  ensureAppBootstrap,
+  runAuthenticatedAppBootstrap,
+} from './src/services/appBootstrap.service';
 
 const AppContent: React.FC = () => {
   const { isDark } = useTheme();
+  const { loading, isAuthenticated } = useAuth();
 
   useEffect(() => {
     let mounted = true;
 
     const bootstrap = async () => {
-      if (databaseBootstrapState.ready) {
-        console.log('SQLite bootstrap completed before first render.');
-      } else {
-        console.log('SQLite bootstrap state contains error:', databaseBootstrapState.error);
+      const snapshot = await ensureAppBootstrap();
+
+      if (mounted) {
+        console.log('Local app bootstrap:', snapshot);
       }
-
-      try {
-        initializeRemoteProductCacheWriteQueue();
-        const flushed = await flushRemoteProductCacheWriteQueue({
-          reason: 'app_boot',
-        });
-        console.log('Remote cache write queue initialized:', { flushed });
-      } catch (error) {
-        console.log('Remote cache write queue bootstrap failed:', error);
-      }
-
-      try {
-        const initialized = await initializeAdMob();
-        console.log('AdMob initialized:', initialized);
-        console.log('AdMob runtime state:', getAdMobRuntimeState());
-      } catch (error) {
-        console.log('AdMob bootstrap failed:', error);
-      }
-
-      try {
-        const policy = await adService.bootstrap();
-
-        if (mounted) {
-          console.log('Ad policy bootstrap:', {
-            source: policy.source,
-            version: policy.version,
-            enabled: policy.enabled,
-            interstitialEnabled: policy.interstitialEnabled,
-            bannerEnabled: policy.bannerEnabled,
-            analyticsEnabled: policy.analyticsEnabled,
-          });
-        }
-      } catch (error) {
-        console.log('Ad policy bootstrap failed:', error);
-      }
-
-      console.log('APP BOOT OK');
     };
 
     void bootstrap();
@@ -88,6 +33,31 @@ const AppContent: React.FC = () => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    let mounted = true;
+
+    const bootstrapAuthenticatedSurface = async () => {
+      const snapshot = await runAuthenticatedAppBootstrap();
+
+      if (mounted) {
+        console.log('Authenticated app bootstrap:', {
+          isAuthenticated,
+          snapshot,
+        });
+      }
+    };
+
+    void bootstrapAuthenticatedSurface();
+
+    return () => {
+      mounted = false;
+    };
+  }, [isAuthenticated, loading]);
 
   return (
     <>
