@@ -10,6 +10,10 @@ import { AppNavigator } from './src/navigation/AppNavigator';
 import { initDatabase } from './src/services/db';
 import { initializeAdMob, getAdMobRuntimeState } from './src/services/admobRuntime';
 import { adService } from './src/services/adService';
+import {
+  flushRemoteProductCacheWriteQueue,
+  initializeRemoteProductCacheWriteQueue,
+} from './src/services/productRemoteWriteQueue.service';
 
 const databaseBootstrapState = (() => {
   try {
@@ -38,6 +42,16 @@ const AppContent: React.FC = () => {
         console.log('SQLite bootstrap completed before first render.');
       } else {
         console.log('SQLite bootstrap state contains error:', databaseBootstrapState.error);
+      }
+
+      try {
+        initializeRemoteProductCacheWriteQueue();
+        const flushed = await flushRemoteProductCacheWriteQueue({
+          reason: 'app_boot',
+        });
+        console.log('Remote cache write queue initialized:', { flushed });
+      } catch (error) {
+        console.log('Remote cache write queue bootstrap failed:', error);
       }
 
       try {
