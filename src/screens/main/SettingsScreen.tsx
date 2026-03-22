@@ -25,8 +25,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { AdBanner } from '../../components/AdBanner';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
-import { useAdDiagnostics } from '../../hooks/useAdDiagnostics';
-import { useFirebaseDiagnostics } from '../../hooks/useFirebaseDiagnostics';
+import { useOperabilityDiagnostics } from '../../hooks/useOperabilityDiagnostics';
 
 const APP_VERSION = 'v1.0.4';
 
@@ -164,25 +163,17 @@ export const SettingsScreen: React.FC = () => {
 
   const adDiagnosticsEnabled = FEATURES.ads.diagnosticsLoggingEnabled;
   const firebaseDiagnosticsEnabled = FEATURES.firebase.diagnosticsLoggingEnabled;
+  const operabilityDiagnosticsEnabled =
+    adDiagnosticsEnabled || firebaseDiagnosticsEnabled;
 
   const {
-    snapshot: adDiagnostics,
-    loading: diagnosticsLoading,
-    refreshing: diagnosticsRefreshing,
-    error: diagnosticsError,
-    refresh: refreshDiagnostics,
-  } = useAdDiagnostics({
-    enabled: adDiagnosticsEnabled,
-  });
-
-  const {
-    snapshot: firebaseDiagnostics,
-    loading: firebaseDiagnosticsLoading,
-    refreshing: firebaseDiagnosticsRefreshing,
-    error: firebaseDiagnosticsError,
-    refresh: refreshFirebaseDiagnostics,
-  } = useFirebaseDiagnostics({
-    enabled: firebaseDiagnosticsEnabled,
+    snapshot: operabilityDiagnostics,
+    loading: operabilityLoading,
+    refreshing: operabilityRefreshing,
+    error: operabilityError,
+    refresh: refreshOperabilityDiagnostics,
+  } = useOperabilityDiagnostics({
+    enabled: operabilityDiagnosticsEnabled,
   });
 
   const tt = useCallback(
@@ -256,11 +247,10 @@ export const SettingsScreen: React.FC = () => {
     setRefreshing(true);
     await Promise.all([
       loadUserProfile(),
-      refreshDiagnostics(),
-      refreshFirebaseDiagnostics(),
+      refreshOperabilityDiagnostics(),
     ]);
     setRefreshing(false);
-  }, [loadUserProfile, refreshDiagnostics, refreshFirebaseDiagnostics]);
+  }, [loadUserProfile, refreshOperabilityDiagnostics]);
 
   const handleSafeOpenUrl = useCallback(
     async (url: string, fallbackMessage?: string) => {
@@ -366,7 +356,31 @@ export const SettingsScreen: React.FC = () => {
       : tt('email_not_verified', 'E-posta doğrulanmadı');
   }, [tt, user?.emailVerified]);
 
-  const diagnosticsFetchedAtText = useMemo(() => {
+  const startupDiagnostics = operabilityDiagnostics?.bootstrap.data ?? null;
+  const startupDiagnosticsError =
+    operabilityDiagnostics?.bootstrap.error ?? operabilityError;
+
+  const adDiagnostics = operabilityDiagnostics?.ad.data ?? null;
+  const adDiagnosticsError =
+    operabilityDiagnostics?.ad.error ?? operabilityError;
+
+  const firebaseDiagnostics = operabilityDiagnostics?.remoteCache.data ?? null;
+  const firebaseAccessDiagnostics =
+    operabilityDiagnostics?.firebaseAccess.data ?? null;
+  const firebaseServicesDiagnostics =
+    operabilityDiagnostics?.firebaseServices.data ?? null;
+
+  const firebaseDiagnosticsError =
+    operabilityDiagnostics?.remoteCache.error ??
+    operabilityDiagnostics?.firebaseAccess.error ??
+    operabilityDiagnostics?.firebaseServices.error ??
+    operabilityError;
+
+  const startupFetchedAtText = useMemo(() => {
+    return formatTimeValue(startupDiagnostics?.fetchedAt);
+  }, [startupDiagnostics?.fetchedAt]);
+
+  const adDiagnosticsFetchedAtText = useMemo(() => {
     return formatTimeValue(adDiagnostics?.fetchedAt);
   }, [adDiagnostics?.fetchedAt]);
 
@@ -564,6 +578,249 @@ export const SettingsScreen: React.FC = () => {
         }
       />
 
+      {operabilityDiagnosticsEnabled ? (
+        <>
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: colors.text, marginHorizontal: layout.horizontalPadding, marginTop: 10 },
+            ]}
+          >
+            {tt('operability_diagnostics', 'Operability / Startup Tanılama')}
+          </Text>
+
+          <View
+            style={[
+              styles.diagnosticsCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                marginHorizontal: layout.horizontalPadding,
+              },
+            ]}
+          >
+            <View style={styles.diagnosticsHeader}>
+              <View style={styles.diagnosticsHeaderLeft}>
+                <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
+                  <Ionicons name="build-outline" size={20} color={colors.primary} />
+                </View>
+
+                <View style={styles.diagnosticsHeaderTextWrap}>
+                  <Text style={[styles.diagnosticsTitle, { color: colors.text }]}>
+                    {tt('startup_runtime_state', 'Bootstrap + runtime + auth')}
+                  </Text>
+                  <Text style={[styles.diagnosticsSubtitle, { color: colors.text }]}>
+                    {tt('last_refresh', 'Son yenileme')}: {startupFetchedAtText}
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.diagnosticsRefreshButton,
+                  operabilityRefreshing && styles.diagnosticsRefreshButtonDisabled,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: `${colors.primary}10`,
+                  },
+                ]}
+                onPress={() => {
+                  void refreshOperabilityDiagnostics();
+                }}
+                disabled={operabilityRefreshing}
+                activeOpacity={0.85}
+              >
+                {operabilityRefreshing ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons name="refresh" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {operabilityLoading ? (
+              <View style={styles.diagnosticsLoadingWrap}>
+                <ActivityIndicator size="small" color={colors.primary} />
+              </View>
+            ) : null}
+
+            {startupDiagnosticsError ? (
+              <Text style={styles.diagnosticsErrorText}>{startupDiagnosticsError}</Text>
+            ) : null}
+
+            {operabilityDiagnostics ? (
+              <>
+                <View style={styles.diagnosticsPillsRow}>
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      {
+                        backgroundColor: operabilityDiagnostics.summary.bootstrapReady
+                          ? `${colors.primary}14`
+                          : '#FF444414',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        {
+                          color: operabilityDiagnostics.summary.bootstrapReady
+                            ? colors.primary
+                            : '#FF4444',
+                        },
+                      ]}
+                    >
+                      Bootstrap: {boolStateText(operabilityDiagnostics.summary.bootstrapReady)}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      {
+                        backgroundColor: operabilityDiagnostics.summary.runtimeReady
+                          ? `${colors.primary}14`
+                          : '#FF444414',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        {
+                          color: operabilityDiagnostics.summary.runtimeReady
+                            ? colors.primary
+                            : '#FF4444',
+                        },
+                      ]}
+                    >
+                      Runtime: {boolStateText(operabilityDiagnostics.summary.runtimeReady)}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      {
+                        backgroundColor: operabilityDiagnostics.summary.isAuthenticated
+                          ? `${colors.primary}14`
+                          : `${colors.border}55`,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        {
+                          color: operabilityDiagnostics.summary.isAuthenticated
+                            ? colors.primary
+                            : colors.text,
+                        },
+                      ]}
+                    >
+                      Auth: {boolStateText(operabilityDiagnostics.summary.isAuthenticated)}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.diagnosticsGrid}>
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Local bootstrap
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(startupDiagnostics?.localBootstrapCompleted ?? false)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Database ready
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(startupDiagnostics?.databaseReady ?? false)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Queue lifecycle
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(startupDiagnostics?.queueLifecycleAttached ?? false)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      AdMob initialized
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(startupDiagnostics?.admobInitialized ?? false)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Firestore runtime resolved
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(startupDiagnostics?.firestoreRuntimeConfigResolved ?? false)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Shared cache flush
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {startupDiagnostics?.sharedCacheFlushCount ?? 0}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Analytics flush
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {startupDiagnostics?.analyticsFlushCount ?? 0}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Ad policy synced
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(startupDiagnostics?.adPolicySynced ?? false)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Auth UID
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(startupDiagnostics?.authUid)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Last bootstrap error
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(operabilityDiagnostics.summary.lastBootstrapError)}
+                    </Text>
+                  </View>
+                </View>
+              </>
+            ) : null}
+          </View>
+        </>
+      ) : null}
+
       {adDiagnosticsEnabled ? (
         <>
           <Text
@@ -596,7 +853,7 @@ export const SettingsScreen: React.FC = () => {
                     {tt('ad_runtime_state', 'Remote policy + analytics')}
                   </Text>
                   <Text style={[styles.diagnosticsSubtitle, { color: colors.text }]}>
-                    {tt('last_refresh', 'Son yenileme')}: {diagnosticsFetchedAtText}
+                    {tt('last_refresh', 'Son yenileme')}: {adDiagnosticsFetchedAtText}
                   </Text>
                 </View>
               </View>
@@ -604,19 +861,19 @@ export const SettingsScreen: React.FC = () => {
               <TouchableOpacity
                 style={[
                   styles.diagnosticsRefreshButton,
-                  diagnosticsRefreshing && styles.diagnosticsRefreshButtonDisabled,
+                  operabilityRefreshing && styles.diagnosticsRefreshButtonDisabled,
                   {
                     borderColor: colors.border,
                     backgroundColor: `${colors.primary}10`,
                   },
                 ]}
                 onPress={() => {
-                  void refreshDiagnostics();
+                  void refreshOperabilityDiagnostics();
                 }}
-                disabled={diagnosticsRefreshing}
+                disabled={operabilityRefreshing}
                 activeOpacity={0.85}
               >
-                {diagnosticsRefreshing ? (
+                {operabilityRefreshing ? (
                   <ActivityIndicator size="small" color={colors.primary} />
                 ) : (
                   <Ionicons name="refresh" size={18} color={colors.primary} />
@@ -624,14 +881,14 @@ export const SettingsScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
 
-            {diagnosticsLoading ? (
+            {operabilityLoading ? (
               <View style={styles.diagnosticsLoadingWrap}>
                 <ActivityIndicator size="small" color={colors.primary} />
               </View>
             ) : null}
 
-            {diagnosticsError ? (
-              <Text style={styles.diagnosticsErrorText}>{diagnosticsError}</Text>
+            {adDiagnosticsError ? (
+              <Text style={styles.diagnosticsErrorText}>{adDiagnosticsError}</Text>
             ) : null}
 
             {adDiagnostics ? (
@@ -832,19 +1089,19 @@ export const SettingsScreen: React.FC = () => {
               <TouchableOpacity
                 style={[
                   styles.diagnosticsRefreshButton,
-                  firebaseDiagnosticsRefreshing && styles.diagnosticsRefreshButtonDisabled,
+                  operabilityRefreshing && styles.diagnosticsRefreshButtonDisabled,
                   {
                     borderColor: colors.border,
                     backgroundColor: `${colors.primary}10`,
                   },
                 ]}
                 onPress={() => {
-                  void refreshFirebaseDiagnostics();
+                  void refreshOperabilityDiagnostics();
                 }}
-                disabled={firebaseDiagnosticsRefreshing}
+                disabled={operabilityRefreshing}
                 activeOpacity={0.85}
               >
-                {firebaseDiagnosticsRefreshing ? (
+                {operabilityRefreshing ? (
                   <ActivityIndicator size="small" color={colors.primary} />
                 ) : (
                   <Ionicons name="refresh" size={18} color={colors.primary} />
@@ -852,7 +1109,7 @@ export const SettingsScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
 
-            {firebaseDiagnosticsLoading ? (
+            {operabilityLoading ? (
               <View style={styles.diagnosticsLoadingWrap}>
                 <ActivityIndicator size="small" color={colors.primary} />
               </View>
@@ -893,7 +1150,7 @@ export const SettingsScreen: React.FC = () => {
                     style={[
                       styles.diagnosticsPill,
                       {
-                        backgroundColor: firebaseDiagnostics.writeFeatureEnabled
+                        backgroundColor: firebaseDiagnostics.sharedCacheWriteAllowed
                           ? `${colors.primary}14`
                           : `${colors.border}55`,
                       },
@@ -903,13 +1160,13 @@ export const SettingsScreen: React.FC = () => {
                       style={[
                         styles.diagnosticsPillText,
                         {
-                          color: firebaseDiagnostics.writeFeatureEnabled
+                          color: firebaseDiagnostics.sharedCacheWriteAllowed
                             ? colors.primary
                             : colors.text,
                         },
                       ]}
                     >
-                      Write: {boolStateText(firebaseDiagnostics.writeFeatureEnabled)}
+                      Shared write: {boolStateText(firebaseDiagnostics.sharedCacheWriteAllowed)}
                     </Text>
                   </View>
 
@@ -946,7 +1203,9 @@ export const SettingsScreen: React.FC = () => {
                       Project
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatOptionalText(firebaseDiagnostics.projectId)}
+                      {formatOptionalText(
+                        firebaseServicesDiagnostics?.projectId ?? firebaseDiagnostics.projectId
+                      )}
                     </Text>
                   </View>
 
@@ -956,6 +1215,24 @@ export const SettingsScreen: React.FC = () => {
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
                       {firebaseDiagnostics.runtimeSource}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Effective runtime source
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(firebaseAccessDiagnostics?.runtimeEffectiveSource)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Authenticated user
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(firebaseAccessDiagnostics?.isAuthenticated ?? false)}
                     </Text>
                   </View>
 
@@ -979,6 +1256,42 @@ export const SettingsScreen: React.FC = () => {
 
                   <View style={styles.diagnosticsRow}>
                     <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Shared cache read allowed
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(firebaseDiagnostics.sharedCacheReadAllowed)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Shared cache write allowed
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(firebaseDiagnostics.sharedCacheWriteAllowed)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Analytics write allowed
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(firebaseAccessDiagnostics?.analyticsWriteAllowed ?? false)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Ad policy read allowed
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(firebaseAccessDiagnostics?.adPolicyReadAllowed ?? false)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
                       Read validation
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
@@ -992,6 +1305,15 @@ export const SettingsScreen: React.FC = () => {
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
                       {boolStateText(firebaseDiagnostics.writeValidationEnabled)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Rollout source / version
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {firebaseDiagnostics.rolloutSource} / v{firebaseDiagnostics.rolloutVersion}
                     </Text>
                   </View>
 
