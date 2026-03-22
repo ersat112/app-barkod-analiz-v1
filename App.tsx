@@ -7,10 +7,7 @@ import { AuthProvider, useAuth } from './src/context/AuthContext';
 import { LanguageProvider } from './src/context/LanguageContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
-import {
-  ensureAppBootstrap,
-  runAuthenticatedAppBootstrap,
-} from './src/services/appBootstrap.service';
+import { bootstrapOperabilitySurface } from './src/services/operability.service';
 
 const AppContent: React.FC = () => {
   const { isDark } = useTheme();
@@ -20,10 +17,10 @@ const AppContent: React.FC = () => {
     let mounted = true;
 
     const bootstrap = async () => {
-      const snapshot = await ensureAppBootstrap();
+      const snapshot = await bootstrapOperabilitySurface();
 
       if (mounted) {
-        console.log('Local app bootstrap:', snapshot);
+        console.log('App operability bootstrap:', snapshot);
       }
     };
 
@@ -42,10 +39,12 @@ const AppContent: React.FC = () => {
     let mounted = true;
 
     const bootstrapAuthenticatedSurface = async () => {
-      const snapshot = await runAuthenticatedAppBootstrap();
+      const snapshot = await bootstrapOperabilitySurface({
+        forceRefresh: true,
+      });
 
       if (mounted) {
-        console.log('Authenticated app bootstrap:', {
+        console.log('Authenticated operability bootstrap:', {
           isAuthenticated,
           snapshot,
         });
