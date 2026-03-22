@@ -28,10 +28,16 @@ type HistoryListItemProps = {
   timeLabel: string;
   beautyLabel: string;
   foodLabel: string;
+  favoriteLabel: string;
+  unfavoriteLabel: string;
+  rescanLabel: string;
   fallbackBrand: string;
   fallbackName: string;
+  isFavorite: boolean;
   onPress: () => void;
   onDelete: () => void;
+  onToggleFavorite: () => void;
+  onRescan: () => void;
   colors: ThemeColors;
 };
 
@@ -203,10 +209,16 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
   timeLabel,
   beautyLabel,
   foodLabel,
+  favoriteLabel,
+  unfavoriteLabel,
+  rescanLabel,
   fallbackBrand,
   fallbackName,
+  isFavorite,
   onPress,
   onDelete,
+  onToggleFavorite,
+  onRescan,
   colors,
 }) => {
   return (
@@ -233,13 +245,22 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
         <HistoryItemImage uri={item.image_url} />
 
         <View style={styles.itemDetails}>
-          <Text style={[styles.itemBrand, { color: colors.primary }]} numberOfLines={1}>
-            {item.brand || fallbackBrand}
-          </Text>
+          <View style={styles.itemHeaderRow}>
+            <View style={styles.itemHeaderTextWrap}>
+              <Text style={[styles.itemBrand, { color: colors.primary }]} numberOfLines={1}>
+                {item.brand || fallbackBrand}
+              </Text>
 
-          <Text style={[styles.itemName, { color: colors.text }]} numberOfLines={2}>
-            {item.name || fallbackName}
-          </Text>
+              <Text style={[styles.itemName, { color: colors.text }]} numberOfLines={2}>
+                {item.name || fallbackName}
+              </Text>
+            </View>
+
+            <View style={styles.itemRightArea}>
+              <Text style={[styles.itemTime, { color: colors.text }]}>{timeLabel}</Text>
+              <Ionicons name="chevron-forward" size={18} color={colors.border} />
+            </View>
+          </View>
 
           <View style={styles.itemMetaRow}>
             <View style={[styles.inlineBadge, { backgroundColor: `${colors.primary}12` }]}>
@@ -260,11 +281,46 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
               </Text>
             </View>
           </View>
-        </View>
 
-        <View style={styles.itemRightArea}>
-          <Text style={[styles.itemTime, { color: colors.text }]}>{timeLabel}</Text>
-          <Ionicons name="chevron-forward" size={18} color={colors.border} />
+          <View style={styles.itemActionsRow}>
+            <TouchableOpacity
+              style={[
+                styles.secondaryActionButton,
+                {
+                  borderColor: colors.border,
+                  backgroundColor: isFavorite ? `${colors.primary}12` : 'transparent',
+                },
+              ]}
+              onPress={onToggleFavorite}
+              activeOpacity={0.88}
+            >
+              <Ionicons
+                name={isFavorite ? 'star' : 'star-outline'}
+                size={16}
+                color={colors.primary}
+              />
+              <Text
+                style={[
+                  styles.secondaryActionText,
+                  { color: isFavorite ? colors.primary : colors.text },
+                ]}
+                numberOfLines={1}
+              >
+                {isFavorite ? unfavoriteLabel : favoriteLabel}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.primaryActionButton, { backgroundColor: colors.primary }]}
+              onPress={onRescan}
+              activeOpacity={0.9}
+            >
+              <Ionicons name="refresh-outline" size={16} color="#000" />
+              <Text style={styles.primaryActionText} numberOfLines={1}>
+                {rescanLabel}
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </TouchableOpacity>
     </Swipeable>
@@ -426,7 +482,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     padding: 14,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   itemImage: {
     width: 72,
@@ -437,7 +493,15 @@ const styles = StyleSheet.create({
   itemDetails: {
     flex: 1,
     marginLeft: 14,
-    marginRight: 10,
+  },
+  itemHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  itemHeaderTextWrap: {
+    flex: 1,
+    minHeight: 48,
   },
   itemBrand: {
     fontSize: 11,
@@ -470,12 +534,48 @@ const styles = StyleSheet.create({
   itemRightArea: {
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    minHeight: 64,
+    minHeight: 42,
   },
   itemTime: {
     fontSize: 12,
     fontWeight: '700',
     opacity: 0.7,
+    marginBottom: 8,
+  },
+  itemActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  secondaryActionButton: {
+    flex: 1,
+    minHeight: 40,
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  secondaryActionText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  primaryActionButton: {
+    flex: 1.1,
+    minHeight: 40,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  primaryActionText: {
+    color: '#000',
+    fontSize: 12,
+    fontWeight: '900',
   },
   deleteAction: {
     marginRight: 16,
