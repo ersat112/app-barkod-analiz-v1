@@ -40,6 +40,9 @@ export const FEATURES = Object.freeze({
     localAnalyticsQueueEnabled: true,
     diagnosticsLoggingEnabled: __DEV__,
   }),
+  database: Object.freeze({
+    diagnosticsLoggingEnabled: __DEV__,
+  }),
   home: Object.freeze({
     singleQueryDashboardEnabled: false,
   }),
