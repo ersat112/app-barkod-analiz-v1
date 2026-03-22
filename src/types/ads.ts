@@ -68,7 +68,9 @@ export type AnalyticsEventName =
   | 'missing_product_screen_viewed'
   | 'missing_product_draft_saved'
   | 'missing_product_draft_sync_succeeded'
-  | 'missing_product_draft_sync_failed';
+  | 'missing_product_draft_sync_failed'
+  | 'product_lookup_resolved'
+  | 'product_detail_viewed';
 
 export type AnalyticsEventPayload = Record<string, unknown>;
 
