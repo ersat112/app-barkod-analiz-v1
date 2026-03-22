@@ -61,7 +61,14 @@ export type AnalyticsEventName =
   | 'ad_interstitial_evaluated'
   | 'ad_interstitial_shown'
   | 'ad_interstitial_show_failed'
-  | 'ad_banner_impression';
+  | 'ad_banner_impression'
+  | 'product_not_found_viewed'
+  | 'product_not_found_retry_tapped'
+  | 'product_not_found_add_product_tapped'
+  | 'missing_product_screen_viewed'
+  | 'missing_product_draft_saved'
+  | 'missing_product_draft_sync_succeeded'
+  | 'missing_product_draft_sync_failed';
 
 export type AnalyticsEventPayload = Record<string, unknown>;
 
