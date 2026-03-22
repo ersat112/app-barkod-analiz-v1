@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
 
 import { useTheme } from '../../context/ThemeContext';
+import { useMissingProductFlow } from '../../hooks/useMissingProductFlow';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { AdBanner } from '../../components/AdBanner';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
@@ -34,6 +35,10 @@ export const MissingProductScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<any>();
   const route = useRoute<MissingRoute>();
+  const {
+    trackMissingProductDraftSaved,
+    trackMissingProductScreenViewed,
+  } = useMissingProductFlow();
 
   const layout = useAppScreenLayout({
     topInsetExtra: 12,
@@ -55,6 +60,10 @@ export const MissingProductScreen: React.FC = () => {
     () => String(route.params?.barcode || '').replace(/[^\d]/g, '').trim(),
     [route.params?.barcode]
   );
+
+  useEffect(() => {
+    void trackMissingProductScreenViewed(barcode, 'detail_not_found');
+  }, [barcode, trackMissingProductScreenViewed]);
 
   const typeOptions: Array<{ value: MissingProductType; label: string }> = useMemo(
     () => [
@@ -101,6 +110,21 @@ export const MissingProductScreen: React.FC = () => {
         ingredients_text: ingredientsText,
         notes,
         type: productType,
+        entry_point: 'detail_not_found',
+        source_screen: 'MissingProductScreen',
+      });
+
+      await trackMissingProductDraftSaved({
+        barcode,
+        type: productType,
+        hasBrand: brand.trim().length > 0,
+        hasCountry: country.trim().length > 0,
+        hasOrigin: origin.trim().length > 0,
+        hasIngredients: ingredientsText.trim().length > 0,
+        hasNotes: notes.trim().length > 0,
+        entryPoint: 'detail_not_found',
+        localId: draft.localId,
+        queueStatus: draft.review_queue_status,
       });
 
       const syncResult = await syncMissingProductDraftToFirestore(draft);
@@ -126,6 +150,7 @@ export const MissingProductScreen: React.FC = () => {
     notes,
     origin,
     productType,
+    trackMissingProductDraftSaved,
     tt,
   ]);
 
@@ -396,7 +421,7 @@ export const MissingProductScreen: React.FC = () => {
         </Text>
 
         <View style={styles.adBox}>
-          <AdBanner />
+          <AdBanner placement="missing_product_footer" />
         </View>
       </ScrollView>
 

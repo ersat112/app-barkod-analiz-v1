@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { fetchProductByBarcode } from '../../api/productResolver';
 import { FEATURES } from '../../config/features';
 import { useTheme } from '../../context/ThemeContext';
+import { useMissingProductFlow } from '../../hooks/useMissingProductFlow';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { saveProductToHistory } from '../../services/db';
 import { useScanStore } from '../../store/useScanStore';
@@ -66,6 +67,11 @@ export const DetailScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<any>();
   const route = useRoute<DetailRoute>();
+  const {
+    trackNotFoundAddProductTapped,
+    trackNotFoundRetryTapped,
+    trackNotFoundViewed,
+  } = useMissingProductFlow();
 
   const layout = useAppScreenLayout({
     contentBottomExtra: 120,
@@ -95,6 +101,7 @@ export const DetailScreen: React.FC = () => {
   const [loading, setLoading] = useState(!isCurrentBarcodeInStore);
   const [error, setError] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
+  const [notFoundReason, setNotFoundReason] = useState<'not_found' | 'invalid_barcode' | 'unknown' | null>(null);
 
   const [localProduct, setLocalProduct] = useState<Product | null>(
     isCurrentBarcodeInStore ? currentProduct : null
@@ -112,6 +119,7 @@ export const DetailScreen: React.FC = () => {
       setLocalAnalysis(currentAnalysis ?? null);
       setLoading(false);
       setError(null);
+      setNotFoundReason(null);
       lastResolvedBarcodeRef.current = normalizedRouteBarcode;
     }
   }, [
@@ -286,7 +294,15 @@ export const DetailScreen: React.FC = () => {
   const loadProduct = useCallback(async () => {
     if (!normalizedRouteBarcode) {
       setError(tt('invalid_barcode', 'Geçersiz barkod formatı'));
+      setNotFoundReason('invalid_barcode');
       setLoading(false);
+
+      await trackNotFoundViewed({
+        barcode: normalizedRouteBarcode,
+        reason: 'invalid_barcode',
+        entryPoint: 'detail_not_found',
+      });
+
       return;
     }
 
@@ -299,11 +315,15 @@ export const DetailScreen: React.FC = () => {
       setLoading(true);
       setError(null);
       setImageError(false);
+      setNotFoundReason(null);
 
       const result = await fetchProductByBarcode(normalizedRouteBarcode);
 
       if (!result.found) {
         useScanStore.getState().markNotFound(result.barcode);
+
+        const resolvedReason =
+          result.reason === 'invalid_barcode' ? 'invalid_barcode' : 'not_found';
 
         if (result.reason === 'invalid_barcode') {
           setError(tt('invalid_barcode', 'Geçersiz barkod formatı'));
@@ -311,9 +331,17 @@ export const DetailScreen: React.FC = () => {
           setError(tt('product_not_found', 'Ürün verisi bulunamadı'));
         }
 
+        setNotFoundReason(resolvedReason);
         setLocalProduct(null);
         setLocalAnalysis(null);
         lastResolvedBarcodeRef.current = normalizedRouteBarcode;
+
+        await trackNotFoundViewed({
+          barcode: normalizedRouteBarcode,
+          reason: resolvedReason,
+          entryPoint: 'detail_not_found',
+        });
+
         return;
       }
 
@@ -323,6 +351,7 @@ export const DetailScreen: React.FC = () => {
       setLocalProduct(product);
       setLocalAnalysis(analysis);
       setAnalysis(product, analysis);
+      setNotFoundReason(null);
       lastResolvedBarcodeRef.current = normalizedRouteBarcode;
 
       const historySaveKey = `${product.barcode}-${analysis.score}`;
@@ -338,6 +367,7 @@ export const DetailScreen: React.FC = () => {
     } catch (loadError) {
       console.error('Detail load failed:', loadError);
       setError(tt('error_generic', 'Bir hata oluştu'));
+      setNotFoundReason('unknown');
       setLocalProduct(null);
       setLocalAnalysis(null);
     } finally {
@@ -348,6 +378,7 @@ export const DetailScreen: React.FC = () => {
     localProduct,
     normalizedRouteBarcode,
     setAnalysis,
+    trackNotFoundViewed,
     tt,
   ]);
 
@@ -360,7 +391,7 @@ export const DetailScreen: React.FC = () => {
       return;
     }
 
-    loadProduct();
+    void loadProduct();
   }, [
     currentProduct,
     isCurrentBarcodeInStore,
@@ -370,10 +401,16 @@ export const DetailScreen: React.FC = () => {
     normalizedRouteBarcode,
   ]);
 
-  const handleRetry = useCallback(() => {
+  const handleRetry = useCallback(async () => {
+    await trackNotFoundRetryTapped({
+      barcode: normalizedRouteBarcode,
+      reason: notFoundReason ?? 'unknown',
+      entryPoint: 'detail_not_found',
+    });
+
     lastResolvedBarcodeRef.current = null;
-    loadProduct();
-  }, [loadProduct]);
+    await loadProduct();
+  }, [loadProduct, normalizedRouteBarcode, notFoundReason, trackNotFoundRetryTapped]);
 
   const handleShare = useCallback(async () => {
     if (!displayedProduct || !displayedAnalysis) {
@@ -420,9 +457,15 @@ export const DetailScreen: React.FC = () => {
         secondaryLabel={tt('go_back', 'Geri Dön')}
         primaryLabel={tt('add_product', 'Ürünü Ekle')}
         onSecondaryPress={() => navigation.goBack()}
-        onPrimaryPress={() =>
-          navigation.navigate('MissingProduct', { barcode: normalizedRouteBarcode })
-        }
+        onPrimaryPress={() => {
+          void trackNotFoundAddProductTapped({
+            barcode: normalizedRouteBarcode,
+            reason: notFoundReason ?? 'unknown',
+            entryPoint: 'detail_not_found',
+          });
+
+          navigation.navigate('MissingProduct', { barcode: normalizedRouteBarcode });
+        }}
         retryLabel={!error?.includes('Geçersiz') ? tt('retry', 'Tekrar Dene') : undefined}
         onRetry={!error?.includes('Geçersiz') ? handleRetry : undefined}
         colors={colors}
@@ -545,7 +588,7 @@ export const DetailScreen: React.FC = () => {
           { bottom: layout.floatingBottomOffset },
         ]}
       >
-        <AdBanner />
+        <AdBanner placement="detail_footer" />
       </View>
     </View>
   );
