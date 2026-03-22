@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { useTheme } from '../../context/ThemeContext';
 import { AdBanner } from '../../components/AdBanner';
 import { usePaginatedHistory } from '../../hooks/usePaginatedHistory';
+import { useRescanActions } from '../../hooks/useRescanActions';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import {
   HistoryEmptyState,
@@ -66,10 +67,18 @@ export const HistoryScreen: React.FC = () => {
     parseCreatedAt,
   } = usePaginatedHistory(tt);
 
+  const {
+    load: loadRescanActions,
+    refresh: refreshRescanActions,
+    toggleFavorite,
+    isFavorite,
+  } = useRescanActions();
+
   useFocusEffect(
     useCallback(() => {
-      loadInitial();
-    }, [loadInitial])
+      void loadInitial();
+      void loadRescanActions();
+    }, [loadInitial, loadRescanActions])
   );
 
   const handleDelete = useCallback(
@@ -85,6 +94,7 @@ export const HistoryScreen: React.FC = () => {
             onPress: async () => {
               try {
                 await deleteEntry(id);
+                await refreshRescanActions();
               } catch (error) {
                 console.error('Delete history failed:', error);
                 Alert.alert(
@@ -97,8 +107,12 @@ export const HistoryScreen: React.FC = () => {
         ]
       );
     },
-    [deleteEntry, tt]
+    [deleteEntry, refreshRescanActions, tt]
   );
+
+  const handleRefresh = useCallback(async () => {
+    await Promise.all([refresh(), refreshRescanActions()]);
+  }, [refresh, refreshRescanActions]);
 
   if (loading) {
     return <HistoryLoadingState label={tt('history', 'Geçmiş')} colors={colors} />;
@@ -158,10 +172,18 @@ export const HistoryScreen: React.FC = () => {
                 timeLabel={timePart}
                 beautyLabel={tt('beauty_label', 'Kozmetik')}
                 foodLabel={tt('food_label', 'Gıda')}
+                favoriteLabel={tt('favorite', 'Favori')}
+                unfavoriteLabel={tt('remove_favorite', 'Favoriden Çıkar')}
+                rescanLabel={tt('rescan_now', 'Yeniden Sorgula')}
                 fallbackBrand={tt('unknown_brand', 'Bilinmeyen Marka')}
                 fallbackName={tt('unnamed_product', 'İsimsiz Ürün')}
+                isFavorite={isFavorite(item.barcode)}
                 onPress={() => navigation.navigate('Detail', { barcode: item.barcode })}
                 onDelete={() => handleDelete(item.id)}
+                onRescan={() => navigation.navigate('Detail', { barcode: item.barcode })}
+                onToggleFavorite={() => {
+                  void toggleFavorite(item.barcode);
+                }}
                 colors={colors}
               />
             );
@@ -175,7 +197,7 @@ export const HistoryScreen: React.FC = () => {
                 title={tt('history', 'Geçmiş')}
                 subtitle={tt(
                   'history_swipe_hint',
-                  'Önceki barkod analizlerinizi burada görebilir, sağa kaydırarak silebilirsiniz.'
+                  'Önceki barkod analizlerinizi burada görebilir, sağa kaydırarak silebilir, favori ekleyebilir ve yeniden sorgulayabilirsiniz.'
                 )}
                 colors={colors}
                 topPadding={layout.headerTopPadding}
@@ -204,7 +226,7 @@ export const HistoryScreen: React.FC = () => {
                 colors={colors}
               />
               <View style={styles.footerBox}>
-                <AdBanner />
+                <AdBanner placement="history_footer" />
               </View>
               <View style={{ height: layout.contentBottomPadding }} />
             </>
@@ -217,7 +239,7 @@ export const HistoryScreen: React.FC = () => {
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
-              onRefresh={refresh}
+              onRefresh={handleRefresh}
               tintColor={colors.primary}
             />
           }
