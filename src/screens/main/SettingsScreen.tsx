@@ -7,10 +7,10 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TouchableOpacity,
   View,
+  Switch,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
@@ -26,10 +26,7 @@ import { useLanguage } from '../../context/LanguageContext';
 import { AdBanner } from '../../components/AdBanner';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useAdDiagnostics } from '../../hooks/useAdDiagnostics';
-import {
-  getRemoteProductCacheDiagnostics,
-  type RemoteProductCacheDiagnosticsSnapshot,
-} from '../../services/productRemoteCache.service';
+import { useFirebaseDiagnostics } from '../../hooks/useFirebaseDiagnostics';
 
 const APP_VERSION = 'v1.0.4';
 
@@ -166,7 +163,7 @@ export const SettingsScreen: React.FC = () => {
   });
 
   const adDiagnosticsEnabled = FEATURES.ads.diagnosticsLoggingEnabled;
-  const sharedCacheDiagnosticsEnabled = FEATURES.firebase.diagnosticsLoggingEnabled;
+  const firebaseDiagnosticsEnabled = FEATURES.firebase.diagnosticsLoggingEnabled;
 
   const {
     snapshot: adDiagnostics,
@@ -176,6 +173,16 @@ export const SettingsScreen: React.FC = () => {
     refresh: refreshDiagnostics,
   } = useAdDiagnostics({
     enabled: adDiagnosticsEnabled,
+  });
+
+  const {
+    snapshot: firebaseDiagnostics,
+    loading: firebaseDiagnosticsLoading,
+    refreshing: firebaseDiagnosticsRefreshing,
+    error: firebaseDiagnosticsError,
+    refresh: refreshFirebaseDiagnostics,
+  } = useFirebaseDiagnostics({
+    enabled: firebaseDiagnosticsEnabled,
   });
 
   const tt = useCallback(
@@ -191,15 +198,6 @@ export const SettingsScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [logoutLoading, setLogoutLoading] = useState(false);
-
-  const [sharedCacheDiagnostics, setSharedCacheDiagnostics] =
-    useState<RemoteProductCacheDiagnosticsSnapshot | null>(null);
-  const [sharedCacheDiagnosticsLoading, setSharedCacheDiagnosticsLoading] =
-    useState<boolean>(sharedCacheDiagnosticsEnabled);
-  const [sharedCacheDiagnosticsRefreshing, setSharedCacheDiagnosticsRefreshing] =
-    useState(false);
-  const [sharedCacheDiagnosticsError, setSharedCacheDiagnosticsError] =
-    useState<string | null>(null);
 
   const loadUserProfile = useCallback(async () => {
     try {
@@ -226,43 +224,6 @@ export const SettingsScreen: React.FC = () => {
     }
   }, [tt, user]);
 
-  const loadSharedCacheDiagnostics = useCallback(
-    async (options?: { refresh?: boolean }) => {
-      if (!sharedCacheDiagnosticsEnabled) {
-        setSharedCacheDiagnostics(null);
-        setSharedCacheDiagnosticsLoading(false);
-        setSharedCacheDiagnosticsRefreshing(false);
-        setSharedCacheDiagnosticsError(null);
-        return;
-      }
-
-      const isRefresh = Boolean(options?.refresh);
-
-      if (isRefresh) {
-        setSharedCacheDiagnosticsRefreshing(true);
-      } else {
-        setSharedCacheDiagnosticsLoading(true);
-      }
-
-      try {
-        setSharedCacheDiagnosticsError(null);
-        const snapshot = await getRemoteProductCacheDiagnostics();
-        setSharedCacheDiagnostics(snapshot);
-      } catch (error) {
-        console.error('Shared cache diagnostics load error:', error);
-        setSharedCacheDiagnosticsError(
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : 'Shared cache diagnostics yüklenemedi'
-        );
-      } finally {
-        setSharedCacheDiagnosticsLoading(false);
-        setSharedCacheDiagnosticsRefreshing(false);
-      }
-    },
-    [sharedCacheDiagnosticsEnabled]
-  );
-
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
@@ -284,19 +245,22 @@ export const SettingsScreen: React.FC = () => {
       };
 
       void fetchProfile();
-      void loadSharedCacheDiagnostics();
 
       return () => {
         isActive = false;
       };
-    }, [loadSharedCacheDiagnostics, loadUserProfile])
+    }, [loadUserProfile])
   );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([loadUserProfile(), loadSharedCacheDiagnostics({ refresh: true })]);
+    await Promise.all([
+      loadUserProfile(),
+      refreshDiagnostics(),
+      refreshFirebaseDiagnostics(),
+    ]);
     setRefreshing(false);
-  }, [loadSharedCacheDiagnostics, loadUserProfile]);
+  }, [loadUserProfile, refreshDiagnostics, refreshFirebaseDiagnostics]);
 
   const handleSafeOpenUrl = useCallback(
     async (url: string, fallbackMessage?: string) => {
@@ -406,9 +370,9 @@ export const SettingsScreen: React.FC = () => {
     return formatTimeValue(adDiagnostics?.fetchedAt);
   }, [adDiagnostics?.fetchedAt]);
 
-  const sharedCacheFetchedAtText = useMemo(() => {
-    return formatTimeValue(sharedCacheDiagnostics?.fetchedAt);
-  }, [sharedCacheDiagnostics?.fetchedAt]);
+  const firebaseDiagnosticsFetchedAtText = useMemo(() => {
+    return formatTimeValue(firebaseDiagnostics?.fetchedAt);
+  }, [firebaseDiagnostics?.fetchedAt]);
 
   return (
     <ScrollView
@@ -828,7 +792,7 @@ export const SettingsScreen: React.FC = () => {
         </>
       ) : null}
 
-      {sharedCacheDiagnosticsEnabled ? (
+      {firebaseDiagnosticsEnabled ? (
         <>
           <Text
             style={[
@@ -860,7 +824,7 @@ export const SettingsScreen: React.FC = () => {
                     {tt('firebase_shared_cache_runtime', 'Runtime + queue state')}
                   </Text>
                   <Text style={[styles.diagnosticsSubtitle, { color: colors.text }]}>
-                    {tt('last_refresh', 'Son yenileme')}: {sharedCacheFetchedAtText}
+                    {tt('last_refresh', 'Son yenileme')}: {firebaseDiagnosticsFetchedAtText}
                   </Text>
                 </View>
               </View>
@@ -868,19 +832,19 @@ export const SettingsScreen: React.FC = () => {
               <TouchableOpacity
                 style={[
                   styles.diagnosticsRefreshButton,
-                  sharedCacheDiagnosticsRefreshing && styles.diagnosticsRefreshButtonDisabled,
+                  firebaseDiagnosticsRefreshing && styles.diagnosticsRefreshButtonDisabled,
                   {
                     borderColor: colors.border,
                     backgroundColor: `${colors.primary}10`,
                   },
                 ]}
                 onPress={() => {
-                  void loadSharedCacheDiagnostics({ refresh: true });
+                  void refreshFirebaseDiagnostics();
                 }}
-                disabled={sharedCacheDiagnosticsRefreshing}
+                disabled={firebaseDiagnosticsRefreshing}
                 activeOpacity={0.85}
               >
-                {sharedCacheDiagnosticsRefreshing ? (
+                {firebaseDiagnosticsRefreshing ? (
                   <ActivityIndicator size="small" color={colors.primary} />
                 ) : (
                   <Ionicons name="refresh" size={18} color={colors.primary} />
@@ -888,24 +852,24 @@ export const SettingsScreen: React.FC = () => {
               </TouchableOpacity>
             </View>
 
-            {sharedCacheDiagnosticsLoading ? (
+            {firebaseDiagnosticsLoading ? (
               <View style={styles.diagnosticsLoadingWrap}>
                 <ActivityIndicator size="small" color={colors.primary} />
               </View>
             ) : null}
 
-            {sharedCacheDiagnosticsError ? (
-              <Text style={styles.diagnosticsErrorText}>{sharedCacheDiagnosticsError}</Text>
+            {firebaseDiagnosticsError ? (
+              <Text style={styles.diagnosticsErrorText}>{firebaseDiagnosticsError}</Text>
             ) : null}
 
-            {sharedCacheDiagnostics ? (
+            {firebaseDiagnostics ? (
               <>
                 <View style={styles.diagnosticsPillsRow}>
                   <View
                     style={[
                       styles.diagnosticsPill,
                       {
-                        backgroundColor: sharedCacheDiagnostics.runtimeReady
+                        backgroundColor: firebaseDiagnostics.runtimeReady
                           ? `${colors.primary}14`
                           : '#FF444414',
                       },
@@ -915,13 +879,13 @@ export const SettingsScreen: React.FC = () => {
                       style={[
                         styles.diagnosticsPillText,
                         {
-                          color: sharedCacheDiagnostics.runtimeReady
+                          color: firebaseDiagnostics.runtimeReady
                             ? colors.primary
                             : '#FF4444',
                         },
                       ]}
                     >
-                      Runtime: {boolStateText(sharedCacheDiagnostics.runtimeReady)}
+                      Runtime: {boolStateText(firebaseDiagnostics.runtimeReady)}
                     </Text>
                   </View>
 
@@ -929,7 +893,7 @@ export const SettingsScreen: React.FC = () => {
                     style={[
                       styles.diagnosticsPill,
                       {
-                        backgroundColor: sharedCacheDiagnostics.writeFeatureEnabled
+                        backgroundColor: firebaseDiagnostics.writeFeatureEnabled
                           ? `${colors.primary}14`
                           : `${colors.border}55`,
                       },
@@ -939,13 +903,13 @@ export const SettingsScreen: React.FC = () => {
                       style={[
                         styles.diagnosticsPillText,
                         {
-                          color: sharedCacheDiagnostics.writeFeatureEnabled
+                          color: firebaseDiagnostics.writeFeatureEnabled
                             ? colors.primary
                             : colors.text,
                         },
                       ]}
                     >
-                      Write: {boolStateText(sharedCacheDiagnostics.writeFeatureEnabled)}
+                      Write: {boolStateText(firebaseDiagnostics.writeFeatureEnabled)}
                     </Text>
                   </View>
 
@@ -954,7 +918,7 @@ export const SettingsScreen: React.FC = () => {
                       styles.diagnosticsPill,
                       {
                         backgroundColor:
-                          sharedCacheDiagnostics.queueSize > 0
+                          firebaseDiagnostics.queueSize > 0
                             ? `${colors.border}55`
                             : `${colors.primary}14`,
                       },
@@ -965,13 +929,13 @@ export const SettingsScreen: React.FC = () => {
                         styles.diagnosticsPillText,
                         {
                           color:
-                            sharedCacheDiagnostics.queueSize > 0
+                            firebaseDiagnostics.queueSize > 0
                               ? colors.text
                               : colors.primary,
                         },
                       ]}
                     >
-                      Queue: {sharedCacheDiagnostics.queueSize}
+                      Queue: {firebaseDiagnostics.queueSize}
                     </Text>
                   </View>
                 </View>
@@ -982,7 +946,7 @@ export const SettingsScreen: React.FC = () => {
                       Project
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatOptionalText(sharedCacheDiagnostics.projectId)}
+                      {formatOptionalText(firebaseDiagnostics.projectId)}
                     </Text>
                   </View>
 
@@ -991,7 +955,7 @@ export const SettingsScreen: React.FC = () => {
                       Runtime source
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {sharedCacheDiagnostics.runtimeSource}
+                      {firebaseDiagnostics.runtimeSource}
                     </Text>
                   </View>
 
@@ -1000,7 +964,7 @@ export const SettingsScreen: React.FC = () => {
                       Read feature
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(sharedCacheDiagnostics.readFeatureEnabled)}
+                      {boolStateText(firebaseDiagnostics.readFeatureEnabled)}
                     </Text>
                   </View>
 
@@ -1009,7 +973,7 @@ export const SettingsScreen: React.FC = () => {
                       Write feature
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(sharedCacheDiagnostics.writeFeatureEnabled)}
+                      {boolStateText(firebaseDiagnostics.writeFeatureEnabled)}
                     </Text>
                   </View>
 
@@ -1018,7 +982,7 @@ export const SettingsScreen: React.FC = () => {
                       Read validation
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(sharedCacheDiagnostics.readValidationEnabled)}
+                      {boolStateText(firebaseDiagnostics.readValidationEnabled)}
                     </Text>
                   </View>
 
@@ -1027,7 +991,7 @@ export const SettingsScreen: React.FC = () => {
                       Write validation
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(sharedCacheDiagnostics.writeValidationEnabled)}
+                      {boolStateText(firebaseDiagnostics.writeValidationEnabled)}
                     </Text>
                   </View>
 
@@ -1036,7 +1000,7 @@ export const SettingsScreen: React.FC = () => {
                       Queue ready / blocked
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {sharedCacheDiagnostics.readyQueueSize} / {sharedCacheDiagnostics.blockedQueueSize}
+                      {firebaseDiagnostics.readyQueueSize} / {firebaseDiagnostics.blockedQueueSize}
                     </Text>
                   </View>
 
@@ -1045,7 +1009,7 @@ export const SettingsScreen: React.FC = () => {
                       Lifecycle attached
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(sharedCacheDiagnostics.lifecycleAttached)}
+                      {boolStateText(firebaseDiagnostics.lifecycleAttached)}
                     </Text>
                   </View>
 
@@ -1054,7 +1018,7 @@ export const SettingsScreen: React.FC = () => {
                       Last flush
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatTimeValue(sharedCacheDiagnostics.lastFlushAt)}
+                      {formatTimeValue(firebaseDiagnostics.lastFlushAt)}
                     </Text>
                   </View>
 
@@ -1063,7 +1027,7 @@ export const SettingsScreen: React.FC = () => {
                       Last flush reason
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatOptionalText(sharedCacheDiagnostics.lastFlushReason)}
+                      {formatOptionalText(firebaseDiagnostics.lastFlushReason)}
                     </Text>
                   </View>
 
@@ -1072,7 +1036,7 @@ export const SettingsScreen: React.FC = () => {
                       Consecutive failures
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {sharedCacheDiagnostics.consecutiveFailureCount}
+                      {firebaseDiagnostics.consecutiveFailureCount}
                     </Text>
                   </View>
 
@@ -1081,7 +1045,7 @@ export const SettingsScreen: React.FC = () => {
                       Last read failure
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatOptionalText(sharedCacheDiagnostics.lastReadFailure)}
+                      {formatOptionalText(firebaseDiagnostics.lastReadFailure)}
                     </Text>
                   </View>
 
@@ -1090,7 +1054,7 @@ export const SettingsScreen: React.FC = () => {
                       Last write failure
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatOptionalText(sharedCacheDiagnostics.lastWriteFailure)}
+                      {formatOptionalText(firebaseDiagnostics.lastWriteFailure)}
                     </Text>
                   </View>
 
@@ -1099,7 +1063,7 @@ export const SettingsScreen: React.FC = () => {
                       Queue flush error
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatOptionalText(sharedCacheDiagnostics.lastFlushError)}
+                      {formatOptionalText(firebaseDiagnostics.lastFlushError)}
                     </Text>
                   </View>
                 </View>

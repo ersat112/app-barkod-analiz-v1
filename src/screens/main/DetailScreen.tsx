@@ -9,7 +9,10 @@ import {
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 
-import { fetchProductByBarcode, type ProductLookupResult } from '../../api/productResolver';
+import {
+  lookupProductByBarcode,
+  type ProductLookupResult,
+} from '../../services/productLookup.service';
 import { FEATURES } from '../../config/features';
 import { useTheme } from '../../context/ThemeContext';
 import { useMissingProductFlow } from '../../hooks/useMissingProductFlow';
@@ -356,7 +359,7 @@ export const DetailScreen: React.FC = () => {
       setImageError(false);
       setNotFoundReason(null);
 
-      const result: ProductLookupResult = await fetchProductByBarcode(normalizedRouteBarcode);
+      const result: ProductLookupResult = await lookupProductByBarcode(normalizedRouteBarcode);
 
       if (!result.found) {
         useScanStore.getState().markNotFound(result.barcode);
