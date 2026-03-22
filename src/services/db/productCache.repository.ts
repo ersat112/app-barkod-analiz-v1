@@ -169,10 +169,12 @@ export const upsertProductCache = (input: ProductCacheUpsertInput): void => {
         : resolveProductCacheExpiry(input.cacheStatus, fetchedAt);
 
     const payloadJson =
-      input.product == null ? null : JSON.stringify({
-        ...input.product,
-        barcode: normalizedBarcode,
-      });
+      input.product == null
+        ? null
+        : JSON.stringify({
+            ...input.product,
+            barcode: normalizedBarcode,
+          });
 
     const sourceName = safeText(
       input.sourceName ?? input.product?.sourceName ?? '',
@@ -357,3 +359,10 @@ export const getProductCacheCount = (): number => {
     return 0;
   }
 };
+
+export const normalizeBarcode = normalizeProductCacheBarcode;
+export const isValidBarcode = isProductCacheBarcodeValid;
+export const getCachedProduct = getLocalProductCacheHit;
+export const setCachedProductFound = setLocalProductCacheFound;
+export const setCachedProductNotFound = setLocalProductCacheNotFound;
+export const invalidateProductCacheBarcode = invalidateLocalProductCacheBarcode;
