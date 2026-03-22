@@ -1,9 +1,9 @@
-import { deleteHistoryEntryById, getDatabase, type HistoryEntry } from './db';
+import { deleteHistoryEntryById, getDatabase, TABLES, type HistoryEntry } from './db';
 
 export const HISTORY_PAGE_SIZE = 20;
 export type HistoryFilterType = 'all' | 'food' | 'beauty';
 
-type HistoryRow = {
+export type HistoryRow = {
   id: number;
   barcode: string;
   name: string;
@@ -28,7 +28,7 @@ export type HistoryPageResult = {
 
 const db = getDatabase();
 
-const normalizeHistoryRow = (row: HistoryRow): HistoryEntry => {
+export const normalizeHistoryRow = (row: HistoryRow): HistoryEntry => {
   return {
     id: row.id,
     barcode: row.barcode,
@@ -107,7 +107,7 @@ export const getHistoryPage = ({
       source_name as sourceName,
       created_at,
       updated_at
-     FROM history
+     FROM ${TABLES.HISTORY}
      ${whereSql}
      ORDER BY datetime(created_at) DESC, id DESC
      LIMIT ? OFFSET ?`,
