@@ -1,14 +1,15 @@
-import { doc, getDoc, Timestamp } from 'firebase/firestore';
+import {
+  doc,
+  getDoc,
+  Timestamp,
+} from 'firebase/firestore';
 
 import {
   FEATURES,
   SHARED_PRODUCT_CACHE_COLLECTION,
 } from '../config/features';
-import {
-  db as firestoreDb,
-  getFirebaseServicesDiagnosticsSnapshot,
-  isFirebaseServicesReady,
-} from '../config/firebase';
+import { db as firestoreDb } from '../config/firebase';
+import { FIREBASE_RUNTIME } from '../config/firebaseRuntime';
 import type { Product, ProductSource, ProductType } from '../utils/analysis';
 import {
   isProductCacheBarcodeValid,
@@ -54,8 +55,8 @@ export type RemoteProductCacheHit =
 export type RemoteProductCacheDiagnosticsSnapshot = {
   fetchedAt: string;
   runtimeReady: boolean;
+  runtimeSource: string;
   projectId: string;
-  effectiveSource: string;
   readFeatureEnabled: boolean;
   writeFeatureEnabled: boolean;
   readValidationEnabled: boolean;
@@ -123,6 +124,19 @@ const toErrorMessage = (error: unknown): string => {
   return 'unknown_remote_cache_error';
 };
 
+const isFirebaseRuntimeReady = (): boolean => {
+  const config = FIREBASE_RUNTIME.config;
+
+  return Boolean(
+    config.apiKey?.trim() &&
+      config.authDomain?.trim() &&
+      config.projectId?.trim() &&
+      config.storageBucket?.trim() &&
+      config.messagingSenderId?.trim() &&
+      config.appId?.trim()
+  );
+};
+
 const canUseRemoteRead = (): boolean => {
   if (!FEATURES.productRepository.firestoreReadEnabled) {
     return false;
@@ -136,13 +150,14 @@ const canUseRemoteRead = (): boolean => {
     return true;
   }
 
-  const ready = isFirebaseServicesReady();
+  const ready = isFirebaseRuntimeReady();
 
   if (!ready && !hasLoggedReadValidationFailure) {
     hasLoggedReadValidationFailure = true;
     lastReadFailure = 'firebase_runtime_not_ready';
     console.warn('[ProductRemoteCache] firestore read disabled by runtime validation', {
-      diagnostics: getFirebaseServicesDiagnosticsSnapshot(),
+      projectId: FIREBASE_RUNTIME.config.projectId,
+      source: FIREBASE_RUNTIME.source,
     });
   }
 
@@ -158,13 +173,12 @@ export const resetRemoteProductCacheDiagnostics = (): void => {
 export const getRemoteProductCacheDiagnostics =
   async (): Promise<RemoteProductCacheDiagnosticsSnapshot> => {
     const queueDiagnostics = await getRemoteProductCacheWriteQueueDiagnostics();
-    const firebaseDiagnostics = getFirebaseServicesDiagnosticsSnapshot();
 
     return {
       fetchedAt: new Date().toISOString(),
-      runtimeReady: isFirebaseServicesReady(),
-      projectId: firebaseDiagnostics.projectId,
-      effectiveSource: firebaseDiagnostics.effectiveSource,
+      runtimeReady: queueDiagnostics.runtimeReady,
+      runtimeSource: queueDiagnostics.runtimeSource,
+      projectId: queueDiagnostics.projectId,
       readFeatureEnabled: FEATURES.productRepository.firestoreReadEnabled,
       writeFeatureEnabled: FEATURES.productRepository.firestoreWriteEnabled,
       readValidationEnabled:
@@ -182,8 +196,7 @@ export const getRemoteProductCacheDiagnostics =
       lastFlushError: queueDiagnostics.lastFlushError,
       consecutiveFailureCount: queueDiagnostics.consecutiveFailureCount,
       lastReadFailure,
-      lastWriteFailure:
-        lastWriteFailure || queueDiagnostics.lastFlushError || null,
+      lastWriteFailure,
     };
   };
 
@@ -264,6 +277,7 @@ export const getRemoteCachedProduct = async (
 export const setRemoteCachedProductFound = async ({
   barcode,
   product,
+  ttlMs,
 }: {
   barcode: string;
   product: Product;
@@ -284,19 +298,21 @@ export const setRemoteCachedProductFound = async ({
     const accepted = await enqueueRemoteProductCacheFoundWrite({
       barcode: normalizedBarcode,
       product,
+      ttlMs,
     });
 
     lastWriteFailure = accepted ? null : 'remote_write_queue_rejected';
     return accepted;
   } catch (error) {
     lastWriteFailure = toErrorMessage(error);
-    console.warn('[ProductRemoteCache] queue(found) failed:', error);
+    console.warn('[ProductRemoteCache] enqueue(found) failed:', error);
     return false;
   }
 };
 
 export const setRemoteCachedProductNotFound = async ({
   barcode,
+  ttlMs,
 }: {
   barcode: string;
   ttlMs?: number;
@@ -315,13 +331,14 @@ export const setRemoteCachedProductNotFound = async ({
   try {
     const accepted = await enqueueRemoteProductCacheNotFoundWrite({
       barcode: normalizedBarcode,
+      ttlMs,
     });
 
     lastWriteFailure = accepted ? null : 'remote_write_queue_rejected';
     return accepted;
   } catch (error) {
     lastWriteFailure = toErrorMessage(error);
-    console.warn('[ProductRemoteCache] queue(not_found) failed:', error);
+    console.warn('[ProductRemoteCache] enqueue(not_found) failed:', error);
     return false;
   }
 };

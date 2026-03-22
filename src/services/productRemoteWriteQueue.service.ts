@@ -13,15 +13,14 @@ import {
   REMOTE_PRODUCT_CACHE_WRITE_QUEUE_STORAGE_KEY,
   SHARED_PRODUCT_CACHE_COLLECTION,
 } from '../config/features';
-import {
-  db as firestoreDb,
-  getFirebaseServicesDiagnosticsSnapshot,
-  isFirebaseServicesReady,
-} from '../config/firebase';
+import { FIREBASE_RUNTIME } from '../config/firebaseRuntime';
+import { db as firestoreDb } from '../config/firebase';
+import { analyticsService } from './analytics.service';
 import type { Product } from '../utils/analysis';
 
 type QueueFlushReason =
   | 'enqueue'
+  | 'app_boot'
   | 'app_active'
   | 'app_inactive'
   | 'app_background'
@@ -40,46 +39,48 @@ type QueueItemBase = {
   ttlMs: number;
 };
 
-type FoundQueueItem = QueueItemBase & {
+type QueueFoundItem = QueueItemBase & {
   kind: 'found';
   product: Product;
 };
 
-type NotFoundQueueItem = QueueItemBase & {
+type QueueNotFoundItem = QueueItemBase & {
   kind: 'not_found';
 };
 
-type RemoteProductCacheWriteQueueItem = FoundQueueItem | NotFoundQueueItem;
+type RemoteWriteQueueItem = QueueFoundItem | QueueNotFoundItem;
 
-type PersistedQueueShape = {
+type PersistedQueueState = {
   version: 1;
-  items: RemoteProductCacheWriteQueueItem[];
+  items: RemoteWriteQueueItem[];
 };
 
-export type RemoteProductCacheWriteQueueDiagnostics = {
+export type RemoteWriteQueueDiagnostics = {
   fetchedAt: string;
   queueSize: number;
   readyQueueSize: number;
   blockedQueueSize: number;
   lifecycleAttached: boolean;
   runtimeReady: boolean;
+  runtimeSource: string;
   projectId: string;
-  effectiveSource: string;
   lastFlushAt: string | null;
   lastFlushReason: QueueFlushReason | null;
   lastFlushError: string | null;
   consecutiveFailureCount: number;
 };
 
-const MAX_QUEUE_BATCH_SIZE = 10;
+const QUEUE_VERSION = 1;
+const MAX_BATCH_SIZE = 10;
 const BASE_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 15 * 60 * 1000;
 
-let queueState: RemoteProductCacheWriteQueueItem[] | null = null;
-let hydratePromise: Promise<RemoteProductCacheWriteQueueItem[]> | null = null;
+let hydrationPromise: Promise<RemoteWriteQueueItem[]> | null = null;
 let flushPromise: Promise<number> | null = null;
+let inMemoryQueue: RemoteWriteQueueItem[] | null = null;
 let appStateSubscription: NativeEventSubscription | null = null;
 let lifecycleAttached = false;
+
 let lastFlushAt: string | null = null;
 let lastFlushReason: QueueFlushReason | null = null;
 let lastFlushError: string | null = null;
@@ -87,8 +88,8 @@ let consecutiveFailureCount = 0;
 
 const nowIso = (): string => new Date().toISOString();
 
-const createQueueItemId = (): string => {
-  return `rpcw_${Date.now().toString(36)}_${Math.random()
+const createQueueId = (): string => {
+  return `rwq_${Date.now().toString(36)}_${Math.random()
     .toString(36)
     .slice(2, 10)}`;
 };
@@ -125,9 +126,17 @@ const stripUndefinedDeep = <T>(value: T): T => {
   return value;
 };
 
-const getRetryDelayMs = (attemptCount: number): number => {
-  const exponent = Math.max(0, attemptCount - 1);
-  return Math.min(BASE_RETRY_DELAY_MS * 2 ** exponent, MAX_RETRY_DELAY_MS);
+const isFirebaseRuntimeReady = (): boolean => {
+  const config = FIREBASE_RUNTIME.config;
+
+  return Boolean(
+    config.apiKey?.trim() &&
+      config.authDomain?.trim() &&
+      config.projectId?.trim() &&
+      config.storageBucket?.trim() &&
+      config.messagingSenderId?.trim() &&
+      config.appId?.trim()
+  );
 };
 
 const canAcceptWrites = (): boolean => {
@@ -135,7 +144,7 @@ const canAcceptWrites = (): boolean => {
 };
 
 const canFlushWrites = (): boolean => {
-  if (!canAcceptWrites()) {
+  if (!FEATURES.productRepository.firestoreWriteEnabled) {
     return false;
   }
 
@@ -147,16 +156,19 @@ const canFlushWrites = (): boolean => {
     return true;
   }
 
-  return isFirebaseServicesReady();
+  return isFirebaseRuntimeReady();
 };
 
-const persistQueue = async (
-  items: RemoteProductCacheWriteQueueItem[]
-): Promise<void> => {
-  queueState = items;
+const getRetryDelayMs = (attemptCount: number): number => {
+  const safeAttempts = Math.max(1, attemptCount);
+  return Math.min(BASE_RETRY_DELAY_MS * 2 ** (safeAttempts - 1), MAX_RETRY_DELAY_MS);
+};
 
-  const payload: PersistedQueueShape = {
-    version: 1,
+const persistQueue = async (items: RemoteWriteQueueItem[]): Promise<void> => {
+  inMemoryQueue = items;
+
+  const payload: PersistedQueueState = {
+    version: QUEUE_VERSION,
     items,
   };
 
@@ -166,35 +178,35 @@ const persistQueue = async (
   );
 };
 
-const hydrateQueue = async (): Promise<RemoteProductCacheWriteQueueItem[]> => {
-  if (queueState) {
-    return queueState;
+const hydrateQueue = async (): Promise<RemoteWriteQueueItem[]> => {
+  if (inMemoryQueue) {
+    return inMemoryQueue;
   }
 
-  if (hydratePromise) {
-    return hydratePromise;
+  if (hydrationPromise) {
+    return hydrationPromise;
   }
 
-  hydratePromise = (async () => {
+  hydrationPromise = (async () => {
     try {
       const raw = await AsyncStorage.getItem(
         REMOTE_PRODUCT_CACHE_WRITE_QUEUE_STORAGE_KEY
       );
 
       if (!raw) {
-        queueState = [];
-        return queueState;
+        inMemoryQueue = [];
+        return inMemoryQueue;
       }
 
-      const parsed = JSON.parse(raw) as Partial<PersistedQueueShape>;
+      const parsed = JSON.parse(raw) as Partial<PersistedQueueState>;
 
       if (!Array.isArray(parsed.items)) {
-        queueState = [];
-        return queueState;
+        inMemoryQueue = [];
+        return inMemoryQueue;
       }
 
-      queueState = parsed.items.filter(
-        (item): item is RemoteProductCacheWriteQueueItem =>
+      inMemoryQueue = parsed.items.filter(
+        (item): item is RemoteWriteQueueItem =>
           Boolean(
             item &&
               typeof item === 'object' &&
@@ -204,34 +216,91 @@ const hydrateQueue = async (): Promise<RemoteProductCacheWriteQueueItem[]> => {
           )
       );
 
-      return queueState;
+      return inMemoryQueue;
     } catch (error) {
       console.warn('[RemoteWriteQueue] hydrate failed:', error);
-      queueState = [];
-      return queueState;
+      inMemoryQueue = [];
+      return inMemoryQueue;
     } finally {
-      hydratePromise = null;
+      hydrationPromise = null;
     }
   })();
 
-  return hydratePromise;
+  return hydrationPromise;
 };
 
 const upsertQueueItem = (
-  items: RemoteProductCacheWriteQueueItem[],
-  nextItem: RemoteProductCacheWriteQueueItem
-): RemoteProductCacheWriteQueueItem[] => {
+  items: RemoteWriteQueueItem[],
+  nextItem: RemoteWriteQueueItem
+): RemoteWriteQueueItem[] => {
   const filtered = items.filter((item) => item.barcode !== nextItem.barcode);
+
   return [nextItem, ...filtered].sort((left, right) => {
     return left.nextAttemptAt - right.nextAttemptAt;
   });
 };
 
-const writeFoundItem = async (
-  item: FoundQueueItem,
-  now: number
-): Promise<void> => {
+const trackEnqueued = (item: RemoteWriteQueueItem): void => {
+  void analyticsService.track(
+    'remote_cache_write_queue_enqueued',
+    {
+      barcode: item.barcode,
+      kind: item.kind,
+      attemptCount: item.attemptCount,
+      ttlMs: item.ttlMs,
+    },
+    { flush: false }
+  );
+};
+
+const trackFlushSucceeded = (params: {
+  reason: QueueFlushReason;
+  flushedCount: number;
+  queueSizeAfterFlush: number;
+}): void => {
+  void analyticsService.track(
+    'remote_cache_write_queue_flush_succeeded',
+    {
+      reason: params.reason,
+      flushedCount: params.flushedCount,
+      queueSizeAfterFlush: params.queueSizeAfterFlush,
+    },
+    { flush: false }
+  );
+};
+
+const trackFlushFailed = (params: {
+  reason: QueueFlushReason;
+  queueSize: number;
+  error: string;
+}): void => {
+  void analyticsService.track(
+    'remote_cache_write_queue_flush_failed',
+    {
+      reason: params.reason,
+      queueSize: params.queueSize,
+      error: params.error,
+    },
+    { flush: false }
+  );
+};
+
+const trackItemFailed = (item: RemoteWriteQueueItem, error: string): void => {
+  void analyticsService.track(
+    'remote_cache_write_queue_item_failed',
+    {
+      barcode: item.barcode,
+      kind: item.kind,
+      attemptCount: item.attemptCount,
+      error,
+    },
+    { flush: false }
+  );
+};
+
+const writeFoundItem = async (item: QueueFoundItem, now: number): Promise<void> => {
   const expiresAt = now + Math.max(1, item.ttlMs);
+
   const productPayload = stripUndefinedDeep<Product>({
     ...item.product,
     barcode: item.barcode,
@@ -258,7 +327,7 @@ const writeFoundItem = async (
 };
 
 const writeNotFoundItem = async (
-  item: NotFoundQueueItem,
+  item: QueueNotFoundItem,
   now: number
 ): Promise<void> => {
   const expiresAt = now + Math.max(1, item.ttlMs);
@@ -283,11 +352,11 @@ const writeNotFoundItem = async (
 };
 
 const flushInternal = async (reason: QueueFlushReason): Promise<number> => {
-  const items = await hydrateQueue();
+  const queue = await hydrateQueue();
 
   lastFlushReason = reason;
 
-  if (!items.length) {
+  if (!queue.length) {
     lastFlushAt = nowIso();
     lastFlushError = null;
     consecutiveFailureCount = 0;
@@ -297,24 +366,29 @@ const flushInternal = async (reason: QueueFlushReason): Promise<number> => {
   if (!canFlushWrites()) {
     lastFlushAt = nowIso();
     lastFlushError = 'firebase_runtime_not_ready';
+    trackFlushFailed({
+      reason,
+      queueSize: queue.length,
+      error: lastFlushError,
+    });
     return 0;
   }
 
   const now = Date.now();
-  const eligibleItems = items
+  const eligible = queue
     .filter((item) => item.nextAttemptAt <= now)
-    .slice(0, MAX_QUEUE_BATCH_SIZE);
+    .slice(0, MAX_BATCH_SIZE);
 
-  if (!eligibleItems.length) {
+  if (!eligible.length) {
     lastFlushAt = nowIso();
     lastFlushError = null;
     return 0;
   }
 
-  let nextQueue = [...items];
+  let nextQueue = [...queue];
   let flushedCount = 0;
 
-  for (const item of eligibleItems) {
+  for (const item of eligible) {
     try {
       if (item.kind === 'found') {
         await writeFoundItem(item, now);
@@ -327,32 +401,41 @@ const flushInternal = async (reason: QueueFlushReason): Promise<number> => {
       lastFlushError = null;
       consecutiveFailureCount = 0;
     } catch (error) {
-      const errorMessage = toErrorMessage(error);
-      const updatedItem: RemoteProductCacheWriteQueueItem =
+      const message = toErrorMessage(error);
+      const nextAttemptAt = now + getRetryDelayMs(item.attemptCount + 1);
+
+      const updatedItem: RemoteWriteQueueItem =
         item.kind === 'found'
           ? {
               ...item,
               attemptCount: item.attemptCount + 1,
-              nextAttemptAt: now + getRetryDelayMs(item.attemptCount + 1),
+              nextAttemptAt,
               lastAttemptAt: nowIso(),
-              lastError: errorMessage,
+              lastError: message,
               updatedAt: nowIso(),
             }
           : {
               ...item,
               attemptCount: item.attemptCount + 1,
-              nextAttemptAt: now + getRetryDelayMs(item.attemptCount + 1),
+              nextAttemptAt,
               lastAttemptAt: nowIso(),
-              lastError: errorMessage,
+              lastError: message,
               updatedAt: nowIso(),
             };
 
       nextQueue = nextQueue.map((queued) =>
         queued.id === item.id ? updatedItem : queued
       );
-      lastFlushError = errorMessage;
+
+      lastFlushError = message;
       consecutiveFailureCount += 1;
-      console.warn('[RemoteWriteQueue] flush item failed:', error);
+      trackItemFailed(item, message);
+      trackFlushFailed({
+        reason,
+        queueSize: nextQueue.length,
+        error: message,
+      });
+      console.warn('[RemoteWriteQueue] flush failed:', error);
       break;
     }
   }
@@ -360,10 +443,18 @@ const flushInternal = async (reason: QueueFlushReason): Promise<number> => {
   await persistQueue(nextQueue);
   lastFlushAt = nowIso();
 
+  if (flushedCount > 0) {
+    trackFlushSucceeded({
+      reason,
+      flushedCount,
+      queueSizeAfterFlush: nextQueue.length,
+    });
+  }
+
   return flushedCount;
 };
 
-const handleAppStateChange = (nextState: AppStateStatus): void => {
+const onAppStateChange = (nextState: AppStateStatus): void => {
   if (nextState === 'active') {
     void flushRemoteProductCacheWriteQueue({ reason: 'app_active' });
     return;
@@ -386,7 +477,18 @@ export const initializeRemoteProductCacheWriteQueue = (): void => {
 
   lifecycleAttached = true;
   void hydrateQueue();
-  appStateSubscription = AppState.addEventListener('change', handleAppStateChange);
+  appStateSubscription = AppState.addEventListener('change', onAppStateChange);
+};
+
+export const teardownRemoteProductCacheWriteQueue = (): void => {
+  if (!appStateSubscription) {
+    lifecycleAttached = false;
+    return;
+  }
+
+  appStateSubscription.remove();
+  appStateSubscription = null;
+  lifecycleAttached = false;
 };
 
 export const enqueueRemoteProductCacheFoundWrite = async ({
@@ -402,11 +504,12 @@ export const enqueueRemoteProductCacheFoundWrite = async ({
     return false;
   }
 
-  const items = await hydrateQueue();
-  const nextItem: FoundQueueItem = {
-    id: createQueueItemId(),
-    kind: 'found',
+  const queue = await hydrateQueue();
+
+  const item: QueueFoundItem = {
+    id: createQueueId(),
     barcode,
+    kind: 'found',
     product,
     ttlMs,
     enqueuedAt: nowIso(),
@@ -417,7 +520,8 @@ export const enqueueRemoteProductCacheFoundWrite = async ({
     lastError: null,
   };
 
-  await persistQueue(upsertQueueItem(items, nextItem));
+  await persistQueue(upsertQueueItem(queue, item));
+  trackEnqueued(item);
   void flushRemoteProductCacheWriteQueue({ reason: 'enqueue' });
   return true;
 };
@@ -433,11 +537,12 @@ export const enqueueRemoteProductCacheNotFoundWrite = async ({
     return false;
   }
 
-  const items = await hydrateQueue();
-  const nextItem: NotFoundQueueItem = {
-    id: createQueueItemId(),
-    kind: 'not_found',
+  const queue = await hydrateQueue();
+
+  const item: QueueNotFoundItem = {
+    id: createQueueId(),
     barcode,
+    kind: 'not_found',
     ttlMs,
     enqueuedAt: nowIso(),
     updatedAt: nowIso(),
@@ -447,7 +552,8 @@ export const enqueueRemoteProductCacheNotFoundWrite = async ({
     lastError: null,
   };
 
-  await persistQueue(upsertQueueItem(items, nextItem));
+  await persistQueue(upsertQueueItem(queue, item));
+  trackEnqueued(item);
   void flushRemoteProductCacheWriteQueue({ reason: 'enqueue' });
   return true;
 };
@@ -471,27 +577,24 @@ export const flushRemoteProductCacheWriteQueue = async ({
 };
 
 export const getRemoteProductCacheWriteQueueDiagnostics =
-  async (): Promise<RemoteProductCacheWriteQueueDiagnostics> => {
-    const items = await hydrateQueue();
+  async (): Promise<RemoteWriteQueueDiagnostics> => {
+    const queue = await hydrateQueue();
     const now = Date.now();
-    const readyQueueSize = items.filter((item) => item.nextAttemptAt <= now).length;
-    const blockedQueueSize = Math.max(0, items.length - readyQueueSize);
-    const firebaseDiagnostics = getFirebaseServicesDiagnosticsSnapshot();
+    const readyQueueSize = queue.filter((item) => item.nextAttemptAt <= now).length;
+    const blockedQueueSize = Math.max(0, queue.length - readyQueueSize);
 
     return {
       fetchedAt: nowIso(),
-      queueSize: items.length,
+      queueSize: queue.length,
       readyQueueSize,
       blockedQueueSize,
       lifecycleAttached,
-      runtimeReady: isFirebaseServicesReady(),
-      projectId: firebaseDiagnostics.projectId,
-      effectiveSource: firebaseDiagnostics.effectiveSource,
+      runtimeReady: isFirebaseRuntimeReady(),
+      runtimeSource: FIREBASE_RUNTIME.source,
+      projectId: FIREBASE_RUNTIME.config.projectId?.trim() || '',
       lastFlushAt,
       lastFlushReason,
       lastFlushError,
       consecutiveFailureCount,
     };
   };
-
-initializeRemoteProductCacheWriteQueue();
