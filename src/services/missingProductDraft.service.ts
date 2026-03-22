@@ -9,6 +9,16 @@ export type MissingProductDraftStatus =
   | 'synced'
   | 'sync_failed';
 
+export type MissingProductEntryPoint = 'detail_not_found' | 'manual';
+export type MissingProductReviewStatus =
+  | 'pending'
+  | 'approved'
+  | 'rejected';
+export type MissingProductReviewQueueStatus =
+  | 'local_draft'
+  | 'queued_remote'
+  | 'synced_remote';
+
 export type MissingProductDraft = {
   localId: string;
   barcode: string;
@@ -26,6 +36,10 @@ export type MissingProductDraft = {
   last_sync_attempt_at?: string;
   last_synced_at?: string;
   sync_error?: string;
+  entry_point: MissingProductEntryPoint;
+  source_screen: string;
+  review_status: MissingProductReviewStatus;
+  review_queue_status: MissingProductReviewQueueStatus;
 };
 
 export type CreateMissingProductDraftInput = {
@@ -37,6 +51,8 @@ export type CreateMissingProductDraftInput = {
   ingredients_text: string;
   notes: string;
   type: MissingProductType;
+  entry_point?: MissingProductEntryPoint;
+  source_screen?: string;
 };
 
 const safeText = (value?: string | null): string => {
@@ -94,6 +110,20 @@ const normalizeDraft = (value: unknown): MissingProductDraft | null => {
       ? raw.type
       : 'unknown';
 
+  const entryPoint: MissingProductEntryPoint =
+    raw.entry_point === 'manual' ? 'manual' : 'detail_not_found';
+
+  const reviewStatus: MissingProductReviewStatus =
+    raw.review_status === 'approved' || raw.review_status === 'rejected'
+      ? raw.review_status
+      : 'pending';
+
+  const reviewQueueStatus: MissingProductReviewQueueStatus =
+    raw.review_queue_status === 'queued_remote' ||
+    raw.review_queue_status === 'synced_remote'
+      ? raw.review_queue_status
+      : 'local_draft';
+
   return {
     localId:
       typeof raw.localId === 'string' && raw.localId.trim()
@@ -114,6 +144,10 @@ const normalizeDraft = (value: unknown): MissingProductDraft | null => {
     last_sync_attempt_at: safeText(raw.last_sync_attempt_at) || undefined,
     last_synced_at: safeText(raw.last_synced_at) || undefined,
     sync_error: safeText(raw.sync_error) || undefined,
+    entry_point: entryPoint,
+    source_screen: safeText(raw.source_screen) || 'MissingProductScreen',
+    review_status: reviewStatus,
+    review_queue_status: reviewQueueStatus,
   };
 };
 
@@ -169,6 +203,10 @@ export const saveMissingProductDraft = async (
     created_at: now,
     updated_at: now,
     status: 'draft',
+    entry_point: input.entry_point === 'manual' ? 'manual' : 'detail_not_found',
+    source_screen: safeText(input.source_screen) || 'MissingProductScreen',
+    review_status: 'pending',
+    review_queue_status: 'local_draft',
   };
 
   const drafts = await getMissingProductDrafts();
@@ -196,6 +234,23 @@ export const updateMissingProductDraft = async (
     barcode: normalizeMissingProductBarcode(
       typeof patch.barcode === 'string' ? patch.barcode : current.barcode
     ),
+    entry_point: patch.entry_point === 'manual' ? 'manual' : current.entry_point,
+    source_screen:
+      typeof patch.source_screen === 'string' && patch.source_screen.trim()
+        ? patch.source_screen.trim()
+        : current.source_screen,
+    review_status:
+      patch.review_status === 'approved' || patch.review_status === 'rejected'
+        ? patch.review_status
+        : patch.review_status === 'pending'
+          ? 'pending'
+          : current.review_status,
+    review_queue_status:
+      patch.review_queue_status === 'queued_remote' ||
+      patch.review_queue_status === 'synced_remote' ||
+      patch.review_queue_status === 'local_draft'
+        ? patch.review_queue_status
+        : current.review_queue_status,
     updated_at: new Date().toISOString(),
   };
 
