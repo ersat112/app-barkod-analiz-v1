@@ -8,6 +8,13 @@ import { analyticsService } from './analytics.service';
 import { adPolicyService } from './adPolicy.service';
 import { adRemotePolicyService } from './adRemotePolicy.service';
 
+export type AdDiagnosticsSnapshot = {
+  fetchedAt: number;
+  policy: AdPolicySnapshot;
+  stats: AdPolicyStats;
+  analyticsQueueSize: number;
+};
+
 function serializeError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
@@ -38,6 +45,32 @@ export const adService = {
 
   async getStats(): Promise<AdPolicyStats> {
     return adPolicyService.getStats();
+  },
+
+  async getAnalyticsQueueSize(): Promise<number> {
+    return analyticsService.getQueueSize();
+  },
+
+  async getDiagnosticsSnapshot(options?: {
+    forcePolicyRefresh?: boolean;
+    flushAnalytics?: boolean;
+  }): Promise<AdDiagnosticsSnapshot> {
+    if (options?.flushAnalytics) {
+      await analyticsService.flushPending();
+    }
+
+    const [policy, stats, analyticsQueueSize] = await Promise.all([
+      this.syncRemotePolicy(Boolean(options?.forcePolicyRefresh)),
+      adPolicyService.getStats(),
+      analyticsService.getQueueSize(),
+    ]);
+
+    return {
+      fetchedAt: Date.now(),
+      policy,
+      stats,
+      analyticsQueueSize,
+    };
   },
 
   async reset(): Promise<void> {
