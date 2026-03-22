@@ -17,10 +17,13 @@ import {
   setRemoteCachedProductNotFound,
   type RemoteProductCacheHit,
 } from './productRemoteCache.service';
+import { analyticsService } from './analytics.service';
 import type {
   ProductRepositoryDiagnostics,
+  ProductRepositoryLookupMeta,
   ProductRepositoryRemoteFetchResult,
   ProductRepositoryResolveResult,
+  ProductRepositoryRemoteMode,
 } from '../types/productRepository';
 
 type RemoteCandidate = {
@@ -34,6 +37,12 @@ export type ProductRepositoryServiceResolveOptions = {
 };
 
 const inFlightRequests = new Map<string, Promise<ProductRepositoryResolveResult>>();
+
+const createLookupId = (): string => {
+  return `lookup_${Date.now().toString(36)}_${Math.random()
+    .toString(36)
+    .slice(2, 10)}`;
+};
 
 const safeTextLength = (value?: string | null): number => {
   if (typeof value !== 'string') {
@@ -219,6 +228,12 @@ const fetchRemoteSourcesParallel = async (
   };
 };
 
+const getDefaultRemoteMode = (): ProductRepositoryRemoteMode => {
+  return FEATURES.productRepository.remoteParallelFetchEnabled
+    ? 'parallel'
+    : 'sequential';
+};
+
 const defaultRemoteFetch = async (
   barcode: string
 ): Promise<ProductRepositoryRemoteFetchResult> => {
@@ -229,8 +244,34 @@ const defaultRemoteFetch = async (
   return fetchRemoteSourcesSequential(barcode);
 };
 
+const createLookupMeta = ({
+  lookupId,
+  startedAt,
+  normalizedBarcode,
+  remoteMode,
+  resolvedSource,
+  cacheTier,
+}: {
+  lookupId: string;
+  startedAt: number;
+  normalizedBarcode: string;
+  remoteMode: ProductRepositoryRemoteMode;
+  resolvedSource?: ProductRepositoryResolveResult extends infer _T ? never : never;
+  cacheTier?: 'local' | 'remote' | 'network';
+}): ProductRepositoryLookupMeta => {
+  return {
+    lookupId,
+    durationMs: Math.max(0, Date.now() - startedAt),
+    normalizedBarcode,
+    resolvedSource: resolvedSource as never,
+    cacheTier,
+    remoteMode,
+  };
+};
+
 const mapLocalHit = (
-  hit: LocalProductCacheHit
+  hit: LocalProductCacheHit,
+  lookupMeta: ProductRepositoryLookupMeta
 ): ProductRepositoryResolveResult => {
   if (hit.kind === 'found') {
     return {
@@ -239,6 +280,11 @@ const mapLocalHit = (
       product: hit.product,
       source: 'local_cache',
       cacheTier: 'local',
+      lookupMeta: {
+        ...lookupMeta,
+        resolvedSource: 'local_cache',
+        cacheTier: 'local',
+      },
     };
   }
 
@@ -248,11 +294,17 @@ const mapLocalHit = (
     reason: 'not_found',
     source: 'local_cache',
     cacheTier: 'local',
+    lookupMeta: {
+      ...lookupMeta,
+      resolvedSource: 'local_cache',
+      cacheTier: 'local',
+    },
   };
 };
 
 const mapRemoteHit = (
-  hit: RemoteProductCacheHit
+  hit: RemoteProductCacheHit,
+  lookupMeta: ProductRepositoryLookupMeta
 ): ProductRepositoryResolveResult => {
   if (hit.kind === 'found') {
     return {
@@ -261,6 +313,11 @@ const mapRemoteHit = (
       product: hit.product,
       source: 'shared_cache',
       cacheTier: 'remote',
+      lookupMeta: {
+        ...lookupMeta,
+        resolvedSource: 'shared_cache',
+        cacheTier: 'remote',
+      },
     };
   }
 
@@ -270,6 +327,11 @@ const mapRemoteHit = (
     reason: 'not_found',
     source: 'shared_cache',
     cacheTier: 'remote',
+    lookupMeta: {
+      ...lookupMeta,
+      resolvedSource: 'shared_cache',
+      cacheTier: 'remote',
+    },
   };
 };
 
@@ -313,18 +375,46 @@ const backfillLocalCacheFromRemoteHit = (
   });
 };
 
+const trackResolvedLookup = (result: ProductRepositoryResolveResult): void => {
+  void analyticsService.trackProductLookupResolved({
+    barcode: result.barcode,
+    found: result.found,
+    reason: result.found ? undefined : result.reason,
+    source: result.found ? result.source : result.source,
+    cacheTier: result.cacheTier,
+    lookupMeta: result.lookupMeta,
+    productType: result.found ? result.product.type : undefined,
+    productScore:
+      result.found && typeof result.product.score === 'number'
+        ? result.product.score
+        : undefined,
+  });
+};
+
 export const resolveProductFromRepository = async (
   barcode: string,
   options?: ProductRepositoryServiceResolveOptions
 ): Promise<ProductRepositoryResolveResult> => {
   const normalizedBarcode = normalizeProductCacheBarcode(barcode);
+  const lookupId = createLookupId();
+  const startedAt = Date.now();
+  const remoteMode = getDefaultRemoteMode();
 
   if (!isProductCacheBarcodeValid(normalizedBarcode)) {
-    return {
+    const invalidResult: ProductRepositoryResolveResult = {
       found: false,
       barcode: normalizedBarcode,
       reason: 'invalid_barcode',
+      lookupMeta: {
+        lookupId,
+        durationMs: Math.max(0, Date.now() - startedAt),
+        normalizedBarcode,
+        remoteMode,
+      },
     };
+
+    trackResolvedLookup(invalidResult);
+    return invalidResult;
   }
 
   const existingRequest = inFlightRequests.get(normalizedBarcode);
@@ -343,7 +433,19 @@ export const resolveProductFromRepository = async (
       const localHit = getLocalProductCacheHit(normalizedBarcode, now);
 
       if (localHit) {
-        return mapLocalHit(localHit);
+        const result = mapLocalHit(
+          localHit,
+          createLookupMeta({
+            lookupId,
+            startedAt,
+            normalizedBarcode,
+            remoteMode,
+            cacheTier: 'local',
+            resolvedSource: 'local_cache' as never,
+          })
+        );
+        trackResolvedLookup(result);
+        return result;
       }
     }
 
@@ -352,7 +454,19 @@ export const resolveProductFromRepository = async (
 
       if (remoteHit) {
         backfillLocalCacheFromRemoteHit(remoteHit, now);
-        return mapRemoteHit(remoteHit);
+        const result = mapRemoteHit(
+          remoteHit,
+          createLookupMeta({
+            lookupId,
+            startedAt,
+            normalizedBarcode,
+            remoteMode,
+            cacheTier: 'remote',
+            resolvedSource: 'shared_cache' as never,
+          })
+        );
+        trackResolvedLookup(result);
+        return result;
       }
     }
 
@@ -363,12 +477,22 @@ export const resolveProductFromRepository = async (
     } catch (error) {
       console.error('[ProductRepositoryService] remote fetch failed:', error);
 
-      return {
+      const failedResult: ProductRepositoryResolveResult = {
         found: false,
         barcode: normalizedBarcode,
         reason: 'not_found',
         cacheTier: 'network',
+        lookupMeta: {
+          lookupId,
+          durationMs: Math.max(0, Date.now() - startedAt),
+          normalizedBarcode,
+          cacheTier: 'network',
+          remoteMode,
+        },
       };
+
+      trackResolvedLookup(failedResult);
+      return failedResult;
     }
 
     if (remoteResult.found) {
@@ -386,13 +510,24 @@ export const resolveProductFromRepository = async (
         now,
       });
 
-      return {
+      const foundResult: ProductRepositoryResolveResult = {
         found: true,
         barcode: normalizedBarcode,
         product: remoteResult.product,
         source: remoteResult.source,
         cacheTier: 'network',
+        lookupMeta: {
+          lookupId,
+          durationMs: Math.max(0, Date.now() - startedAt),
+          normalizedBarcode,
+          resolvedSource: remoteResult.source,
+          cacheTier: 'network',
+          remoteMode,
+        },
       };
+
+      trackResolvedLookup(foundResult);
+      return foundResult;
     }
 
     setLocalProductCacheNotFound({
@@ -407,12 +542,22 @@ export const resolveProductFromRepository = async (
       now,
     });
 
-    return {
+    const notFoundResult: ProductRepositoryResolveResult = {
       found: false,
       barcode: normalizedBarcode,
       reason: 'not_found',
       cacheTier: 'network',
+      lookupMeta: {
+        lookupId,
+        durationMs: Math.max(0, Date.now() - startedAt),
+        normalizedBarcode,
+        cacheTier: 'network',
+        remoteMode,
+      },
     };
+
+    trackResolvedLookup(notFoundResult);
+    return notFoundResult;
   })();
 
   inFlightRequests.set(normalizedBarcode, requestPromise);

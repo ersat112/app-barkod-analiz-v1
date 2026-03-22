@@ -15,6 +15,11 @@ import type {
   AnalyticsEventRecord,
   AnalyticsQueueState,
 } from '../types/ads';
+import type {
+  ProductRepositoryCacheTier,
+  ProductRepositoryLookupMeta,
+  ProductRepositorySource,
+} from '../types/productRepository';
 
 const QUEUE_SCHEMA_VERSION = 1;
 const MAX_QUEUE_LENGTH = 100;
@@ -208,6 +213,62 @@ export const analyticsService = {
     }
 
     return record.eventId;
+  },
+
+  async trackProductLookupResolved(payload: {
+    barcode: string;
+    found: boolean;
+    reason?: 'invalid_barcode' | 'not_found';
+    source?: ProductRepositorySource;
+    cacheTier?: ProductRepositoryCacheTier;
+    lookupMeta: ProductRepositoryLookupMeta;
+    productType?: string;
+    productScore?: number;
+  }): Promise<string> {
+    return this.track(
+      'product_lookup_resolved',
+      {
+        barcode: payload.barcode,
+        found: payload.found,
+        reason: payload.reason,
+        source: payload.source,
+        cacheTier: payload.cacheTier,
+        lookupId: payload.lookupMeta.lookupId,
+        durationMs: payload.lookupMeta.durationMs,
+        normalizedBarcode: payload.lookupMeta.normalizedBarcode,
+        resolvedSource: payload.lookupMeta.resolvedSource,
+        remoteMode: payload.lookupMeta.remoteMode,
+        productType: payload.productType,
+        productScore: payload.productScore,
+      },
+      { flush: false }
+    );
+  },
+
+  async trackProductDetailViewed(payload: {
+    barcode: string;
+    source?: 'food' | 'beauty' | 'cache';
+    cacheTier?: ProductRepositoryCacheTier;
+    lookupMeta?: ProductRepositoryLookupMeta;
+    productType?: string;
+    productScore?: number;
+  }): Promise<string> {
+    return this.track(
+      'product_detail_viewed',
+      {
+        barcode: payload.barcode,
+        source: payload.source,
+        cacheTier: payload.cacheTier,
+        lookupId: payload.lookupMeta?.lookupId,
+        durationMs: payload.lookupMeta?.durationMs,
+        normalizedBarcode: payload.lookupMeta?.normalizedBarcode,
+        resolvedSource: payload.lookupMeta?.resolvedSource,
+        remoteMode: payload.lookupMeta?.remoteMode,
+        productType: payload.productType,
+        productScore: payload.productScore,
+      },
+      { flush: false }
+    );
   },
 
   async flushPending(): Promise<number> {
