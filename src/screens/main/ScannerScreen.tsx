@@ -58,61 +58,97 @@ export const ScannerScreen: React.FC = () => {
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
-    try {
-      const adsModule = getAdMobModule();
+    let disposed = false;
+    let cleanup: (() => void) | undefined;
 
-      if (!adsModule?.InterstitialAd || !adsModule?.AdEventType) {
-        console.log('[Interstitial] native ads module unavailable');
-        setAdLoaded(false);
+    const setupInterstitial = async () => {
+      try {
+        const policy = await adService.getCurrentPolicy();
+
+        if (disposed) {
+          return;
+        }
+
+        if (!policy.enabled || !policy.interstitialEnabled) {
+          console.log('[Interstitial] policy disabled, preload skipped');
+          interstitialRef.current = null;
+          setAdLoaded(false);
+          return;
+        }
+
+        const adsModule = getAdMobModule();
+
+        if (!adsModule?.InterstitialAd || !adsModule?.AdEventType) {
+          console.log('[Interstitial] native ads module unavailable');
+          setAdLoaded(false);
+          interstitialRef.current = null;
+          return;
+        }
+
+        const { InterstitialAd, AdEventType } = adsModule;
+        const interstitial = InterstitialAd.createForAdRequest(
+          AD_UNIT_ID.INTERSTITIAL,
+          GLOBAL_AD_CONFIG
+        );
+
+        const unsubscribeLoaded = interstitial.addAdEventListener(
+          AdEventType.LOADED,
+          () => {
+            console.log('[Interstitial] loaded');
+            setAdLoaded(true);
+          }
+        );
+
+        const unsubscribeClosed = interstitial.addAdEventListener(
+          AdEventType.CLOSED,
+          () => {
+            console.log('[Interstitial] closed');
+            setAdLoaded(false);
+            interstitial.load();
+          }
+        );
+
+        const unsubscribeError = interstitial.addAdEventListener(
+          AdEventType.ERROR,
+          (error: unknown) => {
+            console.log('[Interstitial] failed', error);
+            setAdLoaded(false);
+
+            void adService.trackInterstitialShowFailure(error, {
+              stage: 'load',
+              screen: 'Scanner',
+              unitId: AD_UNIT_ID.INTERSTITIAL,
+            });
+          }
+        );
+
+        interstitial.load();
+        interstitialRef.current = interstitial;
+
+        cleanup = () => {
+          unsubscribeLoaded?.();
+          unsubscribeClosed?.();
+          unsubscribeError?.();
+        };
+      } catch (error) {
+        console.log('[Interstitial] setup failed', error);
         interstitialRef.current = null;
-        return;
+        setAdLoaded(false);
+
+        void adService.trackInterstitialShowFailure(error, {
+          stage: 'setup',
+          screen: 'Scanner',
+          unitId: AD_UNIT_ID.INTERSTITIAL,
+        });
       }
+    };
 
-      const { InterstitialAd, AdEventType } = adsModule;
-      const interstitial = InterstitialAd.createForAdRequest(
-        AD_UNIT_ID.INTERSTITIAL,
-        GLOBAL_AD_CONFIG
-      );
+    void setupInterstitial();
 
-      const unsubscribeLoaded = interstitial.addAdEventListener(
-        AdEventType.LOADED,
-        () => {
-          console.log('[Interstitial] loaded');
-          setAdLoaded(true);
-        }
-      );
-
-      const unsubscribeClosed = interstitial.addAdEventListener(
-        AdEventType.CLOSED,
-        () => {
-          console.log('[Interstitial] closed');
-          setAdLoaded(false);
-          interstitial.load();
-        }
-      );
-
-      const unsubscribeError = interstitial.addAdEventListener(
-        AdEventType.ERROR,
-        (error: any) => {
-          console.log('[Interstitial] failed', error);
-          setAdLoaded(false);
-        }
-      );
-
-      interstitial.load();
-      interstitialRef.current = interstitial;
-
-      return () => {
-        unsubscribeLoaded?.();
-        unsubscribeClosed?.();
-        unsubscribeError?.();
-      };
-    } catch (error) {
-      console.log('[Interstitial] setup failed', error);
-      interstitialRef.current = null;
-      setAdLoaded(false);
-      return;
-    }
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -177,6 +213,21 @@ export const ScannerScreen: React.FC = () => {
             shownAt: Date.now(),
             successfulScanCount: decision.successfulScanCount,
           });
+        } else if (decision.shouldShow) {
+          console.log('[Interstitial] blocked - not ready', {
+            reason: decision.reason,
+            adLoaded,
+            hasRef: Boolean(interstitialRef.current),
+          });
+
+          await adService.trackInterstitialShowFailure('interstitial_not_ready', {
+            stage: 'show_gate',
+            reason: decision.reason,
+            adLoaded,
+            hasRef: Boolean(interstitialRef.current),
+            successfulScanCount: decision.successfulScanCount,
+            screen: 'Scanner',
+          });
         } else {
           console.log('[Interstitial] skipped', {
             reason: decision.reason,
@@ -185,6 +236,11 @@ export const ScannerScreen: React.FC = () => {
         }
       } catch (error) {
         console.error('Ad policy / show failed:', error);
+
+        await adService.trackInterstitialShowFailure(error, {
+          stage: 'show',
+          screen: 'Scanner',
+        });
       } finally {
         setIsManualMode(false);
         setManualBarcode('');
@@ -206,13 +262,17 @@ export const ScannerScreen: React.FC = () => {
 
   const handleBarCodeScanned = useCallback(
     ({ data, type }: { data: string; type?: string }) => {
-      if (scanned || !isFocused || isManualMode) return;
+      if (scanned || !isFocused || isManualMode) {
+        return;
+      }
 
       const decoded = barcodeDecoder.decode(data, type);
 
-      if (!decoded.isValid) return;
+      if (!decoded.isValid) {
+        return;
+      }
 
-      processBarcode(decoded.normalizedData);
+      void processBarcode(decoded.normalizedData);
     },
     [isFocused, isManualMode, processBarcode, scanned]
   );
@@ -235,7 +295,7 @@ export const ScannerScreen: React.FC = () => {
       return;
     }
 
-    processBarcode(decoded.normalizedData);
+    void processBarcode(decoded.normalizedData);
   }, [manualBarcode, processBarcode, tt]);
 
   if (!permission) {

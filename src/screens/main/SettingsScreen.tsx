@@ -19,11 +19,13 @@ import { signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 
 import { auth, db } from '../../config/firebase';
+import { FEATURES } from '../../config/features';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { AdBanner } from '../../components/AdBanner';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
+import { useAdDiagnostics } from '../../hooks/useAdDiagnostics';
 
 const APP_VERSION = 'v1.0.4';
 
@@ -91,6 +93,27 @@ const SettingsItem: React.FC<SettingsItemProps> = ({
   </TouchableOpacity>
 );
 
+function formatDuration(ms: number): string {
+  if (ms <= 0) {
+    return '0 dk';
+  }
+
+  const totalMinutes = Math.round(ms / 1000 / 60);
+
+  if (totalMinutes < 60) {
+    return `${totalMinutes} dk`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (!minutes) {
+    return `${hours} sa`;
+  }
+
+  return `${hours} sa ${minutes} dk`;
+}
+
 export const SettingsScreen: React.FC = () => {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -103,6 +126,18 @@ export const SettingsScreen: React.FC = () => {
     contentBottomExtra: 28,
     contentBottomMin: 40,
     horizontalPadding: 25,
+  });
+
+  const diagnosticsEnabled = FEATURES.ads.diagnosticsLoggingEnabled;
+
+  const {
+    snapshot: adDiagnostics,
+    loading: diagnosticsLoading,
+    refreshing: diagnosticsRefreshing,
+    error: diagnosticsError,
+    refresh: refreshDiagnostics,
+  } = useAdDiagnostics({
+    enabled: diagnosticsEnabled,
   });
 
   const tt = useCallback(
@@ -152,14 +187,19 @@ export const SettingsScreen: React.FC = () => {
         setLoadingProfile(true);
 
         try {
-          if (!isActive) return;
+          if (!isActive) {
+            return;
+          }
+
           await loadUserProfile();
         } catch {
-          if (!isActive) return;
+          if (!isActive) {
+            return;
+          }
         }
       };
 
-      fetchProfile();
+      void fetchProfile();
 
       return () => {
         isActive = false;
@@ -252,9 +292,17 @@ export const SettingsScreen: React.FC = () => {
     const city = userData?.city?.trim();
     const district = userData?.district?.trim();
 
-    if (city && district) return `${city} / ${district}`;
-    if (city) return city;
-    if (district) return district;
+    if (city && district) {
+      return `${city} / ${district}`;
+    }
+
+    if (city) {
+      return city;
+    }
+
+    if (district) {
+      return district;
+    }
 
     return user?.email || tt('location_not_set', 'Konum bilgisi eklenmemiş');
   }, [tt, user?.email, userData?.city, userData?.district]);
@@ -268,6 +316,21 @@ export const SettingsScreen: React.FC = () => {
       ? tt('email_verified', 'E-posta doğrulandı')
       : tt('email_not_verified', 'E-posta doğrulanmadı');
   }, [tt, user?.emailVerified]);
+
+  const diagnosticsFetchedAtText = useMemo(() => {
+    if (!adDiagnostics?.fetchedAt) {
+      return '-';
+    }
+
+    try {
+      return new Date(adDiagnostics.fetchedAt).toLocaleTimeString('tr-TR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return '-';
+    }
+  }, [adDiagnostics?.fetchedAt]);
 
   return (
     <ScrollView
@@ -459,6 +522,235 @@ export const SettingsScreen: React.FC = () => {
         }
       />
 
+      {diagnosticsEnabled ? (
+        <>
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: colors.text, marginHorizontal: layout.horizontalPadding, marginTop: 10 },
+            ]}
+          >
+            {tt('ad_diagnostics', 'Reklam Tanılama')}
+          </Text>
+
+          <View
+            style={[
+              styles.diagnosticsCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                marginHorizontal: layout.horizontalPadding,
+              },
+            ]}
+          >
+            <View style={styles.diagnosticsHeader}>
+              <View style={styles.diagnosticsHeaderLeft}>
+                <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
+                  <Ionicons name="analytics-outline" size={20} color={colors.primary} />
+                </View>
+
+                <View style={styles.diagnosticsHeaderTextWrap}>
+                  <Text style={[styles.diagnosticsTitle, { color: colors.text }]}>
+                    {tt('ad_runtime_state', 'Remote policy + analytics')}
+                  </Text>
+                  <Text style={[styles.diagnosticsSubtitle, { color: colors.text }]}>
+                    {tt('last_refresh', 'Son yenileme')}: {diagnosticsFetchedAtText}
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.diagnosticsRefreshButton,
+                  diagnosticsRefreshing && styles.diagnosticsRefreshButtonDisabled,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: `${colors.primary}10`,
+                  },
+                ]}
+                onPress={() => {
+                  void refreshDiagnostics();
+                }}
+                disabled={diagnosticsRefreshing}
+                activeOpacity={0.85}
+              >
+                {diagnosticsRefreshing ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons name="refresh" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {diagnosticsLoading ? (
+              <View style={styles.diagnosticsLoadingWrap}>
+                <ActivityIndicator size="small" color={colors.primary} />
+              </View>
+            ) : null}
+
+            {diagnosticsError ? (
+              <Text style={styles.diagnosticsErrorText}>{diagnosticsError}</Text>
+            ) : null}
+
+            {adDiagnostics ? (
+              <>
+                <View style={styles.diagnosticsPillsRow}>
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      { backgroundColor: adDiagnostics.policy.enabled ? `${colors.primary}14` : '#FF444414' },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        { color: adDiagnostics.policy.enabled ? colors.primary : '#FF4444' },
+                      ]}
+                    >
+                      {adDiagnostics.policy.enabled
+                        ? tt('ads_enabled', 'Ads ON')
+                        : tt('ads_disabled', 'Ads OFF')}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      {
+                        backgroundColor: adDiagnostics.policy.interstitialEnabled
+                          ? `${colors.primary}14`
+                          : `${colors.border}55`,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        {
+                          color: adDiagnostics.policy.interstitialEnabled
+                            ? colors.primary
+                            : colors.text,
+                        },
+                      ]}
+                    >
+                      {tt('interstitial', 'Interstitial')}:{' '}
+                      {adDiagnostics.policy.interstitialEnabled ? 'ON' : 'OFF'}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      {
+                        backgroundColor: adDiagnostics.policy.bannerEnabled
+                          ? `${colors.primary}14`
+                          : `${colors.border}55`,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        {
+                          color: adDiagnostics.policy.bannerEnabled
+                            ? colors.primary
+                            : colors.text,
+                        },
+                      ]}
+                    >
+                      {tt('banner', 'Banner')}: {adDiagnostics.policy.bannerEnabled ? 'ON' : 'OFF'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.diagnosticsGrid}>
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      {tt('policy_source', 'Policy source')}
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {adDiagnostics.policy.source}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      {tt('policy_version', 'Policy version')}
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      v{adDiagnostics.policy.version}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      {tt('warmup_successful_scans', 'Warmup')}
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {adDiagnostics.policy.warmupSuccessfulScans}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      {tt('interstitial_cadence', 'Cadence')}
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {adDiagnostics.policy.scansBetweenInterstitials}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      {tt('interstitial_cooldown', 'Cooldown')}
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatDuration(adDiagnostics.policy.minInterstitialCooldownMs)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      {tt('daily_interstitial_cap', 'Günlük cap')}
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {adDiagnostics.policy.maxDailyInterstitials}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      {tt('successful_scan_count', 'Başarılı tarama')}
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {adDiagnostics.stats.successfulScanCount}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      {tt('daily_interstitial_count', 'Bugünkü interstitial')}
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {adDiagnostics.stats.dailyInterstitialCount}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      {tt('analytics_queue_size', 'Analytics queue')}
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {adDiagnostics.analyticsQueueSize}
+                    </Text>
+                  </View>
+                </View>
+              </>
+            ) : null}
+          </View>
+        </>
+      ) : null}
+
       <TouchableOpacity
         style={[styles.logoutBtn, logoutLoading && styles.logoutBtnDisabled]}
         onPress={handleLogout}
@@ -473,7 +765,10 @@ export const SettingsScreen: React.FC = () => {
       </TouchableOpacity>
 
       <View style={styles.adBox}>
-        <AdBanner />
+        <AdBanner
+          placement="settings_footer"
+          showPlaceholderWhenUnavailable={diagnosticsEnabled}
+        />
       </View>
 
       <View
@@ -603,6 +898,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
     marginBottom: 10,
+    marginHorizontal: 25,
   },
   langOptions: {
     flexDirection: 'row',
@@ -621,6 +917,92 @@ const styles = StyleSheet.create({
   langText: {
     fontSize: 12,
     fontWeight: 'bold',
+  },
+  diagnosticsCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 8,
+  },
+  diagnosticsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  diagnosticsHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  diagnosticsHeaderTextWrap: {
+    flex: 1,
+  },
+  diagnosticsTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  diagnosticsSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    opacity: 0.62,
+  },
+  diagnosticsRefreshButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  diagnosticsRefreshButtonDisabled: {
+    opacity: 0.7,
+  },
+  diagnosticsLoadingWrap: {
+    paddingVertical: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  diagnosticsPillsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 16,
+    marginBottom: 14,
+  },
+  diagnosticsPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 999,
+  },
+  diagnosticsPillText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  diagnosticsGrid: {
+    gap: 10,
+  },
+  diagnosticsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 16,
+  },
+  diagnosticsLabel: {
+    flex: 1,
+    fontSize: 13,
+    opacity: 0.72,
+  },
+  diagnosticsValue: {
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  diagnosticsErrorText: {
+    marginTop: 14,
+    color: '#FF4444',
+    fontSize: 12,
+    fontWeight: '700',
   },
   logoutBtn: {
     flexDirection: 'row',
