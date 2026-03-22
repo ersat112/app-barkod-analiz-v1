@@ -1,3 +1,4 @@
+import type { DiagnosticsTimestamp } from '../../types/diagnostics';
 import {
   TABLES,
   applyDatabasePragmas,
@@ -25,14 +26,14 @@ type TableDiagnosticsSnapshot = {
 };
 
 export type DatabaseDiagnosticsSnapshot = {
-  fetchedAt: string;
+  fetchedAt: DiagnosticsTimestamp;
   initialized: boolean;
   targetVersion: number;
   userVersion: number;
   pendingMigrationCount: number;
   pendingMigrationVersions: number[];
   lastAppliedMigrationVersions: number[];
-  lastInitializedAt: string | null;
+  lastInitializedAt: DiagnosticsTimestamp | null;
   lastError: string | null;
   tables: {
     history: TableDiagnosticsSnapshot;
@@ -50,7 +51,7 @@ export type DatabaseDiagnosticsSnapshot = {
 const db = getDatabase();
 
 let initialized = false;
-let lastInitializedAt: string | null = null;
+let lastInitializedAt: DiagnosticsTimestamp | null = null;
 let lastError: string | null = null;
 let lastAppliedMigrationVersions: number[] = [];
 
