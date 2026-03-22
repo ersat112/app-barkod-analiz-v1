@@ -1,31 +1,13 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 
-import type { HistoryEntry } from '../services/db';
 import {
-  getLatestHistoryEntriesForBarcodes,
-  getRecentUniqueHistoryEntries,
-} from '../services/db/history.repository';
-import {
-  getRecentFavoriteBarcodes,
-  toggleFavoriteBarcode,
-} from '../services/db/favorites.repository';
+  getRescanActionsSnapshot,
+  toggleRescanFavorite,
+  type RescanActionsSnapshot,
+  type RescanShortcutItem,
+} from '../services/rescanActions.service';
 
-export type RescanShortcutItem = {
-  barcode: string;
-  name: string;
-  brand: string;
-  image_url: string;
-  type: HistoryEntry['type'];
-  score?: number;
-  lastScannedAt: string;
-  isFavorite: boolean;
-};
-
-type RescanActionsSnapshot = {
-  favoriteBarcodes: string[];
-  favoriteItems: RescanShortcutItem[];
-  recentItems: RescanShortcutItem[];
-};
+export type { RescanShortcutItem };
 
 const SNAPSHOT_STALE_MS = 15_000;
 
@@ -34,40 +16,6 @@ const emptySnapshot: RescanActionsSnapshot = {
   favoriteItems: [],
   recentItems: [],
 };
-
-function mapEntryToShortcutItem(
-  entry: HistoryEntry,
-  favoriteSet: Set<string>
-): RescanShortcutItem {
-  return {
-    barcode: entry.barcode,
-    name: entry.name || '',
-    brand: entry.brand || '',
-    image_url: entry.image_url || '',
-    type: entry.type,
-    score: entry.score,
-    lastScannedAt: entry.created_at,
-    isFavorite: favoriteSet.has(entry.barcode),
-  };
-}
-
-function createSnapshot(
-  favoriteBarcodes: string[],
-  favoriteEntries: HistoryEntry[],
-  recentEntries: HistoryEntry[]
-): RescanActionsSnapshot {
-  const favoriteSet = new Set(favoriteBarcodes);
-
-  return {
-    favoriteBarcodes,
-    favoriteItems: favoriteEntries.map((entry) =>
-      mapEntryToShortcutItem(entry, favoriteSet)
-    ),
-    recentItems: recentEntries.map((entry) =>
-      mapEntryToShortcutItem(entry, favoriteSet)
-    ),
-  };
-}
 
 function areShortcutItemsEqual(
   left: RescanShortcutItem[],
@@ -157,7 +105,11 @@ export const useRescanActions = () => {
       return;
     }
 
-    if (!force && lastLoadedAtRef.current > 0 && now - lastLoadedAtRef.current < SNAPSHOT_STALE_MS) {
+    if (
+      !force &&
+      lastLoadedAtRef.current > 0 &&
+      now - lastLoadedAtRef.current < SNAPSHOT_STALE_MS
+    ) {
       setLoading(false);
       setRefreshing(false);
       return;
@@ -167,18 +119,7 @@ export const useRescanActions = () => {
       busyRef.current = true;
       setLoadError(null);
 
-      const favoriteBarcodes = await Promise.resolve(getRecentFavoriteBarcodes(8));
-      const [favoriteEntries, recentEntries] = await Promise.all([
-        Promise.resolve(getLatestHistoryEntriesForBarcodes(favoriteBarcodes)),
-        Promise.resolve(getRecentUniqueHistoryEntries(6)),
-      ]);
-
-      const nextSnapshot = createSnapshot(
-        favoriteBarcodes,
-        favoriteEntries,
-        recentEntries
-      );
-
+      const nextSnapshot = await Promise.resolve(getRescanActionsSnapshot());
       commitSnapshot(nextSnapshot);
       lastLoadedAtRef.current = Date.now();
     } catch (error) {
@@ -199,7 +140,7 @@ export const useRescanActions = () => {
 
   const toggleFavorite = useCallback(
     async (barcode: string): Promise<boolean> => {
-      const result = await Promise.resolve(toggleFavoriteBarcode(barcode));
+      const result = await Promise.resolve(toggleRescanFavorite(barcode));
       lastLoadedAtRef.current = 0;
       await load({ force: true });
       return result;
