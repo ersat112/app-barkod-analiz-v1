@@ -9,14 +9,19 @@ import {
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 
-import { fetchProductByBarcode } from '../../api/productResolver';
+import { fetchProductByBarcode, type ProductLookupResult } from '../../api/productResolver';
 import { FEATURES } from '../../config/features';
 import { useTheme } from '../../context/ThemeContext';
 import { useMissingProductFlow } from '../../hooks/useMissingProductFlow';
 import { RootStackParamList } from '../../navigation/AppNavigator';
+import { analyticsService } from '../../services/analytics.service';
 import { saveProductToHistory } from '../../services/db';
 import { useScanStore } from '../../store/useScanStore';
-import { analyzeProduct, type AnalysisResult, type Product } from '../../utils/analysis';
+import {
+  analyzeProduct,
+  type AnalysisResult,
+  type Product,
+} from '../../utils/analysis';
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
 import { AdBanner } from '../../components/AdBanner';
@@ -35,6 +40,7 @@ import {
   SummarySection,
   TextSection,
 } from './detail/DetailSections';
+import type { ProductRepositoryCacheTier, ProductRepositoryLookupMeta } from '../../types/productRepository';
 
 type DetailRoute = RouteProp<RootStackParamList, 'Detail'>;
 
@@ -42,6 +48,12 @@ type DisplayProduct = Product & {
   sourceName?: string;
   country?: string;
   origin?: string;
+};
+
+type DetailLookupContext = {
+  source?: 'food' | 'beauty' | 'cache';
+  cacheTier?: ProductRepositoryCacheTier;
+  lookupMeta?: ProductRepositoryLookupMeta;
 };
 
 const scoreToGrade = (score: number): 'A' | 'B' | 'C' | 'D' | 'E' => {
@@ -60,6 +72,20 @@ const normalizeDisplayText = (value?: string | null): string => {
     .replace(/\s*,\s*/g, ', ')
     .replace(/\s+/g, ' ')
     .trim();
+};
+
+const mapStoreSourceToLookupSource = (
+  sourceName?: string
+): 'food' | 'beauty' | 'cache' | undefined => {
+  if (sourceName === 'openfoodfacts') {
+    return 'food';
+  }
+
+  if (sourceName === 'openbeautyfacts') {
+    return 'beauty';
+  }
+
+  return undefined;
 };
 
 export const DetailScreen: React.FC = () => {
@@ -109,9 +135,19 @@ export const DetailScreen: React.FC = () => {
   const [localAnalysis, setLocalAnalysis] = useState<AnalysisResult | null>(
     isCurrentBarcodeInStore ? currentAnalysis : null
   );
+  const [lookupContext, setLookupContext] = useState<DetailLookupContext>(() => {
+    if (isCurrentBarcodeInStore && currentProduct) {
+      return {
+        source: mapStoreSourceToLookupSource(currentProduct.sourceName),
+      };
+    }
+
+    return {};
+  });
 
   const lastResolvedBarcodeRef = useRef<string | null>(null);
   const lastSavedHistoryKeyRef = useRef<string | null>(null);
+  const lastTrackedDetailViewKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (isCurrentBarcodeInStore && currentProduct) {
@@ -120,6 +156,9 @@ export const DetailScreen: React.FC = () => {
       setLoading(false);
       setError(null);
       setNotFoundReason(null);
+      setLookupContext({
+        source: mapStoreSourceToLookupSource(currentProduct.sourceName),
+      });
       lastResolvedBarcodeRef.current = normalizedRouteBarcode;
     }
   }, [
@@ -317,7 +356,7 @@ export const DetailScreen: React.FC = () => {
       setImageError(false);
       setNotFoundReason(null);
 
-      const result = await fetchProductByBarcode(normalizedRouteBarcode);
+      const result: ProductLookupResult = await fetchProductByBarcode(normalizedRouteBarcode);
 
       if (!result.found) {
         useScanStore.getState().markNotFound(result.barcode);
@@ -334,6 +373,9 @@ export const DetailScreen: React.FC = () => {
         setNotFoundReason(resolvedReason);
         setLocalProduct(null);
         setLocalAnalysis(null);
+        setLookupContext({
+          lookupMeta: result.lookupMeta,
+        });
         lastResolvedBarcodeRef.current = normalizedRouteBarcode;
 
         await trackNotFoundViewed({
@@ -352,6 +394,11 @@ export const DetailScreen: React.FC = () => {
       setLocalAnalysis(analysis);
       setAnalysis(product, analysis);
       setNotFoundReason(null);
+      setLookupContext({
+        source: result.source,
+        cacheTier: result.lookupMeta?.cacheTier,
+        lookupMeta: result.lookupMeta,
+      });
       lastResolvedBarcodeRef.current = normalizedRouteBarcode;
 
       const historySaveKey = `${product.barcode}-${analysis.score}`;
@@ -370,6 +417,7 @@ export const DetailScreen: React.FC = () => {
       setNotFoundReason('unknown');
       setLocalProduct(null);
       setLocalAnalysis(null);
+      setLookupContext({});
     } finally {
       setLoading(false);
     }
@@ -401,6 +449,42 @@ export const DetailScreen: React.FC = () => {
     normalizedRouteBarcode,
   ]);
 
+  useEffect(() => {
+    if (!displayedProduct || !displayedAnalysis || !normalizedRouteBarcode) {
+      return;
+    }
+
+    const source = lookupContext.source ?? mapStoreSourceToLookupSource(displayedProduct.sourceName);
+    const trackingKey = [
+      normalizedRouteBarcode,
+      source ?? 'unknown',
+      lookupContext.cacheTier ?? 'unknown',
+    ].join(':');
+
+    if (lastTrackedDetailViewKeyRef.current === trackingKey) {
+      return;
+    }
+
+    lastTrackedDetailViewKeyRef.current = trackingKey;
+
+    void analyticsService.trackProductDetailViewed({
+      barcode: normalizedRouteBarcode,
+      source,
+      cacheTier: lookupContext.cacheTier,
+      lookupMeta: lookupContext.lookupMeta,
+      productType: displayedProduct.type,
+      productScore:
+        typeof displayedProduct.score === 'number' ? displayedProduct.score : undefined,
+    });
+  }, [
+    displayedAnalysis,
+    displayedProduct,
+    lookupContext.cacheTier,
+    lookupContext.lookupMeta,
+    lookupContext.source,
+    normalizedRouteBarcode,
+  ]);
+
   const handleRetry = useCallback(async () => {
     await trackNotFoundRetryTapped({
       barcode: normalizedRouteBarcode,
@@ -409,6 +493,7 @@ export const DetailScreen: React.FC = () => {
     });
 
     lastResolvedBarcodeRef.current = null;
+    lastTrackedDetailViewKeyRef.current = null;
     await loadProduct();
   }, [loadProduct, normalizedRouteBarcode, notFoundReason, trackNotFoundRetryTapped]);
 
