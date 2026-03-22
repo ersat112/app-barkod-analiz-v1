@@ -3,7 +3,32 @@ import type { Product } from '../../utils/analysis';
 import { TABLES, getDatabase, safeNumber, safeText } from './core';
 import type { ProductCacheRecord, ProductCacheStatus, ProductCacheUpsertInput } from './types';
 
+export type LocalProductCacheHit =
+  | {
+      kind: 'found';
+      barcode: string;
+      product: Product;
+      source: 'local_cache';
+      fetchedAt: number;
+      expiresAt: number;
+    }
+  | {
+      kind: 'not_found';
+      barcode: string;
+      source: 'local_cache';
+      fetchedAt: number;
+      expiresAt: number;
+    };
+
 const db = getDatabase();
+
+export function normalizeProductCacheBarcode(barcode: string): string {
+  return String(barcode || '').replace(/[^\d]/g, '').trim();
+}
+
+export function isProductCacheBarcodeValid(barcode: string): boolean {
+  return [8, 12, 13, 14].includes(barcode.length);
+}
 
 function safeTimestamp(value?: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0
@@ -40,6 +65,12 @@ export const getProductCacheByBarcode = (
   barcode: string
 ): { record: ProductCacheRecord; product: Product | null } | null => {
   try {
+    const normalizedBarcode = normalizeProductCacheBarcode(barcode);
+
+    if (!isProductCacheBarcodeValid(normalizedBarcode)) {
+      return null;
+    }
+
     const record = db.getFirstSync<ProductCacheRecord>(
       `SELECT
         barcode,
@@ -56,7 +87,7 @@ export const getProductCacheByBarcode = (
        FROM ${TABLES.PRODUCT_CACHE}
        WHERE barcode = ?
        LIMIT 1`,
-      [barcode]
+      [normalizedBarcode]
     );
 
     if (!record) {
@@ -73,8 +104,63 @@ export const getProductCacheByBarcode = (
   }
 };
 
+export const getLocalProductCacheHit = (
+  barcode: string,
+  now = Date.now()
+): LocalProductCacheHit | null => {
+  const cached = getProductCacheByBarcode(barcode);
+
+  if (!cached) {
+    return null;
+  }
+
+  const normalizedBarcode = normalizeProductCacheBarcode(barcode);
+  const fetchedAt = safeNumber(cached.record.fetched_at, 0);
+  const expiresAt = safeNumber(cached.record.expires_at, 0);
+
+  if (expiresAt > 0 && expiresAt <= now) {
+    deleteProductCacheByBarcode(normalizedBarcode);
+    return null;
+  }
+
+  markProductCacheAccessed(normalizedBarcode, now);
+
+  if (cached.record.cache_status === 'not_found') {
+    return {
+      kind: 'not_found',
+      barcode: normalizedBarcode,
+      source: 'local_cache',
+      fetchedAt,
+      expiresAt,
+    };
+  }
+
+  if (!cached.product) {
+    deleteProductCacheByBarcode(normalizedBarcode);
+    return null;
+  }
+
+  return {
+    kind: 'found',
+    barcode: normalizedBarcode,
+    product: {
+      ...cached.product,
+      barcode: normalizedBarcode,
+    },
+    source: 'local_cache',
+    fetchedAt,
+    expiresAt,
+  };
+};
+
 export const upsertProductCache = (input: ProductCacheUpsertInput): void => {
   try {
+    const normalizedBarcode = normalizeProductCacheBarcode(input.barcode);
+
+    if (!isProductCacheBarcodeValid(normalizedBarcode)) {
+      return;
+    }
+
     const fetchedAt = safeTimestamp(input.fetchedAt);
     const lastAccessedAt = safeTimestamp(input.lastAccessedAt ?? fetchedAt);
     const expiresAt =
@@ -83,7 +169,10 @@ export const upsertProductCache = (input: ProductCacheUpsertInput): void => {
         : resolveProductCacheExpiry(input.cacheStatus, fetchedAt);
 
     const payloadJson =
-      input.product == null ? null : JSON.stringify(input.product);
+      input.product == null ? null : JSON.stringify({
+        ...input.product,
+        barcode: normalizedBarcode,
+      });
 
     const sourceName = safeText(
       input.sourceName ?? input.product?.sourceName ?? '',
@@ -120,7 +209,7 @@ export const upsertProductCache = (input: ProductCacheUpsertInput): void => {
         last_accessed_at = excluded.last_accessed_at,
         updated_at = CURRENT_TIMESTAMP;`,
       [
-        safeText(input.barcode),
+        normalizedBarcode,
         input.cacheStatus,
         sourceName,
         productType,
@@ -136,18 +225,82 @@ export const upsertProductCache = (input: ProductCacheUpsertInput): void => {
   }
 };
 
+export const setLocalProductCacheFound = ({
+  barcode,
+  product,
+  ttlMs = CACHE_POLICY.localFoundTtlMs,
+  now = Date.now(),
+}: {
+  barcode: string;
+  product: Product;
+  ttlMs?: number;
+  now?: number;
+}): void => {
+  const normalizedBarcode = normalizeProductCacheBarcode(barcode);
+
+  if (!isProductCacheBarcodeValid(normalizedBarcode)) {
+    return;
+  }
+
+  upsertProductCache({
+    barcode: normalizedBarcode,
+    cacheStatus: 'found',
+    product: {
+      ...product,
+      barcode: normalizedBarcode,
+    },
+    sourceName: product.sourceName,
+    productType: product.type,
+    fetchedAt: now,
+    expiresAt: now + Math.max(1, ttlMs),
+    lastAccessedAt: now,
+    schemaVersion: PRODUCT_CACHE_SCHEMA_VERSION,
+  });
+};
+
+export const setLocalProductCacheNotFound = ({
+  barcode,
+  ttlMs = CACHE_POLICY.localNotFoundTtlMs,
+  now = Date.now(),
+}: {
+  barcode: string;
+  ttlMs?: number;
+  now?: number;
+}): void => {
+  const normalizedBarcode = normalizeProductCacheBarcode(barcode);
+
+  if (!isProductCacheBarcodeValid(normalizedBarcode)) {
+    return;
+  }
+
+  upsertProductCache({
+    barcode: normalizedBarcode,
+    cacheStatus: 'not_found',
+    fetchedAt: now,
+    expiresAt: now + Math.max(1, ttlMs),
+    lastAccessedAt: now,
+    schemaVersion: PRODUCT_CACHE_SCHEMA_VERSION,
+  });
+};
+
 export const markProductCacheAccessed = (
   barcode: string,
   accessedAt = Date.now()
 ): void => {
   try {
+    const normalizedBarcode = normalizeProductCacheBarcode(barcode);
+
+    if (!isProductCacheBarcodeValid(normalizedBarcode)) {
+      return;
+    }
+
     db.runSync(
       `UPDATE ${TABLES.PRODUCT_CACHE}
        SET
          last_accessed_at = ?,
          updated_at = CURRENT_TIMESTAMP
        WHERE barcode = ?`,
-      [safeTimestamp(accessedAt), barcode]
+      [safeTimestamp(accessedAt), normalizedBarcode]
     );
   } catch (error) {
     console.error('Product cache access update error:', error);
@@ -156,10 +309,20 @@ export const markProductCacheAccessed = (
 
 export const deleteProductCacheByBarcode = (barcode: string): void => {
   try {
-    db.runSync(`DELETE FROM ${TABLES.PRODUCT_CACHE} WHERE barcode = ?`, [barcode]);
+    const normalizedBarcode = normalizeProductCacheBarcode(barcode);
+
+    if (!normalizedBarcode) {
+      return;
+    }
+
+    db.runSync(`DELETE FROM ${TABLES.PRODUCT_CACHE} WHERE barcode = ?`, [normalizedBarcode]);
   } catch (error) {
     console.error('Product cache delete error:', error);
   }
+};
+
+export const invalidateLocalProductCacheBarcode = (barcode: string): void => {
+  deleteProductCacheByBarcode(barcode);
 };
 
 export const clearExpiredProductCache = (now = Date.now()): void => {
