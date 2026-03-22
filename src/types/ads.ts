@@ -70,7 +70,11 @@ export type AnalyticsEventName =
   | 'missing_product_draft_sync_succeeded'
   | 'missing_product_draft_sync_failed'
   | 'product_lookup_resolved'
-  | 'product_detail_viewed';
+  | 'product_detail_viewed'
+  | 'remote_cache_write_queue_enqueued'
+  | 'remote_cache_write_queue_flush_succeeded'
+  | 'remote_cache_write_queue_flush_failed'
+  | 'remote_cache_write_queue_item_failed';
 
 export type AnalyticsEventPayload = Record<string, unknown>;
 
