@@ -988,10 +988,10 @@ export const SettingsScreen: React.FC = () => {
 
                   <View style={styles.diagnosticsRow}>
                     <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Effective source
+                      Runtime source
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {sharedCacheDiagnostics.effectiveSource}
+                      {sharedCacheDiagnostics.runtimeSource}
                     </Text>
                   </View>
 
