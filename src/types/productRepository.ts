@@ -8,6 +8,17 @@ export type ProductRepositorySource =
 
 export type ProductRepositoryCacheTier = 'local' | 'remote' | 'network';
 
+export type ProductRepositoryRemoteMode = 'parallel' | 'sequential';
+
+export type ProductRepositoryLookupMeta = {
+  lookupId: string;
+  durationMs: number;
+  normalizedBarcode: string;
+  resolvedSource?: ProductRepositorySource;
+  cacheTier?: ProductRepositoryCacheTier;
+  remoteMode: ProductRepositoryRemoteMode;
+};
+
 export type ProductRepositoryResolveResult =
   | {
       found: true;
@@ -15,6 +26,7 @@ export type ProductRepositoryResolveResult =
       product: Product;
       source: ProductRepositorySource;
       cacheTier: ProductRepositoryCacheTier;
+      lookupMeta: ProductRepositoryLookupMeta;
     }
   | {
       found: false;
@@ -22,6 +34,7 @@ export type ProductRepositoryResolveResult =
       reason: 'invalid_barcode' | 'not_found';
       source?: ProductRepositorySource;
       cacheTier?: ProductRepositoryCacheTier;
+      lookupMeta: ProductRepositoryLookupMeta;
     };
 
 export type ProductRepositoryRemoteFetchResult =
@@ -43,11 +56,13 @@ export type ProductRepositoryLookupResult =
       barcode: string;
       product: Product;
       source: 'food' | 'beauty' | 'cache';
+      lookupMeta?: ProductRepositoryLookupMeta;
     }
   | {
       found: false;
       barcode: string;
       reason: 'invalid_barcode' | 'not_found';
+      lookupMeta?: ProductRepositoryLookupMeta;
     };
 
 export type ProductRepositoryDiagnostics = {
