@@ -33,6 +33,7 @@ const mapRepositoryResultToLookupResult = (
         result.source === 'local_cache' || result.source === 'shared_cache'
           ? 'cache'
           : result.source,
+      lookupMeta: result.lookupMeta,
     };
   }
 
@@ -40,6 +41,7 @@ const mapRepositoryResultToLookupResult = (
     found: false,
     barcode: result.barcode,
     reason: result.reason,
+    lookupMeta: result.lookupMeta,
   };
 };
 
