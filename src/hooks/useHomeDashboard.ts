@@ -1,67 +1,17 @@
 import { useCallback, useRef, useState } from 'react';
+import type { HomeDashboardSnapshot } from '../types/history';
 import {
-  getHomeDashboardSnapshot,
-  type HomeDashboardSnapshot,
-} from '../services/homeDashboard.service';
+  areHomeDashboardReadModelsEqual,
+  EMPTY_HOME_DASHBOARD_READ_MODEL,
+  getHomeDashboardReadModel,
+} from '../services/homeReadModel.service';
 
 const SNAPSHOT_STALE_MS = 15_000;
 
-const emptySnapshot: HomeDashboardSnapshot = {
-  todayCount: 0,
-  todayUniqueCount: 0,
-  totalHistoryCount: 0,
-  bestScoreToday: null,
-  weeklyScanTotal: 0,
-  weeklyActiveDays: 0,
-  streakCount: 0,
-  lastScannedProduct: null,
-  recentProducts: [],
-};
-
-function areRecentProductsEqual(
-  left: HomeDashboardSnapshot['recentProducts'],
-  right: HomeDashboardSnapshot['recentProducts']
-): boolean {
-  if (left.length !== right.length) {
-    return false;
-  }
-
-  for (let index = 0; index < left.length; index += 1) {
-    const current = left[index];
-    const next = right[index];
-
-    if (
-      current.id !== next.id ||
-      current.barcode !== next.barcode ||
-      current.updated_at !== next.updated_at
-    ) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
-function areSnapshotsEqual(
-  left: HomeDashboardSnapshot,
-  right: HomeDashboardSnapshot
-): boolean {
-  return (
-    left.todayCount === right.todayCount &&
-    left.todayUniqueCount === right.todayUniqueCount &&
-    left.totalHistoryCount === right.totalHistoryCount &&
-    left.bestScoreToday === right.bestScoreToday &&
-    left.weeklyScanTotal === right.weeklyScanTotal &&
-    left.weeklyActiveDays === right.weeklyActiveDays &&
-    left.streakCount === right.streakCount &&
-    left.lastScannedProduct?.id === right.lastScannedProduct?.id &&
-    left.lastScannedProduct?.updated_at === right.lastScannedProduct?.updated_at &&
-    areRecentProductsEqual(left.recentProducts, right.recentProducts)
-  );
-}
-
 export const useHomeDashboard = () => {
-  const [snapshot, setSnapshot] = useState<HomeDashboardSnapshot>(emptySnapshot);
+  const [snapshot, setSnapshot] = useState<HomeDashboardSnapshot>(
+    EMPTY_HOME_DASHBOARD_READ_MODEL
+  );
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -77,7 +27,11 @@ export const useHomeDashboard = () => {
       return;
     }
 
-    if (!force && lastLoadedAtRef.current > 0 && now - lastLoadedAtRef.current < SNAPSHOT_STALE_MS) {
+    if (
+      !force &&
+      lastLoadedAtRef.current > 0 &&
+      now - lastLoadedAtRef.current < SNAPSHOT_STALE_MS
+    ) {
       setLoading(false);
       setRefreshing(false);
       return;
@@ -87,10 +41,10 @@ export const useHomeDashboard = () => {
       busyRef.current = true;
       setLoadError(null);
 
-      const data = await Promise.resolve(getHomeDashboardSnapshot());
+      const data = await Promise.resolve(getHomeDashboardReadModel());
 
       setSnapshot((current) => {
-        if (areSnapshotsEqual(current, data)) {
+        if (areHomeDashboardReadModelsEqual(current, data)) {
           return current;
         }
 
@@ -100,7 +54,7 @@ export const useHomeDashboard = () => {
       lastLoadedAtRef.current = Date.now();
     } catch (error) {
       console.error('[useHomeDashboard] load failed:', error);
-      setSnapshot(emptySnapshot);
+      setSnapshot(EMPTY_HOME_DASHBOARD_READ_MODEL);
       setLoadError('dashboard_load_failed');
     } finally {
       setLoading(false);
