@@ -4,12 +4,13 @@ import type {
   AnalyticsEventPayload,
   InterstitialDecision,
 } from '../types/ads';
+import type { DiagnosticsTimestamp } from '../types/diagnostics';
 import { analyticsService } from './analytics.service';
 import { adPolicyService } from './adPolicy.service';
 import { adRemotePolicyService } from './adRemotePolicy.service';
 
 export type AdDiagnosticsSnapshot = {
-  fetchedAt: number;
+  fetchedAt: DiagnosticsTimestamp;
   policy: AdPolicySnapshot;
   stats: AdPolicyStats;
   analyticsQueueSize: number;
@@ -66,7 +67,7 @@ export const adService = {
     ]);
 
     return {
-      fetchedAt: Date.now(),
+      fetchedAt: new Date().toISOString(),
       policy,
       stats,
       analyticsQueueSize,
