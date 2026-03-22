@@ -12,7 +12,11 @@ import {
   PRODUCT_CACHE_SCHEMA_VERSION,
   SHARED_PRODUCT_CACHE_COLLECTION,
 } from '../config/features';
-import { db as firestoreDb } from '../config/firebase';
+import {
+  db as firestoreDb,
+  getFirebaseServicesDiagnosticsSnapshot,
+  isFirebaseServicesReady,
+} from '../config/firebase';
 import type { Product, ProductSource, ProductType } from '../utils/analysis';
 import {
   isProductCacheBarcodeValid,
@@ -49,6 +53,24 @@ export type RemoteProductCacheHit =
       fetchedAt: number;
       expiresAt: number;
     };
+
+export type RemoteProductCacheDiagnosticsSnapshot = {
+  fetchedAt: string;
+  runtimeReady: boolean;
+  projectId: string;
+  effectiveSource: string;
+  readFeatureEnabled: boolean;
+  writeFeatureEnabled: boolean;
+  readValidationEnabled: boolean;
+  writeValidationEnabled: boolean;
+  lastReadFailure: string | null;
+  lastWriteFailure: string | null;
+};
+
+let lastReadFailure: string | null = null;
+let lastWriteFailure: string | null = null;
+let hasLoggedReadValidationFailure = false;
+let hasLoggedWriteValidationFailure = false;
 
 const stripUndefinedDeep = <T>(value: T): T => {
   if (Array.isArray(value)) {
@@ -105,11 +127,102 @@ const toProduct = (barcode: string, payload: unknown): Product | null => {
   };
 };
 
+const toErrorMessage = (error: unknown): string => {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error;
+  }
+
+  return 'unknown_remote_cache_error';
+};
+
+const canUseRemoteRead = (): boolean => {
+  if (!FEATURES.productRepository.firestoreReadEnabled) {
+    return false;
+  }
+
+  if (!FEATURES.firebase.runtimeValidationEnabled) {
+    return true;
+  }
+
+  if (!FEATURES.firebase.sharedCacheReadValidationEnabled) {
+    return true;
+  }
+
+  const ready = isFirebaseServicesReady();
+
+  if (!ready && !hasLoggedReadValidationFailure) {
+    hasLoggedReadValidationFailure = true;
+    console.warn('[ProductRemoteCache] firestore read disabled by runtime validation', {
+      diagnostics: getFirebaseServicesDiagnosticsSnapshot(),
+    });
+  }
+
+  return ready;
+};
+
+const canUseRemoteWrite = (): boolean => {
+  if (!FEATURES.productRepository.firestoreWriteEnabled) {
+    return false;
+  }
+
+  if (!FEATURES.firebase.runtimeValidationEnabled) {
+    return true;
+  }
+
+  if (!FEATURES.firebase.sharedCacheWriteValidationEnabled) {
+    return true;
+  }
+
+  const ready = isFirebaseServicesReady();
+
+  if (!ready && !hasLoggedWriteValidationFailure) {
+    hasLoggedWriteValidationFailure = true;
+    console.warn('[ProductRemoteCache] firestore write disabled by runtime validation', {
+      diagnostics: getFirebaseServicesDiagnosticsSnapshot(),
+    });
+  }
+
+  return ready;
+};
+
+export const getRemoteProductCacheDiagnostics =
+  (): RemoteProductCacheDiagnosticsSnapshot => {
+    const firebaseDiagnostics = getFirebaseServicesDiagnosticsSnapshot();
+
+    return {
+      fetchedAt: new Date().toISOString(),
+      runtimeReady: isFirebaseServicesReady(),
+      projectId: firebaseDiagnostics.projectId,
+      effectiveSource: firebaseDiagnostics.effectiveSource,
+      readFeatureEnabled: FEATURES.productRepository.firestoreReadEnabled,
+      writeFeatureEnabled: FEATURES.productRepository.firestoreWriteEnabled,
+      readValidationEnabled:
+        FEATURES.firebase.runtimeValidationEnabled &&
+        FEATURES.firebase.sharedCacheReadValidationEnabled,
+      writeValidationEnabled:
+        FEATURES.firebase.runtimeValidationEnabled &&
+        FEATURES.firebase.sharedCacheWriteValidationEnabled,
+      lastReadFailure,
+      lastWriteFailure,
+    };
+  };
+
+export const resetRemoteProductCacheDiagnostics = (): void => {
+  lastReadFailure = null;
+  lastWriteFailure = null;
+  hasLoggedReadValidationFailure = false;
+  hasLoggedWriteValidationFailure = false;
+};
+
 export const getRemoteCachedProduct = async (
   barcode: string,
   now = Date.now()
 ): Promise<RemoteProductCacheHit | null> => {
-  if (!FEATURES.productRepository.firestoreReadEnabled) {
+  if (!canUseRemoteRead()) {
     return null;
   }
 
@@ -129,6 +242,7 @@ export const getRemoteCachedProduct = async (
     const snapshot = await getDoc(ref);
 
     if (!snapshot.exists()) {
+      lastReadFailure = null;
       return null;
     }
 
@@ -137,10 +251,13 @@ export const getRemoteCachedProduct = async (
     const expiresAt = toEpochMs(data.expiresAt);
 
     if (expiresAt > 0 && expiresAt <= now) {
+      lastReadFailure = null;
       return null;
     }
 
     if (data.cacheStatus === 'not_found') {
+      lastReadFailure = null;
+
       return {
         kind: 'not_found',
         barcode: normalizedBarcode,
@@ -153,8 +270,11 @@ export const getRemoteCachedProduct = async (
     const product = toProduct(normalizedBarcode, data.productPayload);
 
     if (!product) {
+      lastReadFailure = 'invalid_remote_product_payload';
       return null;
     }
+
+    lastReadFailure = null;
 
     return {
       kind: 'found',
@@ -166,6 +286,7 @@ export const getRemoteCachedProduct = async (
       expiresAt,
     };
   } catch (error) {
+    lastReadFailure = toErrorMessage(error);
     console.warn('[ProductRemoteCache] read failed:', error);
     return null;
   }
@@ -182,7 +303,7 @@ export const setRemoteCachedProductFound = async ({
   ttlMs?: number;
   now?: number;
 }): Promise<boolean> => {
-  if (!FEATURES.productRepository.firestoreWriteEnabled) {
+  if (!canUseRemoteWrite()) {
     return false;
   }
 
@@ -222,8 +343,10 @@ export const setRemoteCachedProductFound = async ({
       { merge: true }
     );
 
+    lastWriteFailure = null;
     return true;
   } catch (error) {
+    lastWriteFailure = toErrorMessage(error);
     console.warn('[ProductRemoteCache] write(found) failed:', error);
     return false;
   }
@@ -238,7 +361,7 @@ export const setRemoteCachedProductNotFound = async ({
   ttlMs?: number;
   now?: number;
 }): Promise<boolean> => {
-  if (!FEATURES.productRepository.firestoreWriteEnabled) {
+  if (!canUseRemoteWrite()) {
     return false;
   }
 
@@ -274,8 +397,10 @@ export const setRemoteCachedProductNotFound = async ({
       { merge: true }
     );
 
+    lastWriteFailure = null;
     return true;
   } catch (error) {
+    lastWriteFailure = toErrorMessage(error);
     console.warn('[ProductRemoteCache] write(not_found) failed:', error);
     return false;
   }
