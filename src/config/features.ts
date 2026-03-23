@@ -16,6 +16,14 @@ export const FIRESTORE_RUNTIME_CONFIG_STORAGE_KEY =
 export const AD_REMOTE_POLICY_COLLECTION = RUNTIME_CONFIG_COLLECTION;
 export const AD_REMOTE_POLICY_DOCUMENT = 'ad_policy' as const;
 export const AD_REMOTE_POLICY_STORAGE_KEY = 'erenesal_ad_remote_policy_v1' as const;
+
+export const MONETIZATION_POLICY_DOCUMENT = 'monetization_policy' as const;
+export const MONETIZATION_POLICY_STORAGE_KEY =
+  'erenesal_monetization_policy_v1' as const;
+export const ENTITLEMENT_STORAGE_KEY = 'erenesal_entitlement_state_v1' as const;
+export const FREE_SCAN_POLICY_STORAGE_KEY =
+  'erenesal_free_scan_policy_state_v1' as const;
+
 export const ANALYTICS_EVENTS_COLLECTION = 'analytics_events' as const;
 export const ANALYTICS_QUEUE_STORAGE_KEY = 'erenesal_analytics_queue_v1' as const;
 export const ANALYTICS_INSTALLATION_ID_STORAGE_KEY =
@@ -55,6 +63,15 @@ export const FEATURES = Object.freeze({
     localAnalyticsQueueEnabled: true,
     diagnosticsLoggingEnabled: __DEV__,
   }),
+  monetization: Object.freeze({
+    foundationEnabled: true,
+    entitlementEnabled: true,
+    remotePolicyEnabled: true,
+    freeScanLimitEnabled: true,
+    paywallEnabled: true,
+    restoreEnabled: true,
+    diagnosticsLoggingEnabled: __DEV__,
+  }),
   database: Object.freeze({
     diagnosticsLoggingEnabled: __DEV__,
   }),
@@ -85,6 +102,19 @@ export const AD_POLICY = Object.freeze({
   scansBetweenInterstitials: 4,
   minInterstitialCooldownMs: 1000 * 60 * 2,
   maxDailyInterstitials: 6,
+  remoteFetchTtlMs: 1000 * 60 * 10,
+  remoteFetchTimeoutMs: 1000 * 6,
+});
+
+export const MONETIZATION_POLICY = Object.freeze({
+  annualPlanEnabled: true,
+  annualPriceTry: 39.99,
+  annualProductId: 'premium_annual_39_99_try',
+  purchaseProviderEnabled: false,
+  restoreEnabled: true,
+  paywallEnabled: true,
+  freeScanLimitEnabled: true,
+  freeDailyScanLimit: 20,
   remoteFetchTtlMs: 1000 * 60 * 10,
   remoteFetchTimeoutMs: 1000 * 6,
 });
