@@ -74,7 +74,15 @@ export type AnalyticsEventName =
   | 'remote_cache_write_queue_enqueued'
   | 'remote_cache_write_queue_flush_succeeded'
   | 'remote_cache_write_queue_flush_failed'
-  | 'remote_cache_write_queue_item_failed';
+  | 'remote_cache_write_queue_item_failed'
+  | 'auth_login_succeeded'
+  | 'auth_login_failed'
+  | 'auth_signup_succeeded'
+  | 'auth_signup_failed'
+  | 'profile_save_succeeded'
+  | 'profile_save_failed'
+  | 'profile_completion_gate_viewed'
+  | 'profile_completion_cta_tapped';
 
 export type AnalyticsEventPayload = Record<string, unknown>;
 
