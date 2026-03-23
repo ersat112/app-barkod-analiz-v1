@@ -57,6 +57,7 @@ export const HomeScreen: React.FC = () => {
     openScanner,
     openHistory,
     openSettings,
+    openSettingsFromProfileGate,
     toggleFavorite,
     displayName,
     greeting,
@@ -71,6 +72,9 @@ export const HomeScreen: React.FC = () => {
     streakText,
     weeklyChallengeText,
     quickInsights,
+    profileCompletion,
+    shouldShowProfileCompletionGate,
+    profileCompletionSummaryText,
   } = useHomeScreenController();
 
   if (loading) {
@@ -106,6 +110,58 @@ export const HomeScreen: React.FC = () => {
           {tt('home_subtitle', 'Bugünkü barkod analiz özeti ve hızlı işlemler burada.')}
         </Text>
       </View>
+
+      {shouldShowProfileCompletionGate ? (
+        <View
+          style={[
+            styles.profileGateCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}
+        >
+          <View style={styles.profileGateHeader}>
+            <View style={styles.profileGateHeaderTextWrap}>
+              <Text style={[styles.profileGateTitle, { color: colors.text }]}>
+                {tt('complete_profile_title', 'Profilini Tamamla')}
+              </Text>
+              <Text style={[styles.profileGateSubtitle, { color: colors.text }]}>
+                {profileCompletionSummaryText}
+              </Text>
+            </View>
+
+            <View style={[styles.profileGateScoreBadge, { backgroundColor: `${colors.primary}12` }]}>
+              <Text style={[styles.profileGateScoreText, { color: colors.primary }]}>
+                %{profileCompletion.score}
+              </Text>
+            </View>
+          </View>
+
+          <View style={[styles.profileGateProgressTrack, { backgroundColor: colors.border }]}>
+            <View
+              style={[
+                styles.profileGateProgressFill,
+                {
+                  width: `${profileCompletion.score}%`,
+                  backgroundColor: colors.primary,
+                },
+              ]}
+            />
+          </View>
+
+          <TouchableOpacity
+            style={[styles.profileGateButton, { backgroundColor: colors.primary }]}
+            onPress={openSettingsFromProfileGate}
+            activeOpacity={0.9}
+          >
+            <Ionicons name="person-circle-outline" size={18} color="#000" />
+            <Text style={styles.profileGateButtonText}>
+              {tt('complete_profile_cta', 'Profili Tamamla')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       <MissionCard
         icon={dailyMission.icon}
@@ -534,6 +590,69 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     opacity: 0.65,
+  },
+  profileGateCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 16,
+    marginBottom: 18,
+  },
+  profileGateHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  profileGateHeaderTextWrap: {
+    flex: 1,
+  },
+  profileGateTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  profileGateSubtitle: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 20,
+    opacity: 0.72,
+  },
+  profileGateScoreBadge: {
+    minWidth: 56,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  profileGateScoreText: {
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  profileGateProgressTrack: {
+    width: '100%',
+    height: 10,
+    borderRadius: 999,
+    overflow: 'hidden',
+    marginTop: 14,
+  },
+  profileGateProgressFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  profileGateButton: {
+    marginTop: 14,
+    minHeight: 46,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  profileGateButtonText: {
+    color: '#000',
+    fontSize: 13,
+    fontWeight: '900',
   },
   statsRow: {
     flexDirection: 'row',
