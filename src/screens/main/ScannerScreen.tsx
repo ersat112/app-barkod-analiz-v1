@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
   Keyboard,
   KeyboardAvoidingView,
@@ -20,6 +21,8 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { adService } from '../../services/adService';
 import { getAdMobModule } from '../../services/admobRuntime';
+import { entitlementService } from '../../services/entitlement.service';
+import { freeScanPolicyService } from '../../services/freeScanPolicy.service';
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
 export const ScannerScreen: React.FC = () => {
@@ -63,6 +66,19 @@ export const ScannerScreen: React.FC = () => {
 
     const setupInterstitial = async () => {
       try {
+        const entitlement = await entitlementService.getSnapshot();
+
+        if (disposed) {
+          return;
+        }
+
+        if (entitlement.isPremium) {
+          console.log('[Interstitial] premium entitlement active, preload skipped');
+          interstitialRef.current = null;
+          setAdLoaded(false);
+          return;
+        }
+
         const policy = await adService.getCurrentPolicy();
 
         if (disposed) {
@@ -197,42 +213,79 @@ export const ScannerScreen: React.FC = () => {
     Keyboard.dismiss();
   }, []);
 
+  const resetTransientState = useCallback(() => {
+    setIsManualMode(false);
+    setManualBarcode('');
+    setManualError('');
+  }, []);
+
   const processBarcode = useCallback(
     async (validBarcodeData: string) => {
       setScanned(true);
 
       try {
-        const decision = await adService.evaluateScanInterstitialOpportunity();
+        const freeScanResult = await freeScanPolicyService.registerSuccessfulScan();
 
-        if (decision.shouldShow && adLoaded && interstitialRef.current) {
-          console.log('[Interstitial] show requested', decision);
+        if (!freeScanResult.allowed) {
+          resetTransientState();
+          setScanned(false);
 
-          await interstitialRef.current.show();
+          if (freeScanResult.snapshot.paywallEnabled) {
+            navigation.navigate('Paywall', { source: 'scan_limit' });
+          } else {
+            Alert.alert(
+              tt('scan_limit_title', 'Tarama limiti'),
+              tt(
+                'scan_limit_reached_message',
+                'Günlük ücretsiz tarama limitine ulaştınız.'
+              )
+            );
+          }
 
-          await adService.recordInterstitialShown({
-            shownAt: Date.now(),
-            successfulScanCount: decision.successfulScanCount,
-          });
-        } else if (decision.shouldShow) {
-          console.log('[Interstitial] blocked - not ready', {
-            reason: decision.reason,
-            adLoaded,
-            hasRef: Boolean(interstitialRef.current),
-          });
+          return;
+        }
+      } catch (error) {
+        console.error('Free scan policy failed, allowing scan:', error);
+      }
 
-          await adService.trackInterstitialShowFailure('interstitial_not_ready', {
-            stage: 'show_gate',
-            reason: decision.reason,
-            adLoaded,
-            hasRef: Boolean(interstitialRef.current),
-            successfulScanCount: decision.successfulScanCount,
-            screen: 'Scanner',
-          });
+      try {
+        const entitlement = await entitlementService.getSnapshot();
+
+        if (!entitlement.isPremium) {
+          const decision = await adService.evaluateScanInterstitialOpportunity();
+
+          if (decision.shouldShow && adLoaded && interstitialRef.current) {
+            console.log('[Interstitial] show requested', decision);
+
+            await interstitialRef.current.show();
+
+            await adService.recordInterstitialShown({
+              shownAt: Date.now(),
+              successfulScanCount: decision.successfulScanCount,
+            });
+          } else if (decision.shouldShow) {
+            console.log('[Interstitial] blocked - not ready', {
+              reason: decision.reason,
+              adLoaded,
+              hasRef: Boolean(interstitialRef.current),
+            });
+
+            await adService.trackInterstitialShowFailure('interstitial_not_ready', {
+              stage: 'show_gate',
+              reason: decision.reason,
+              adLoaded,
+              hasRef: Boolean(interstitialRef.current),
+              successfulScanCount: decision.successfulScanCount,
+              screen: 'Scanner',
+            });
+          } else {
+            console.log('[Interstitial] skipped', {
+              reason: decision.reason,
+              adLoaded,
+            });
+          }
         } else {
-          console.log('[Interstitial] skipped', {
-            reason: decision.reason,
-            adLoaded,
-          });
+          console.log('[Interstitial] premium entitlement active, ads suppressed');
         }
       } catch (error) {
         console.error('Ad policy / show failed:', error);
@@ -241,23 +294,21 @@ export const ScannerScreen: React.FC = () => {
           stage: 'show',
           screen: 'Scanner',
         });
-      } finally {
-        setIsManualMode(false);
-        setManualBarcode('');
-        setManualError('');
-
-        navigation.navigate('Detail', { barcode: validBarcodeData });
-
-        if (scanResetTimeoutRef.current) {
-          clearTimeout(scanResetTimeoutRef.current);
-        }
-
-        scanResetTimeoutRef.current = setTimeout(() => {
-          setScanned(false);
-        }, 1800);
       }
+
+      resetTransientState();
+
+      navigation.navigate('Detail', { barcode: validBarcodeData });
+
+      if (scanResetTimeoutRef.current) {
+        clearTimeout(scanResetTimeoutRef.current);
+      }
+
+      scanResetTimeoutRef.current = setTimeout(() => {
+        setScanned(false);
+      }, 1800);
     },
-    [adLoaded, navigation]
+    [adLoaded, navigation, resetTransientState, tt]
   );
 
   const handleBarCodeScanned = useCallback(
