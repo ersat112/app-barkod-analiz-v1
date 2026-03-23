@@ -8,6 +8,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
   Switch,
@@ -24,6 +25,12 @@ import { useLanguage } from '../../context/LanguageContext';
 import { AdBanner } from '../../components/AdBanner';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useOperabilityDiagnostics } from '../../hooks/useOperabilityDiagnostics';
+import { useSettingsProfileEditor } from '../../hooks/useSettingsProfileEditor';
+import {
+  buildAvatarLetter,
+  buildUserDisplayName,
+  buildUserMetaText,
+} from '../../services/userPresentation.service';
 
 const APP_VERSION = 'v1.0.4';
 
@@ -42,6 +49,16 @@ type SettingsItemProps = {
   onPress?: () => void;
   children?: React.ReactNode;
   colors: ThemeColors;
+};
+
+type ProfileFieldProps = {
+  label: string;
+  value: string;
+  placeholder: string;
+  onChangeText: (value: string) => void;
+  colors: ThemeColors;
+  isDark: boolean;
+  multiline?: boolean;
 };
 
 const SettingsItem: React.FC<SettingsItemProps> = ({
@@ -81,6 +98,39 @@ const SettingsItem: React.FC<SettingsItemProps> = ({
     )}
   </TouchableOpacity>
 );
+
+const ProfileField: React.FC<ProfileFieldProps> = ({
+  label,
+  value,
+  placeholder,
+  onChangeText,
+  colors,
+  isDark,
+  multiline = false,
+}) => {
+  return (
+    <View style={styles.profileFieldGroup}>
+      <Text style={[styles.profileFieldLabel, { color: colors.text }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={`${colors.text}55`}
+        multiline={multiline}
+        textAlignVertical={multiline ? 'top' : 'center'}
+        style={[
+          styles.profileInput,
+          multiline && styles.profileInputMultiline,
+          {
+            color: colors.text,
+            borderColor: colors.border,
+            backgroundColor: isDark ? '#181818' : '#FAFAFA',
+          },
+        ]}
+      />
+    </View>
+  );
+};
 
 function formatDuration(ms: number): string {
   if (ms <= 0) {
@@ -136,41 +186,6 @@ function formatOptionalText(value?: string | null): string {
   return '-';
 }
 
-function buildProfileDisplayName(params: {
-  firstName?: string;
-  lastName?: string;
-  displayName?: string;
-  email?: string | null;
-  fallback: string;
-}): string {
-  const firstName = params.firstName?.trim();
-  const lastName = params.lastName?.trim();
-
-  if (firstName || lastName) {
-    return `${firstName || ''} ${lastName || ''}`.trim();
-  }
-
-  const explicitDisplayName = params.displayName?.trim();
-
-  if (explicitDisplayName) {
-    return explicitDisplayName;
-  }
-
-  const emailName = params.email?.split('@')[0]?.trim();
-
-  if (emailName) {
-    return emailName
-      .replace(/[._-]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .split(' ')
-      .filter((word: string) => word.length > 0)
-      .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-      .join(' ');
-  }
-
-  return params.fallback;
-}
-
 export const SettingsScreen: React.FC = () => {
   const { t } = useTranslation();
   const { user, profile, loading: authLoading, profileError, refreshProfile } = useAuth();
@@ -199,6 +214,18 @@ export const SettingsScreen: React.FC = () => {
   } = useOperabilityDiagnostics({
     enabled: operabilityDiagnosticsEnabled,
   });
+
+  const {
+    draft,
+    isEditing,
+    isSaving,
+    hasChanges,
+    saveError,
+    startEditing,
+    cancelEditing,
+    setField,
+    save,
+  } = useSettingsProfileEditor();
 
   const tt = useCallback(
     (key: string, fallback: string) => {
@@ -270,45 +297,41 @@ export const SettingsScreen: React.FC = () => {
     );
   }, [tt]);
 
+  const handleProfileSave = useCallback(async () => {
+    const success = await save();
+
+    if (!success) {
+      Alert.alert(
+        tt('error_title', 'Hata'),
+        tt('profile_save_error', 'Profil bilgileri kaydedilemedi.')
+      );
+      return;
+    }
+
+    Alert.alert(
+      tt('success_title', 'Başarılı'),
+      tt('profile_saved', 'Profil bilgileriniz güncellendi.')
+    );
+  }, [save, tt]);
+
   const displayName = useMemo(() => {
-    return buildProfileDisplayName({
-      firstName: profile?.firstName,
-      lastName: profile?.lastName,
-      displayName: profile?.displayName ?? user?.displayName ?? undefined,
-      email: profile?.email ?? user?.email,
+    return buildUserDisplayName({
+      profile,
+      user,
       fallback: tt('default_user_name', 'Kullanıcı'),
     });
-  }, [
-    profile?.displayName,
-    profile?.email,
-    profile?.firstName,
-    profile?.lastName,
-    tt,
-    user?.displayName,
-    user?.email,
-  ]);
+  }, [profile, tt, user]);
 
   const displayMeta = useMemo(() => {
-    const city = profile?.city?.trim();
-    const district = profile?.district?.trim();
-
-    if (city && district) {
-      return `${city} / ${district}`;
-    }
-
-    if (city) {
-      return city;
-    }
-
-    if (district) {
-      return district;
-    }
-
-    return profile?.email || user?.email || tt('location_not_set', 'Konum bilgisi eklenmemiş');
-  }, [profile?.city, profile?.district, profile?.email, tt, user?.email]);
+    return buildUserMetaText({
+      profile,
+      user,
+      fallback: tt('location_not_set', 'Konum bilgisi eklenmemiş'),
+    });
+  }, [profile, tt, user]);
 
   const avatarLetter = useMemo(() => {
-    return displayName?.charAt(0)?.toUpperCase() || 'U';
+    return buildAvatarLetter(displayName);
   }, [displayName]);
 
   const verifiedText = useMemo(() => {
@@ -348,6 +371,17 @@ export const SettingsScreen: React.FC = () => {
   const firebaseDiagnosticsFetchedAtText = useMemo(() => {
     return formatTimeValue(firebaseDiagnostics?.fetchedAt);
   }, [firebaseDiagnostics?.fetchedAt]);
+
+  const readonlyLocation = useMemo(() => {
+    const city = profile?.city?.trim();
+    const district = profile?.district?.trim();
+
+    if (city && district) {
+      return `${city} / ${district}`;
+    }
+
+    return city || district || tt('location_not_set', 'Konum bilgisi eklenmemiş');
+  }, [profile?.city, profile?.district, tt]);
 
   return (
     <ScrollView
@@ -416,6 +450,220 @@ export const SettingsScreen: React.FC = () => {
             </>
           )}
         </View>
+      </View>
+
+      <Text
+        style={[
+          styles.sectionTitle,
+          { color: colors.text, marginHorizontal: layout.horizontalPadding },
+        ]}
+      >
+        {tt('profile', 'Profil')}
+      </Text>
+
+      <View
+        style={[
+          styles.profileEditorCard,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+            marginHorizontal: layout.horizontalPadding,
+          },
+        ]}
+      >
+        <View style={styles.profileEditorHeader}>
+          <View style={styles.profileEditorHeaderTextWrap}>
+            <Text style={[styles.profileEditorTitle, { color: colors.text }]}>
+              {tt('profile_information', 'Profil Bilgileri')}
+            </Text>
+            <Text style={[styles.profileEditorSubtitle, { color: colors.text }]}>
+              {tt(
+                'profile_information_subtitle',
+                'Ad, soyad, telefon ve adres bilgilerinizi buradan güncelleyebilirsiniz.'
+              )}
+            </Text>
+          </View>
+
+          {!isEditing ? (
+            <TouchableOpacity
+              style={[
+                styles.profileEditIconButton,
+                {
+                  backgroundColor: `${colors.primary}12`,
+                  borderColor: colors.border,
+                },
+              ]}
+              onPress={startEditing}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="create-outline" size={18} color={colors.primary} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        {isEditing ? (
+          <>
+            <View style={styles.profileFieldRow}>
+              <View style={styles.profileFieldHalf}>
+                <ProfileField
+                  label={tt('first_name', 'Ad')}
+                  value={draft.firstName}
+                  placeholder={tt('first_name', 'Ad')}
+                  onChangeText={(value) => setField('firstName', value)}
+                  colors={colors}
+                  isDark={isDark}
+                />
+              </View>
+
+              <View style={styles.profileFieldHalf}>
+                <ProfileField
+                  label={tt('last_name', 'Soyad')}
+                  value={draft.lastName}
+                  placeholder={tt('last_name', 'Soyad')}
+                  onChangeText={(value) => setField('lastName', value)}
+                  colors={colors}
+                  isDark={isDark}
+                />
+              </View>
+            </View>
+
+            <ProfileField
+              label={tt('phone', 'Telefon')}
+              value={draft.phone}
+              placeholder={tt('phone', 'Telefon')}
+              onChangeText={(value) => setField('phone', value)}
+              colors={colors}
+              isDark={isDark}
+            />
+
+            <View style={styles.profileFieldRow}>
+              <View style={styles.profileFieldHalf}>
+                <ProfileField
+                  label={tt('city', 'Şehir')}
+                  value={draft.city}
+                  placeholder={tt('city', 'Şehir')}
+                  onChangeText={(value) => setField('city', value)}
+                  colors={colors}
+                  isDark={isDark}
+                />
+              </View>
+
+              <View style={styles.profileFieldHalf}>
+                <ProfileField
+                  label={tt('district', 'İlçe')}
+                  value={draft.district}
+                  placeholder={tt('district', 'İlçe')}
+                  onChangeText={(value) => setField('district', value)}
+                  colors={colors}
+                  isDark={isDark}
+                />
+              </View>
+            </View>
+
+            <ProfileField
+              label={tt('address', 'Adres')}
+              value={draft.address}
+              placeholder={tt('address', 'Adres')}
+              onChangeText={(value) => setField('address', value)}
+              colors={colors}
+              isDark={isDark}
+              multiline
+            />
+
+            {saveError ? (
+              <Text style={styles.profileSaveErrorText}>
+                {tt('profile_save_error', 'Profil bilgileri kaydedilemedi.')}
+              </Text>
+            ) : null}
+
+            <View style={styles.profileActionsRow}>
+              <TouchableOpacity
+                style={[
+                  styles.secondaryProfileButton,
+                  {
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={cancelEditing}
+                disabled={isSaving}
+                activeOpacity={0.85}
+              >
+                <Text style={[styles.secondaryProfileButtonText, { color: colors.text }]}>
+                  {tt('cancel', 'İptal')}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.primaryProfileButton,
+                  {
+                    backgroundColor: hasChanges ? colors.primary : colors.border,
+                    opacity: isSaving ? 0.7 : 1,
+                  },
+                ]}
+                onPress={handleProfileSave}
+                disabled={!hasChanges || isSaving}
+                activeOpacity={0.9}
+              >
+                {isSaving ? (
+                  <ActivityIndicator size="small" color="#000" />
+                ) : (
+                  <Text style={styles.primaryProfileButtonText}>
+                    {tt('save', 'Kaydet')}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </>
+        ) : (
+          <View style={styles.readonlyProfileList}>
+            <View style={styles.readonlyProfileRow}>
+              <Text style={[styles.readonlyProfileLabel, { color: colors.text }]}>
+                {tt('email', 'E-posta')}
+              </Text>
+              <Text style={[styles.readonlyProfileValue, { color: colors.text }]}>
+                {formatOptionalText(profile?.email || user?.email)}
+              </Text>
+            </View>
+
+            <View style={styles.readonlyProfileRow}>
+              <Text style={[styles.readonlyProfileLabel, { color: colors.text }]}>
+                {tt('phone', 'Telefon')}
+              </Text>
+              <Text style={[styles.readonlyProfileValue, { color: colors.text }]}>
+                {formatOptionalText(profile?.phone)}
+              </Text>
+            </View>
+
+            <View style={styles.readonlyProfileRow}>
+              <Text style={[styles.readonlyProfileLabel, { color: colors.text }]}>
+                {tt('location', 'Konum')}
+              </Text>
+              <Text style={[styles.readonlyProfileValue, { color: colors.text }]}>
+                {readonlyLocation}
+              </Text>
+            </View>
+
+            <View style={styles.readonlyProfileRow}>
+              <Text style={[styles.readonlyProfileLabel, { color: colors.text }]}>
+                {tt('address', 'Adres')}
+              </Text>
+              <Text style={[styles.readonlyProfileValue, { color: colors.text }]}>
+                {formatOptionalText(profile?.address)}
+              </Text>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.primaryProfileButton, { backgroundColor: colors.primary, marginTop: 16 }]}
+              onPress={startEditing}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.primaryProfileButtonText}>
+                {tt('edit_profile', 'Profili Düzenle')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       <Text
@@ -1415,7 +1663,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
-    marginBottom: 30,
+    marginBottom: 22,
   },
   avatar: {
     width: 60,
@@ -1456,6 +1704,125 @@ const styles = StyleSheet.create({
     opacity: 0.5,
     letterSpacing: 1,
     marginBottom: 12,
+  },
+  profileEditorCard: {
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 22,
+  },
+  profileEditorHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  profileEditorHeaderTextWrap: {
+    flex: 1,
+  },
+  profileEditorTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  profileEditorSubtitle: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 20,
+    opacity: 0.68,
+  },
+  profileEditIconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  readonlyProfileList: {
+    marginTop: 16,
+    gap: 12,
+  },
+  readonlyProfileRow: {
+    gap: 4,
+  },
+  readonlyProfileLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    opacity: 0.62,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  readonlyProfileValue: {
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '600',
+  },
+  profileFieldRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  profileFieldHalf: {
+    flex: 1,
+  },
+  profileFieldGroup: {
+    marginTop: 16,
+  },
+  profileFieldLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  profileInput: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 15,
+    minHeight: 52,
+  },
+  profileInputMultiline: {
+    minHeight: 92,
+  },
+  profileSaveErrorText: {
+    marginTop: 12,
+    color: '#FF4444',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  profileActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 18,
+  },
+  secondaryProfileButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  secondaryProfileButtonText: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  primaryProfileButton: {
+    flex: 1.2,
+    minHeight: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  primaryProfileButtonText: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.3,
   },
   item: {
     marginHorizontal: 25,

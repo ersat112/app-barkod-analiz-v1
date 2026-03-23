@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -10,17 +10,12 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../../context/ThemeContext';
-import { useAuth } from '../../context/AuthContext';
 import { AdBanner } from '../../components/AdBanner';
-import { useHomeDashboard } from '../../hooks/useHomeDashboard';
-import { useRescanActions } from '../../hooks/useRescanActions';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
-import { buildUserDisplayName } from '../../services/userPresentation.service';
+import { useHomeScreenController } from '../../hooks/useHomeScreenController';
 import {
   ChallengeCard,
   DidYouKnowCard,
@@ -35,32 +30,10 @@ import {
   SummaryCard,
 } from './home/HomeSections';
 
-const DAILY_GOAL = 3;
-const WEEKLY_GOAL = 10;
 const FALLBACK_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
 
-const getTodayKey = (): string => {
-  const now = new Date();
-  return `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
-};
-
-const getMissionIndex = (): number => new Date().getDate() % 4;
-const getInsightIndex = (): number => new Date().getDay() % 4;
-
-const getTimeBasedGreetingKey = (): string => {
-  const hour = new Date().getHours();
-
-  if (hour < 12) return 'good_morning';
-  if (hour < 18) return 'good_afternoon';
-  return 'good_evening';
-};
-
 export const HomeScreen: React.FC = () => {
-  const { t } = useTranslation();
   const { colors, isDark } = useTheme();
-  const { user, profile } = useAuth();
-  const navigation = useNavigation<any>();
-
   const layout = useAppScreenLayout({
     topInsetExtra: 18,
     topInsetMin: 70,
@@ -70,243 +43,35 @@ export const HomeScreen: React.FC = () => {
   });
 
   const {
+    tt,
     snapshot,
     loading,
     refreshing,
     loadError,
-    load,
-    refresh,
-  } = useHomeDashboard();
-
-  const {
-    snapshot: rescanSnapshot,
-    loading: rescanLoading,
-    refreshing: rescanRefreshing,
-    loadError: rescanLoadError,
-    load: loadRescanActions,
-    refresh: refreshRescanActions,
+    rescanSnapshot,
+    rescanLoading,
+    rescanRefreshing,
+    rescanLoadError,
+    handleRefresh,
+    openBarcodeDetail,
+    openScanner,
+    openHistory,
+    openSettings,
     toggleFavorite,
-  } = useRescanActions();
-
-  const tt = useCallback(
-    (key: string, fallback: string) => {
-      const value = t(key, { defaultValue: fallback });
-      return value === key ? fallback : value;
-    },
-    [t]
-  );
-
-  useFocusEffect(
-    useCallback(() => {
-      void load();
-      void loadRescanActions();
-    }, [load, loadRescanActions])
-  );
-
-  const handleRefresh = useCallback(async () => {
-    await Promise.all([refresh(), refreshRescanActions()]);
-  }, [refresh, refreshRescanActions]);
-
-  const openBarcodeDetail = useCallback(
-    (barcode: string) => {
-      navigation.navigate('Detail', { barcode });
-    },
-    [navigation]
-  );
-
-  const displayName = useMemo(() => {
-    return buildUserDisplayName({
-      profile,
-      user,
-      fallback: tt('default_user_name', 'Kullanıcı'),
-    });
-  }, [profile, tt, user]);
-
-  const greeting = useMemo(() => {
-    const key = getTimeBasedGreetingKey();
-    const fallback =
-      key === 'good_morning'
-        ? 'Günaydın'
-        : key === 'good_afternoon'
-          ? 'İyi günler'
-          : 'İyi akşamlar';
-
-    return tt(key, fallback);
-  }, [tt]);
-
-  const todayKey = useMemo(() => getTodayKey(), []);
-
-  const dailyMission = useMemo(() => {
-    const index = getMissionIndex();
-
-    const map = [
-      {
-        title: tt('mission_today_1_title', 'Bugünün Görevi'),
-        text: tt('mission_today_1_text', 'En az 3 ürün tarayıp içerik farkındalığını artır.'),
-        icon: 'trophy-outline' as keyof typeof Ionicons.glyphMap,
-      },
-      {
-        title: tt('mission_today_2_title', 'Sağlıklı Seçim Görevi'),
-        text: tt('mission_today_2_text', 'Bugün en az 1 üründe katkı maddelerini incele.'),
-        icon: 'leaf-outline' as keyof typeof Ionicons.glyphMap,
-      },
-      {
-        title: tt('mission_today_3_title', 'Bilinçli Tüketim Görevi'),
-        text: tt('mission_today_3_text', 'Yeni bir ürün barkodu tara ve geçmişini büyüt.'),
-        icon: 'scan-outline' as keyof typeof Ionicons.glyphMap,
-      },
-      {
-        title: tt('mission_today_4_title', 'Günün Mini Challenge’ı'),
-        text: tt('mission_today_4_text', 'Aynı gün içinde 2 farklı kategoriden ürün analiz et.'),
-        icon: 'flash-outline' as keyof typeof Ionicons.glyphMap,
-      },
-    ];
-
-    return map[index];
-  }, [tt]);
-
-  const dailyInsight = useMemo(() => {
-    const index = getInsightIndex();
-
-    const map = [
-      {
-        title: tt('insight_1_title', 'Günün İpucu'),
-        text: tt(
-          'insight_1_text',
-          'İçerik listesinde ilk sıralarda yer alan maddeler, üründe en yüksek oranda bulunan bileşenlerdir.'
-        ),
-        icon: 'bulb-outline' as keyof typeof Ionicons.glyphMap,
-      },
-      {
-        title: tt('insight_2_title', 'Akıllı Hatırlatma'),
-        text: tt(
-          'insight_2_text',
-          'Aynı markanın farklı ürünlerinde içerik profili ciddi şekilde değişebilir. Her ürünü ayrı incele.'
-        ),
-        icon: 'sparkles-outline' as keyof typeof Ionicons.glyphMap,
-      },
-      {
-        title: tt('insight_3_title', 'Bugünkü Bilgi'),
-        text: tt(
-          'insight_3_text',
-          'Yüksek riskli katkılar her kullanıcıda aynı etkiyi göstermeyebilir, ama düzenli takip daha bilinçli seçim sağlar.'
-        ),
-        icon: 'shield-checkmark-outline' as keyof typeof Ionicons.glyphMap,
-      },
-      {
-        title: tt('insight_4_title', 'Küçük Ama Önemli'),
-        text: tt(
-          'insight_4_text',
-          'Barkod menşei bilgisi her zaman gerçek üretim yeri anlamına gelmeyebilir; ürün detayını ayrıca kontrol et.'
-        ),
-        icon: 'information-circle-outline' as keyof typeof Ionicons.glyphMap,
-      },
-    ];
-
-    return map[index];
-  }, [tt]);
-
-  const insightText = useMemo(() => {
-    if (snapshot.todayCount === 0) {
-      return tt(
-        'home_insight_zero',
-        'Henüz bugün barkod analizi yapılmadı. İlk taramayı başlatıp ürün içeriğini ve skorunu saniyeler içinde inceleyebilirsiniz.'
-      );
-    }
-
-    if (snapshot.todayCount < 5) {
-      return tt(
-        'home_insight_low',
-        'Düzenli barkod taraması, katkı maddelerini ve ürün risk seviyelerini daha erken fark etmenize yardımcı olur.'
-      );
-    }
-
-    return tt(
-      'home_insight_high',
-      'Harika gidiyorsunuz. Sık analiz yapmak, alışveriş tercihlerinizi daha bilinçli hale getirir.'
-    );
-  }, [snapshot.todayCount, tt]);
-
-  const missionProgress = useMemo(
-    () => Math.min(snapshot.todayCount / DAILY_GOAL, 1),
-    [snapshot.todayCount]
-  );
-
-  const missionProgressText = useMemo(() => {
-    if (snapshot.todayCount >= DAILY_GOAL) {
-      return tt('daily_mission_completed', 'Görev tamamlandı');
-    }
-
-    return tt('daily_mission_progress', `${snapshot.todayCount}/${DAILY_GOAL} tarama tamamlandı`)
-      .replace('{{current}}', String(snapshot.todayCount))
-      .replace('{{goal}}', String(DAILY_GOAL));
-  }, [snapshot.todayCount, tt]);
-
-  const motivationText = useMemo(() => {
-    if (snapshot.todayCount === 0) {
-      return tt('daily_mission_start', 'Bugünün ilk analizini yap ve günlük görevi başlat.');
-    }
-
-    if (snapshot.todayCount < DAILY_GOAL) {
-      return tt(
-        'daily_mission_remaining',
-        `Hedefe çok yakınsın. ${DAILY_GOAL - snapshot.todayCount} tarama daha yapman yeterli.`
-      ).replace('{{count}}', String(DAILY_GOAL - snapshot.todayCount));
-    }
-
-    return tt(
-      'daily_mission_done_message',
-      'Bugünkü hedef tamamlandı. İstersen yeni ürünler keşfetmeye devam et.'
-    );
-  }, [snapshot.todayCount, tt]);
-
-  const weeklyProgress = useMemo(() => {
-    return Math.min(snapshot.weeklyScanTotal / WEEKLY_GOAL, 1);
-  }, [snapshot.weeklyScanTotal]);
-
-  const streakText = useMemo(() => {
-    if (snapshot.streakCount <= 0) return tt('streak_start', 'Seri başlat');
-    if (snapshot.streakCount === 1) return tt('streak_one_day', '1 günlük seri');
-
-    return tt('streak_days', `${snapshot.streakCount} günlük seri`).replace(
-      '{{count}}',
-      String(snapshot.streakCount)
-    );
-  }, [snapshot.streakCount, tt]);
-
-  const weeklyChallengeText = useMemo(() => {
-    if (snapshot.weeklyScanTotal >= WEEKLY_GOAL) {
-      return tt('weekly_goal_completed', 'Haftalık challenge tamamlandı');
-    }
-
-    return tt(
-      'weekly_goal_progress',
-      `${snapshot.weeklyScanTotal}/${WEEKLY_GOAL} haftalık tarama tamamlandı`
-    )
-      .replace('{{current}}', String(snapshot.weeklyScanTotal))
-      .replace('{{goal}}', String(WEEKLY_GOAL));
-  }, [snapshot.weeklyScanTotal, tt]);
-
-  const quickInsights = useMemo(
-    () => [
-      {
-        icon: 'albums-outline' as keyof typeof Ionicons.glyphMap,
-        value: String(snapshot.totalHistoryCount),
-        label: tt('products_label', 'Toplam Kayıt'),
-      },
-      {
-        icon: 'calendar-outline' as keyof typeof Ionicons.glyphMap,
-        value: String(snapshot.weeklyActiveDays),
-        label: tt('weekly_active_days_short', 'Aktif Gün'),
-      },
-      {
-        icon: 'bar-chart-outline' as keyof typeof Ionicons.glyphMap,
-        value: String(snapshot.weeklyScanTotal),
-        label: tt('weekly_scans_short', 'Haftalık Tarama'),
-      },
-    ],
-    [snapshot.totalHistoryCount, snapshot.weeklyActiveDays, snapshot.weeklyScanTotal, tt]
-  );
+    displayName,
+    greeting,
+    todayKey,
+    dailyMission,
+    dailyInsight,
+    insightText,
+    missionProgress,
+    missionProgressText,
+    motivationText,
+    weeklyProgress,
+    streakText,
+    weeklyChallengeText,
+    quickInsights,
+  } = useHomeScreenController();
 
   if (loading) {
     return <HomeLoadingState label={tt('home', 'Ana Sayfa')} colors={colors} />;
@@ -351,7 +116,7 @@ export const HomeScreen: React.FC = () => {
         progressValue={missionProgress}
         motivationText={motivationText}
         actionLabel={tt('scan_now', 'Şimdi Tara')}
-        onActionPress={() => navigation.navigate('Scanner')}
+        onActionPress={openScanner}
         colors={colors}
       />
 
@@ -405,15 +170,15 @@ export const HomeScreen: React.FC = () => {
           String(snapshot.weeklyActiveDays)
         )}
         progressLabel={weeklyChallengeText}
-        progressMeta={tt('weekly_goal', `Hedef: ${WEEKLY_GOAL}`).replace('{{count}}', String(WEEKLY_GOAL))}
+        progressMeta={tt('weekly_goal', 'Hedef: 10').replace('{{count}}', '10')}
         progressValue={weeklyProgress}
         footerText={
-          snapshot.weeklyScanTotal >= WEEKLY_GOAL
+          snapshot.weeklyScanTotal >= 10
             ? tt('weekly_goal_done_message', 'Haftalık hedefi tamamladın. Yeni rekor için devam et.')
             : tt(
                 'weekly_goal_remaining_message',
-                `Bu hafta hedefe ulaşmak için ${WEEKLY_GOAL - snapshot.weeklyScanTotal} tarama daha yapabilirsin.`
-              ).replace('{{count}}', String(WEEKLY_GOAL - snapshot.weeklyScanTotal))
+                `Bu hafta hedefe ulaşmak için ${10 - snapshot.weeklyScanTotal} tarama daha yapabilirsin.`
+              ).replace('{{count}}', String(10 - snapshot.weeklyScanTotal))
         }
         colors={colors}
       />
@@ -427,9 +192,7 @@ export const HomeScreen: React.FC = () => {
           scoreLabel={tt('score_label', 'Skor')}
           fallbackBrand={tt('unknown_brand', 'Bilinmeyen Marka')}
           fallbackName={tt('unnamed_product', 'İsimsiz Ürün')}
-          onPress={() =>
-            navigation.navigate('Detail', { barcode: snapshot.lastScannedProduct?.barcode })
-          }
+          onPress={() => openBarcodeDetail(snapshot.lastScannedProduct!.barcode)}
           colors={colors}
         />
       ) : null}
@@ -695,7 +458,7 @@ export const HomeScreen: React.FC = () => {
         items={snapshot.recentProducts}
         fallbackBrand={tt('unknown_brand', 'Bilinmeyen Marka')}
         fallbackName={tt('unnamed_product', 'İsimsiz Ürün')}
-        onItemPress={(barcode) => navigation.navigate('Detail', { barcode })}
+        onItemPress={openBarcodeDetail}
         colors={colors}
       />
 
@@ -707,7 +470,7 @@ export const HomeScreen: React.FC = () => {
             'history_card_desc',
             'Önceki barkod taramalarınızı görüntüleyin.'
           )}
-          onPress={() => navigation.navigate('History')}
+          onPress={openHistory}
           colors={colors}
         />
 
@@ -718,7 +481,7 @@ export const HomeScreen: React.FC = () => {
             'settings_card_desc',
             'Dil, tema ve hesap tercihlerinizi yönetin.'
           )}
-          onPress={() => navigation.navigate('Settings')}
+          onPress={openSettings}
           colors={colors}
         />
       </View>
