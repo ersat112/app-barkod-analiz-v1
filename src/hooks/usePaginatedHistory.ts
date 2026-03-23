@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type HistoryFilterType,
+  type UsePaginatedHistoryResult,
+} from '../types/history';
 import type { HistoryEntry } from '../services/db';
-import { type HistoryFilterType } from '../services/history.service';
 import {
   areHistoryEntriesEqual,
   getHistoryFeedPageReadModel,
@@ -8,11 +11,10 @@ import {
   parseHistoryFeedCreatedAt,
   removeHistoryEntryFromFeed,
 } from '../services/historyReadModel.service';
-import type { HistorySection } from '../types/history';
 
 export const usePaginatedHistory = (
   t: (key: string, fallback: string) => string
-) => {
+): UsePaginatedHistoryResult => {
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -30,7 +32,7 @@ export const usePaginatedHistory = (
   const searchQueryRef = useRef('');
   const selectedTypeRef = useRef<HistoryFilterType>('all');
 
-  const sections: HistorySection[] = useMemo(() => {
+  const sections = useMemo(() => {
     return groupHistoryFeedSections(items, t);
   }, [items, t]);
 
@@ -199,3 +201,5 @@ export const usePaginatedHistory = (
     parseCreatedAt: parseHistoryFeedCreatedAt,
   };
 };
+
+export type { UsePaginatedHistoryResult };
