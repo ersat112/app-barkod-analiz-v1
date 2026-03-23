@@ -4,6 +4,11 @@ export const HISTORY_PAGE_SIZE = 20;
 
 export type HistoryFilterType = 'all' | 'food' | 'beauty';
 
+export type HistoryListTranslationFn = (
+  key: string,
+  fallback: string
+) => string;
+
 export type HistoryRow = {
   id: number;
   barcode: string;
@@ -19,6 +24,13 @@ export type HistoryRow = {
   sourceName: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type HistoryPageQuery = {
+  limit?: number;
+  offset?: number;
+  query?: string;
+  type?: HistoryFilterType;
 };
 
 export type HistoryPageResult = {
@@ -48,6 +60,31 @@ export type HistorySection = {
 export type ParsedHistoryCreatedAt = {
   datePart: string;
   timePart: string;
+};
+
+export type HistoryFeedPageReadModel = HistoryPageResult & {
+  sections: HistorySection[];
+};
+
+export type UsePaginatedHistoryResult = {
+  items: HistoryEntry[];
+  sections: HistorySection[];
+  loading: boolean;
+  loadingMore: boolean;
+  refreshing: boolean;
+  loadError: string | null;
+  hasMore: boolean;
+  searchQuery: string;
+  selectedType: HistoryFilterType;
+  hasActiveFilters: boolean;
+  loadInitial: () => Promise<void>;
+  refresh: () => Promise<void>;
+  loadMore: () => Promise<void>;
+  deleteEntry: (id: number) => Promise<void>;
+  setSearchQuery: (value: string) => void;
+  setSelectedType: (value: HistoryFilterType) => void;
+  clearFilters: () => void;
+  parseCreatedAt: (createdAt?: string | null) => ParsedHistoryCreatedAt;
 };
 
 export const createEmptyHomeDashboardSnapshot = (): HomeDashboardSnapshot => ({
@@ -89,7 +126,10 @@ export const parseHistoryCreatedAt = (
     };
   }
 
-  const datePart = `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(2, '0')}-${`${date.getDate()}`.padStart(2, '0')}`;
+  const datePart = `${date.getFullYear()}-${`${date.getMonth() + 1}`.padStart(
+    2,
+    '0'
+  )}-${`${date.getDate()}`.padStart(2, '0')}`;
   const timePart = `${`${date.getHours()}`.padStart(2, '0')}:${`${date.getMinutes()}`.padStart(2, '0')}`;
 
   return { datePart, timePart };
@@ -97,7 +137,7 @@ export const parseHistoryCreatedAt = (
 
 export const formatHistoryDateTitle = (
   rawDate: string,
-  t: (key: string, fallback: string) => string
+  t: HistoryListTranslationFn
 ): string => {
   const today = getLocalDateKey();
   const yesterday = getLocalDateKey(new Date(Date.now() - 86400000));
@@ -115,7 +155,7 @@ export const formatHistoryDateTitle = (
 
 export const groupHistoryEntriesByDate = (
   data: HistoryEntry[],
-  t: (key: string, fallback: string) => string
+  t: HistoryListTranslationFn
 ): HistorySection[] => {
   const grouped = data.reduce<Record<string, HistorySection>>((acc, item) => {
     const { datePart } = parseHistoryCreatedAt(item.created_at);
