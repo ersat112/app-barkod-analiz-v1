@@ -29,10 +29,10 @@ import {
   signInWithCredential,
   updateProfile,
 } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
 
-import { auth, db } from '../../config/firebase';
+import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
+import { ensureUserProfileDocument } from '../../services/userProfile.service';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -350,21 +350,20 @@ export const SignUpScreen: React.FC = () => {
         await updateProfile(userCredential.user, { displayName });
       }
 
-      await setDoc(
-        doc(db, 'users', userCredential.user.uid),
-        {
+      await ensureUserProfileDocument(userCredential.user, {
+        trackLogin: true,
+        profile: {
           firstName: firstName.trim(),
           lastName: lastName.trim(),
+          displayName,
           phone: phone.trim(),
           city: city.trim(),
           district: district.trim(),
           address: address.trim(),
           email: email.trim(),
           kvkkAccepted: true,
-          createdAt: new Date().toISOString(),
         },
-        { merge: true }
-      );
+      });
 
       await sendEmailVerification(userCredential.user);
 
@@ -750,22 +749,22 @@ export const SignUpScreen: React.FC = () => {
           {Platform.OS === 'ios' ? (
             <View style={styles.appleButtonWrap}>
               <AppleAuthentication.AppleAuthenticationButton
-                  buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
-                  buttonStyle={
-                    isDark
-                       ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
-                       : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
-                 }
-                 cornerRadius={16}
-                 style={styles.appleButton}
-                 onPress={appleLoading ? () => undefined : handleAppleLogin}
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
+                buttonStyle={
+                  isDark
+                    ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
+                    : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
+                }
+                cornerRadius={16}
+                style={styles.appleButton}
+                onPress={appleLoading ? () => undefined : handleAppleLogin}
               />
-               {appleLoading ? (
-                  <View style={styles.appleLoadingOverlay}>
-                     <ActivityIndicator size="small" color={isDark ? '#000' : '#FFF'} />
-                  </View>
-               ) : null}
-              </View>
+              {appleLoading ? (
+                <View style={styles.appleLoadingOverlay}>
+                  <ActivityIndicator size="small" color={isDark ? '#000' : '#FFF'} />
+                </View>
+              ) : null}
+            </View>
           ) : null}
         </View>
 
