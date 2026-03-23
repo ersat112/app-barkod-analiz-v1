@@ -20,6 +20,7 @@ import { AdBanner } from '../../components/AdBanner';
 import { useHomeDashboard } from '../../hooks/useHomeDashboard';
 import { useRescanActions } from '../../hooks/useRescanActions';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
+import { buildUserDisplayName } from '../../services/userPresentation.service';
 import {
   ChallengeCard,
   DidYouKnowCard,
@@ -37,15 +38,6 @@ import {
 const DAILY_GOAL = 3;
 const WEEKLY_GOAL = 10;
 const FALLBACK_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
-
-const formatDisplayName = (rawName: string): string =>
-  rawName
-    .replace(/[._-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .split(' ')
-    .filter((word: string) => word.length > 0)
-    .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
 
 const getTodayKey = (): string => {
   const now = new Date();
@@ -66,7 +58,7 @@ const getTimeBasedGreetingKey = (): string => {
 export const HomeScreen: React.FC = () => {
   const { t } = useTranslation();
   const { colors, isDark } = useTheme();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const navigation = useNavigation<any>();
 
   const layout = useAppScreenLayout({
@@ -123,14 +115,12 @@ export const HomeScreen: React.FC = () => {
   );
 
   const displayName = useMemo(() => {
-    const rawName = user?.displayName?.trim() || user?.email?.split('@')[0]?.trim() || '';
-
-    if (!rawName) {
-      return tt('default_user_name', 'Kullanıcı');
-    }
-
-    return formatDisplayName(rawName);
-  }, [tt, user?.displayName, user?.email]);
+    return buildUserDisplayName({
+      profile,
+      user,
+      fallback: tt('default_user_name', 'Kullanıcı'),
+    });
+  }, [profile, tt, user]);
 
   const greeting = useMemo(() => {
     const key = getTimeBasedGreetingKey();
