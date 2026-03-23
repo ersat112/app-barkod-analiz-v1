@@ -33,6 +33,7 @@ import {
 import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
 import { ensureUserProfileDocument } from '../../services/userProfile.service';
+import { authAnalyticsService } from '../../services/authAnalytics.service';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -186,21 +187,42 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({ label }) => {
             : null);
 
         if (!idToken && !accessToken) {
+          await authAnalyticsService.trackSignupFailed({
+            method: 'google',
+            surface: 'signup',
+            error: 'google_credential_missing',
+          });
+
           Alert.alert('Hata', 'Google kimlik doğrulama bilgisi alınamadı.');
           return;
         }
 
         const credential = GoogleAuthProvider.credential(idToken, accessToken);
-        await signInWithCredential(auth, credential);
+        const userCredential = await signInWithCredential(auth, credential);
+
+        await authAnalyticsService.trackSignupSucceeded({
+          method: 'google',
+          surface: 'signup',
+          emailVerified: userCredential.user.emailVerified,
+          hasProfileSeed: false,
+        });
       } catch (error: any) {
         console.error('Google signup/login failed:', error);
+
+        await authAnalyticsService.trackSignupFailed({
+          method: 'google',
+          surface: 'signup',
+          error,
+          errorCode: error?.code,
+        });
+
         Alert.alert('Hata', error?.message || 'Google ile devam etme başarısız oldu.');
       } finally {
         setLoading(false);
       }
     };
 
-    handleGoogleResponse();
+    void handleGoogleResponse();
   }, [response]);
 
   return (
@@ -287,6 +309,12 @@ export const SignUpScreen: React.FC = () => {
       });
 
       if (!appleCredential.identityToken) {
+        await authAnalyticsService.trackSignupFailed({
+          method: 'apple',
+          surface: 'signup',
+          error: 'apple_identity_token_missing',
+        });
+
         Alert.alert('Hata', 'Apple kimlik doğrulama bilgisi alınamadı.');
         return;
       }
@@ -297,13 +325,28 @@ export const SignUpScreen: React.FC = () => {
         rawNonce,
       });
 
-      await signInWithCredential(auth, credential);
+      const userCredential = await signInWithCredential(auth, credential);
+
+      await authAnalyticsService.trackSignupSucceeded({
+        method: 'apple',
+        surface: 'signup',
+        emailVerified: userCredential.user.emailVerified,
+        hasProfileSeed: false,
+      });
     } catch (error: any) {
       if (error?.code === 'ERR_REQUEST_CANCELED') {
         return;
       }
 
       console.error('Apple login failed:', error);
+
+      await authAnalyticsService.trackSignupFailed({
+        method: 'apple',
+        surface: 'signup',
+        error,
+        errorCode: error?.code,
+      });
+
       Alert.alert('Hata', error?.message || 'Apple ile devam etme başarısız oldu.');
     } finally {
       setAppleLoading(false);
@@ -367,12 +410,26 @@ export const SignUpScreen: React.FC = () => {
 
       await sendEmailVerification(userCredential.user);
 
+      await authAnalyticsService.trackSignupSucceeded({
+        method: 'password',
+        surface: 'signup',
+        emailVerified: userCredential.user.emailVerified,
+        hasProfileSeed: true,
+      });
+
       Alert.alert(
         tt('success_title', 'Başarılı'),
         tt('verification_email_sent', 'Hesabınız oluşturuldu. Doğrulama e-postası gönderildi.')
       );
     } catch (error: any) {
       console.error('Signup failed:', error);
+
+      await authAnalyticsService.trackSignupFailed({
+        method: 'password',
+        surface: 'signup',
+        error,
+        errorCode: error?.code,
+      });
 
       let message = tt('signup_error_generic', 'Kayıt sırasında bir hata oluştu.');
 

@@ -29,6 +29,7 @@ import {
 
 import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
+import { authAnalyticsService } from '../../services/authAnalytics.service';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -137,21 +138,41 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({ label }) => {
             : null);
 
         if (!idToken && !accessToken) {
+          await authAnalyticsService.trackLoginFailed({
+            method: 'google',
+            surface: 'login',
+            error: 'google_credential_missing',
+          });
+
           Alert.alert('Hata', 'Google kimlik doğrulama bilgisi alınamadı.');
           return;
         }
 
         const credential = GoogleAuthProvider.credential(idToken, accessToken);
-        await signInWithCredential(auth, credential);
+        const userCredential = await signInWithCredential(auth, credential);
+
+        await authAnalyticsService.trackLoginSucceeded({
+          method: 'google',
+          surface: 'login',
+          emailVerified: userCredential.user.emailVerified,
+        });
       } catch (error: any) {
         console.error('Google login failed:', error);
+
+        await authAnalyticsService.trackLoginFailed({
+          method: 'google',
+          surface: 'login',
+          error,
+          errorCode: error?.code,
+        });
+
         Alert.alert('Hata', error?.message || 'Google ile giriş başarısız oldu.');
       } finally {
         setLoading(false);
       }
     };
 
-    handleGoogleResponse();
+    void handleGoogleResponse();
   }, [response]);
 
   return (
@@ -201,9 +222,26 @@ export const LoginScreen: React.FC = () => {
 
     try {
       setLoading(true);
-      await signInWithEmailAndPassword(auth, email.trim(), password);
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      );
+
+      await authAnalyticsService.trackLoginSucceeded({
+        method: 'password',
+        surface: 'login',
+        emailVerified: userCredential.user.emailVerified,
+      });
     } catch (error: any) {
       console.error('Login failed:', error);
+
+      await authAnalyticsService.trackLoginFailed({
+        method: 'password',
+        surface: 'login',
+        error,
+        errorCode: error?.code,
+      });
 
       let message = tt('login_error_generic', 'Giriş sırasında bir hata oluştu.');
 
@@ -249,6 +287,12 @@ export const LoginScreen: React.FC = () => {
       });
 
       if (!appleCredential.identityToken) {
+        await authAnalyticsService.trackLoginFailed({
+          method: 'apple',
+          surface: 'login',
+          error: 'apple_identity_token_missing',
+        });
+
         Alert.alert('Hata', 'Apple kimlik doğrulama bilgisi alınamadı.');
         return;
       }
@@ -259,13 +303,27 @@ export const LoginScreen: React.FC = () => {
         rawNonce,
       });
 
-      await signInWithCredential(auth, credential);
+      const userCredential = await signInWithCredential(auth, credential);
+
+      await authAnalyticsService.trackLoginSucceeded({
+        method: 'apple',
+        surface: 'login',
+        emailVerified: userCredential.user.emailVerified,
+      });
     } catch (error: any) {
       if (error?.code === 'ERR_REQUEST_CANCELED') {
         return;
       }
 
       console.error('Apple login failed:', error);
+
+      await authAnalyticsService.trackLoginFailed({
+        method: 'apple',
+        surface: 'login',
+        error,
+        errorCode: error?.code,
+      });
+
       Alert.alert('Hata', error?.message || 'Apple ile giriş başarısız oldu.');
     } finally {
       setAppleLoading(false);
@@ -402,23 +460,23 @@ export const LoginScreen: React.FC = () => {
           {Platform.OS === 'ios' ? (
             <View style={styles.appleButtonWrap}>
               <AppleAuthentication.AppleAuthenticationButton
-                 buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
-                 buttonStyle={
-                   isDark
+                buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
+                buttonStyle={
+                  isDark
                     ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE
                     : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK
-              }
-              cornerRadius={16}
-              style={styles.appleButton}
-              onPress={appleLoading ? () => undefined : handleAppleLogin}
-            />
-            {appleLoading ? (
-              <View style={styles.appleLoadingOverlay}>
-                <ActivityIndicator size="small" color={isDark ? '#000' : '#FFF'} />
-              </View>
-            ) : null}
-          </View>
-        ) : null}
+                }
+                cornerRadius={16}
+                style={styles.appleButton}
+                onPress={appleLoading ? () => undefined : handleAppleLogin}
+              />
+              {appleLoading ? (
+                <View style={styles.appleLoadingOverlay}>
+                  <ActivityIndicator size="small" color={isDark ? '#000' : '#FFF'} />
+                </View>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.footerRow}>
