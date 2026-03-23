@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -15,21 +15,11 @@ import { useTranslation } from 'react-i18next';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { useTheme } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
-import type {
-  EntitlementSnapshot,
-  MonetizationPolicySnapshot,
-} from '../../types/monetization';
+import { analyticsService } from '../../services/analytics.service';
 import { entitlementService } from '../../services/entitlement.service';
-import { monetizationPolicyService } from '../../services/monetizationPolicy.service';
+import { useMonetizationStatus } from '../../hooks/useMonetizationStatus';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Paywall'>;
-
-type ScreenState = {
-  loading: boolean;
-  policy: MonetizationPolicySnapshot | null;
-  entitlement: EntitlementSnapshot | null;
-  error: string | null;
-};
 
 function formatTryPrice(value: number): string {
   return new Intl.NumberFormat('tr-TR', {
@@ -51,12 +41,8 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
     horizontalPadding: 24,
   });
 
-  const [state, setState] = useState<ScreenState>({
-    loading: true,
-    policy: null,
-    entitlement: null,
-    error: null,
-  });
+  const { loading, policy, entitlement, error, load } = useMonetizationStatus();
+  const hasTrackedViewRef = useRef(false);
 
   const tt = useCallback(
     (key: string, fallback: string) => {
@@ -66,41 +52,26 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
     [t]
   );
 
-  const load = useCallback(async () => {
-    setState((prev) => ({
-      ...prev,
-      loading: true,
-      error: null,
-    }));
-
-    try {
-      const [policy, entitlement] = await Promise.all([
-        monetizationPolicyService.getResolvedPolicy({ allowStale: true }),
-        entitlementService.getSnapshot(),
-      ]);
-
-      setState({
-        loading: false,
-        policy,
-        entitlement,
-        error: null,
-      });
-    } catch (error) {
-      setState({
-        loading: false,
-        policy: null,
-        entitlement: null,
-        error:
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : tt('paywall_load_error', 'Premium teklif ekranı yüklenemedi.'),
-      });
-    }
-  }, [tt]);
-
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (loading || !policy || !entitlement || hasTrackedViewRef.current) {
+      return;
+    }
+
+    hasTrackedViewRef.current = true;
+
+    void analyticsService.track(
+      'monetization_paywall_viewed',
+      {
+        source: route.params?.source ?? 'unknown',
+        annualPlanEnabled: policy.annualPlanEnabled,
+        purchaseProviderEnabled: policy.purchaseProviderEnabled,
+        annualPriceTry: policy.annualPriceTry,
+        entitlementPlan: entitlement.plan,
+        isPremium: entitlement.isPremium,
+      },
+      { flush: false }
+    );
+  }, [entitlement, loading, policy, route.params?.source]);
 
   const sourceLabel = useMemo(() => {
     switch (route.params?.source) {
@@ -118,13 +89,18 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const handleRestore = useCallback(async () => {
     try {
+      void analyticsService.track(
+        'monetization_restore_tapped',
+        {
+          source: route.params?.source ?? 'unknown',
+        },
+        { flush: false }
+      );
+
       const result = await entitlementService.restorePurchases();
 
       if (result.status === 'restored') {
-        Alert.alert(
-          tt('restore_success_title', 'Başarılı'),
-          result.message
-        );
+        Alert.alert(tt('restore_success_title', 'Başarılı'), result.message);
       } else if (result.status === 'no_active_purchase') {
         Alert.alert(
           tt('restore_not_found_title', 'Satın alma bulunamadı'),
@@ -139,7 +115,7 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
         Alert.alert(tt('error_title', 'Hata'), result.message);
       }
 
-      await load();
+      await load({ forceRefresh: true });
     } catch (error) {
       Alert.alert(
         tt('error_title', 'Hata'),
@@ -148,9 +124,19 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
           : tt('restore_error', 'Satın alma geri yükleme başarısız oldu.')
       );
     }
-  }, [load, tt]);
+  }, [load, route.params?.source, tt]);
 
   const handlePurchasePress = useCallback(() => {
+    void analyticsService.track(
+      'monetization_paywall_cta_tapped',
+      {
+        source: route.params?.source ?? 'unknown',
+        annualProductId: policy?.annualProductId ?? null,
+        purchaseProviderEnabled: policy?.purchaseProviderEnabled ?? false,
+      },
+      { flush: false }
+    );
+
     Alert.alert(
       tt('purchase_unavailable_title', 'Satın alma entegrasyonu hazır değil'),
       tt(
@@ -158,10 +144,7 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
         'Bu build içinde mağaza satın alma sağlayıcısı henüz aktif değil. Foundation hazır; gerçek satın alma entegrasyonu sonraki pakette bağlanacak.'
       )
     );
-  }, [tt]);
-
-  const policy = state.policy;
-  const entitlement = state.entitlement;
+  }, [policy?.annualProductId, policy?.purchaseProviderEnabled, route.params?.source, tt]);
 
   return (
     <ScrollView
@@ -206,12 +189,12 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
           )}
         </Text>
 
-        {state.loading ? (
+        {loading ? (
           <View style={styles.loadingWrap}>
             <ActivityIndicator size="small" color={colors.primary} />
           </View>
-        ) : state.error ? (
-          <Text style={styles.errorText}>{state.error}</Text>
+        ) : error ? (
+          <Text style={styles.errorText}>{error}</Text>
         ) : (
           <>
             <View

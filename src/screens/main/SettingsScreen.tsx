@@ -13,6 +13,7 @@ import {
   View,
   Switch,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
@@ -26,6 +27,8 @@ import { AdBanner } from '../../components/AdBanner';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useOperabilityDiagnostics } from '../../hooks/useOperabilityDiagnostics';
 import { useSettingsProfileEditor } from '../../hooks/useSettingsProfileEditor';
+import { useMonetizationStatus } from '../../hooks/useMonetizationStatus';
+import { analyticsService } from '../../services/analytics.service';
 import {
   buildAvatarLetter,
   buildUserDisplayName,
@@ -59,6 +62,16 @@ type ProfileFieldProps = {
   colors: ThemeColors;
   isDark: boolean;
   multiline?: boolean;
+};
+
+type PremiumCardProps = {
+  title: string;
+  subtitle: string;
+  statusLabel: string;
+  ctaLabel: string;
+  metaLabel: string;
+  onPress: () => void;
+  colors: ThemeColors;
 };
 
 const SettingsItem: React.FC<SettingsItemProps> = ({
@@ -132,6 +145,71 @@ const ProfileField: React.FC<ProfileFieldProps> = ({
   );
 };
 
+const PremiumCard: React.FC<PremiumCardProps> = ({
+  title,
+  subtitle,
+  statusLabel,
+  ctaLabel,
+  metaLabel,
+  onPress,
+  colors,
+}) => {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.premiumCard,
+        {
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+        },
+      ]}
+      onPress={onPress}
+      activeOpacity={0.9}
+    >
+      <View style={styles.premiumHeader}>
+        <View style={[styles.premiumIconWrap, { backgroundColor: `${colors.primary}14` }]}>
+          <Ionicons name="diamond-outline" size={22} color={colors.primary} />
+        </View>
+
+        <View style={styles.premiumHeaderTextWrap}>
+          <Text style={[styles.premiumTitle, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.premiumSubtitle, { color: colors.text }]}>{subtitle}</Text>
+        </View>
+
+        <View style={[styles.premiumStatusBadge, { backgroundColor: `${colors.primary}12` }]}>
+          <Text style={[styles.premiumStatusText, { color: colors.primary }]}>
+            {statusLabel}
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.premiumFeatureRow}>
+        <View style={styles.premiumFeatureItem}>
+          <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
+          <Text style={[styles.premiumFeatureText, { color: colors.text }]}>
+            Reklamsız kullanım
+          </Text>
+        </View>
+
+        <View style={styles.premiumFeatureItem}>
+          <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
+          <Text style={[styles.premiumFeatureText, { color: colors.text }]}>
+            Limitsiz tarama
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.premiumFooter}>
+        <Text style={[styles.premiumMetaText, { color: colors.text }]}>{metaLabel}</Text>
+
+        <View style={[styles.premiumCtaButton, { backgroundColor: colors.primary }]}>
+          <Text style={styles.premiumCtaText}>{ctaLabel}</Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
 function formatDuration(ms: number): string {
   if (ms <= 0) {
     return '0 dk';
@@ -186,8 +264,18 @@ function formatOptionalText(value?: string | null): string {
   return '-';
 }
 
+function formatTryPrice(value: number): string {
+  return new Intl.NumberFormat('tr-TR', {
+    style: 'currency',
+    currency: 'TRY',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 export const SettingsScreen: React.FC = () => {
   const { t } = useTranslation();
+  const navigation = useNavigation<any>();
   const { user, profile, loading: authLoading, profileError, refreshProfile } = useAuth();
   const { colors, isDark, setIsDark, toggleTheme } = useTheme();
   const { locale, changeLanguage, supportedLanguages, ready: languageReady } = useLanguage();
@@ -215,6 +303,8 @@ export const SettingsScreen: React.FC = () => {
     enabled: operabilityDiagnosticsEnabled,
   });
 
+  const monetization = useMonetizationStatus();
+
   const {
     draft,
     isEditing,
@@ -238,11 +328,30 @@ export const SettingsScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
 
+  const handleOpenPaywall = useCallback(() => {
+    void analyticsService.track(
+      'monetization_settings_premium_tapped',
+      {
+        source: 'settings',
+        entitlementPlan: monetization.entitlement?.plan ?? 'free',
+        isPremium: monetization.entitlement?.isPremium ?? false,
+        annualProductId: monetization.policy?.annualProductId ?? null,
+      },
+      { flush: false }
+    );
+
+    navigation.navigate('Paywall', { source: 'settings' });
+  }, [monetization.entitlement?.isPremium, monetization.entitlement?.plan, monetization.policy?.annualProductId, navigation]);
+
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([refreshProfile(), refreshOperabilityDiagnostics()]);
+    await Promise.all([
+      refreshProfile(),
+      refreshOperabilityDiagnostics(),
+      monetization.refresh(),
+    ]);
     setRefreshing(false);
-  }, [refreshOperabilityDiagnostics, refreshProfile]);
+  }, [monetization, refreshOperabilityDiagnostics, refreshProfile]);
 
   const handleSafeOpenUrl = useCallback(
     async (url: string, fallbackMessage?: string) => {
@@ -383,6 +492,33 @@ export const SettingsScreen: React.FC = () => {
     return city || district || tt('location_not_set', 'Konum bilgisi eklenmemiş');
   }, [profile?.city, profile?.district, tt]);
 
+  const premiumTitle = monetization.entitlement?.isPremium
+    ? tt('premium_active', 'Premium aktif')
+    : tt('premium_title', 'Premium yıllık plan');
+
+  const premiumSubtitle = monetization.entitlement?.isPremium
+    ? tt(
+        'premium_active_text',
+        'Bu hesapta premium entitlement aktif. Reklamlar bastırılır ve tarama limiti uygulanmaz.'
+      )
+    : tt(
+        'premium_settings_subtitle',
+        'Yıllık premium ile reklamsız kullanım ve limitsiz barkod tarama açılır.'
+      );
+
+  const premiumStatusLabel = monetization.entitlement?.isPremium
+    ? tt('premium_badge_active', 'Aktif')
+    : tt('premium_badge_yearly', 'Yıllık');
+
+  const premiumCtaLabel = monetization.entitlement?.isPremium
+    ? tt('manage_premium', 'Premium Durumunu Gör')
+    : tt('open_premium_offer', 'Premium Teklifini Aç');
+
+  const premiumMetaLabel =
+    monetization.policy?.annualPriceTry != null
+      ? `${formatTryPrice(monetization.policy.annualPriceTry)} / yıl`
+      : '39,99 TL / yıl';
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: colors.background }]}
@@ -450,6 +586,45 @@ export const SettingsScreen: React.FC = () => {
             </>
           )}
         </View>
+      </View>
+
+      <Text
+        style={[
+          styles.sectionTitle,
+          { color: colors.text, marginHorizontal: layout.horizontalPadding },
+        ]}
+      >
+        {tt('premium', 'Premium')}
+      </Text>
+
+      <View style={{ marginHorizontal: layout.horizontalPadding, marginBottom: 22 }}>
+        {monetization.loading ? (
+          <View
+            style={[
+              styles.premiumLoadingCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : (
+          <PremiumCard
+            title={premiumTitle}
+            subtitle={premiumSubtitle}
+            statusLabel={premiumStatusLabel}
+            ctaLabel={premiumCtaLabel}
+            metaLabel={premiumMetaLabel}
+            onPress={handleOpenPaywall}
+            colors={colors}
+          />
+        )}
+
+        {monetization.error ? (
+          <Text style={styles.monetizationErrorText}>{monetization.error}</Text>
+        ) : null}
       </View>
 
       <Text
@@ -1704,6 +1879,98 @@ const styles = StyleSheet.create({
     opacity: 0.5,
     letterSpacing: 1,
     marginBottom: 12,
+  },
+  premiumLoadingCard: {
+    minHeight: 116,
+    borderRadius: 22,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  premiumCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 16,
+  },
+  premiumHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  premiumIconWrap: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  premiumHeaderTextWrap: {
+    flex: 1,
+  },
+  premiumTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  premiumSubtitle: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 20,
+    opacity: 0.72,
+  },
+  premiumStatusBadge: {
+    minHeight: 32,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  premiumStatusText: {
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  premiumFeatureRow: {
+    marginTop: 14,
+    gap: 10,
+  },
+  premiumFeatureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  premiumFeatureText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  premiumFooter: {
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  premiumMetaText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '800',
+    opacity: 0.72,
+  },
+  premiumCtaButton: {
+    minHeight: 40,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  premiumCtaText: {
+    color: '#000',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  monetizationErrorText: {
+    marginTop: 10,
+    color: '#FF4444',
+    fontSize: 12,
+    fontWeight: '700',
   },
   profileEditorCard: {
     borderWidth: 1,
