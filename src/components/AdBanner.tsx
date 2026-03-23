@@ -17,6 +17,7 @@ import {
   isAdMobAvailable,
 } from '../services/admobRuntime';
 import { adService } from '../services/adService';
+import { entitlementService } from '../services/entitlement.service';
 
 type AdBannerProps = {
   visible?: boolean;
@@ -38,6 +39,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({
 
   const [policyReady, setPolicyReady] = useState(false);
   const [policyAllowsBanner, setPolicyAllowsBanner] = useState(false);
+  const [entitlementAllowsAds, setEntitlementAllowsAds] = useState(true);
   const impressionTrackedRef = useRef(false);
 
   const tt = (key: string, fallback: string) => {
@@ -46,12 +48,17 @@ export const AdBanner: React.FC<AdBannerProps> = ({
   };
 
   const adsModule = useMemo(() => {
-    if (!visible || !policyAllowsBanner || !isAdMobAvailable()) {
+    if (
+      !visible ||
+      !policyAllowsBanner ||
+      !entitlementAllowsAds ||
+      !isAdMobAvailable()
+    ) {
       return null;
     }
 
     return getAdMobModule();
-  }, [policyAllowsBanner, visible]);
+  }, [entitlementAllowsAds, policyAllowsBanner, visible]);
 
   useEffect(() => {
     let mounted = true;
@@ -61,18 +68,27 @@ export const AdBanner: React.FC<AdBannerProps> = ({
         if (mounted) {
           setPolicyReady(true);
           setPolicyAllowsBanner(false);
+          setEntitlementAllowsAds(false);
         }
         return;
       }
 
       try {
-        const policy = await adService.getCurrentPolicy();
+        const [policy, entitlement] = await Promise.all([
+          adService.getCurrentPolicy(),
+          entitlementService.getSnapshot(),
+        ]);
 
         if (!mounted) {
           return;
         }
 
-        setPolicyAllowsBanner(policy.enabled && policy.bannerEnabled);
+        const allowAds = !entitlement.isPremium;
+
+        setEntitlementAllowsAds(allowAds);
+        setPolicyAllowsBanner(
+          allowAds && policy.enabled && policy.bannerEnabled
+        );
       } catch (error) {
         console.log('[BannerAd] policy resolve failed:', error);
 
@@ -80,6 +96,7 @@ export const AdBanner: React.FC<AdBannerProps> = ({
           return;
         }
 
+        setEntitlementAllowsAds(false);
         setPolicyAllowsBanner(false);
       } finally {
         if (mounted) {
@@ -153,9 +170,15 @@ export const AdBanner: React.FC<AdBannerProps> = ({
             },
           ]}
         >
-          <Ionicons name="pause-circle-outline" size={18} color={colors.primary} />
+          <Ionicons
+            name={entitlementAllowsAds ? 'pause-circle-outline' : 'diamond-outline'}
+            size={18}
+            color={colors.primary}
+          />
           <Text style={[styles.placeholderText, { color: colors.text }]}>
-            {tt('ad_placeholder_disabled', 'Reklam bu yerleşimde pasif')}
+            {entitlementAllowsAds
+              ? tt('ad_placeholder_disabled', 'Reklam bu yerleşimde pasif')
+              : tt('premium_no_ads', 'Premium planda reklam gösterilmez')}
           </Text>
         </View>
       </View>
