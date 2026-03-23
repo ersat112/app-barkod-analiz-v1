@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
@@ -7,6 +7,8 @@ import { useAuth } from '../context/AuthContext';
 import { useHomeDashboard } from './useHomeDashboard';
 import { useRescanActions } from './useRescanActions';
 import { buildUserDisplayName } from '../services/userPresentation.service';
+import { calculateProfileCompletion } from '../services/profileCompletion.service';
+import { authAnalyticsService } from '../services/authAnalytics.service';
 
 const DAILY_GOAL = 3;
 const WEEKLY_GOAL = 10;
@@ -32,6 +34,7 @@ export const useHomeScreenController = () => {
   const { t } = useTranslation();
   const navigation = useNavigation<any>();
   const { user, profile } = useAuth();
+  const trackedProfileGateRef = useRef<string>('');
 
   const {
     snapshot,
@@ -113,6 +116,80 @@ export const useHomeScreenController = () => {
   }, [tt]);
 
   const todayKey = useMemo(() => getTodayKey(), []);
+
+  const profileCompletion = useMemo(() => {
+    return calculateProfileCompletion({
+      profile,
+      user,
+    });
+  }, [profile, user]);
+
+  const profileCompletionMissingLabels = useMemo(() => {
+    const fieldLabelMap: Record<string, string> = {
+      firstName: tt('first_name', 'Ad'),
+      lastName: tt('last_name', 'Soyad'),
+      phone: tt('phone', 'Telefon'),
+      city: tt('city', 'Şehir'),
+      district: tt('district', 'İlçe'),
+      address: tt('address', 'Adres'),
+    };
+
+    return profileCompletion.missingFields.map((field) => fieldLabelMap[field]);
+  }, [profileCompletion.missingFields, tt]);
+
+  const shouldShowProfileCompletionGate = useMemo(() => {
+    return Boolean(user) && !profileCompletion.isComplete;
+  }, [profileCompletion.isComplete, user]);
+
+  const profileCompletionSummaryText = useMemo(() => {
+    if (profileCompletion.isComplete) {
+      return tt('profile_complete_summary', 'Profil bilgilerin tamamlandı.');
+    }
+
+    const visibleLabels = profileCompletionMissingLabels.slice(0, 2);
+    const extraCount = Math.max(profileCompletionMissingLabels.length - visibleLabels.length, 0);
+    const extraSuffix = extraCount > 0 ? ` +${extraCount}` : '';
+
+    return tt(
+      'profile_completion_gate_summary',
+      `Profilin %${profileCompletion.score} tamamlandı. Eksik alanlar: ${visibleLabels.join(', ')}${extraSuffix}.`
+    );
+  }, [profileCompletion.isComplete, profileCompletion.score, profileCompletionMissingLabels, tt]);
+
+  useEffect(() => {
+    if (!shouldShowProfileCompletionGate) {
+      trackedProfileGateRef.current = '';
+      return;
+    }
+
+    const signature = `${profileCompletion.score}:${profileCompletion.missingFields.join(',')}`;
+
+    if (trackedProfileGateRef.current === signature) {
+      return;
+    }
+
+    trackedProfileGateRef.current = signature;
+
+    void authAnalyticsService.trackProfileCompletionGateViewed({
+      surface: 'home',
+      completionScore: profileCompletion.score,
+      missingFields: profileCompletion.missingFields,
+    });
+  }, [
+    profileCompletion.missingFields,
+    profileCompletion.score,
+    shouldShowProfileCompletionGate,
+  ]);
+
+  const openSettingsFromProfileGate = useCallback(() => {
+    void authAnalyticsService.trackProfileCompletionCtaTapped({
+      surface: 'home',
+      completionScore: profileCompletion.score,
+      missingFields: profileCompletion.missingFields,
+    });
+
+    openSettings();
+  }, [openSettings, profileCompletion.missingFields, profileCompletion.score]);
 
   const dailyMission = useMemo(() => {
     const index = getMissionIndex();
@@ -303,6 +380,7 @@ export const useHomeScreenController = () => {
     openScanner,
     openHistory,
     openSettings,
+    openSettingsFromProfileGate,
     toggleFavorite,
     displayName,
     greeting,
@@ -317,5 +395,8 @@ export const useHomeScreenController = () => {
     streakText,
     weeklyChallengeText,
     quickInsights,
+    profileCompletion,
+    shouldShowProfileCompletionGate,
+    profileCompletionSummaryText,
   };
 };

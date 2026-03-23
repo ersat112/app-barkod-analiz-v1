@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useAuth } from '../context/AuthContext';
 import { updateCurrentUserProfile } from '../services/userProfile.service';
+import { authAnalyticsService } from '../services/authAnalytics.service';
+import { calculateProfileCompletion } from '../services/profileCompletion.service';
 
 export type SettingsProfileDraft = {
   firstName: string;
@@ -36,6 +38,21 @@ const areDraftsEqual = (
     left.address === right.address
   );
 };
+
+function getChangedFields(
+  source: SettingsProfileDraft,
+  draft: SettingsProfileDraft
+): string[] {
+  const changed: string[] = [];
+
+  (Object.keys(draft) as Array<keyof SettingsProfileDraft>).forEach((key) => {
+    if (source[key] !== draft[key]) {
+      changed.push(key);
+    }
+  });
+
+  return changed;
+}
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -121,6 +138,8 @@ export const useSettingsProfileEditor = () => {
       return true;
     }
 
+    const changedFields = getChangedFields(sourceDraft, draft);
+
     try {
       setIsSaving(true);
       setSaveError(null);
@@ -136,16 +155,43 @@ export const useSettingsProfileEditor = () => {
 
       await refreshProfile();
 
+      const completion = calculateProfileCompletion({
+        profile: {
+          ...(profile ?? {}),
+          firstName: draft.firstName,
+          lastName: draft.lastName,
+          phone: draft.phone,
+          city: draft.city,
+          district: draft.district,
+          address: draft.address,
+        },
+        user,
+      });
+
+      await authAnalyticsService.trackProfileSaveSucceeded({
+        surface: 'settings',
+        completionScore: completion.score,
+        missingFields: completion.missingFields,
+        changedFields,
+      });
+
       setIsEditing(false);
       return true;
     } catch (error) {
       console.error('[useSettingsProfileEditor] save failed:', error);
+
+      await authAnalyticsService.trackProfileSaveFailed({
+        surface: 'settings',
+        changedFields,
+        error,
+      });
+
       setSaveError(toErrorMessage(error));
       return false;
     } finally {
       setIsSaving(false);
     }
-  }, [draft, hasChanges, refreshProfile, user]);
+  }, [draft, hasChanges, profile, refreshProfile, sourceDraft, user]);
 
   return {
     draft,
