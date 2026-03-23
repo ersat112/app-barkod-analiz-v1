@@ -12,8 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Swipeable } from 'react-native-gesture-handler';
 
 import type { HistoryEntry } from '../../../services/db';
-import type { HistorySection } from '../../../types/history';
-import type { HistoryFilterType } from '../../../services/history.service';
+import type { HistoryFilterType, HistorySection } from '../../../types/history';
 
 type ThemeColors = {
   background: string;
