@@ -12,13 +12,11 @@ import {
   View,
   Switch,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
 
-import { auth, db } from '../../config/firebase';
+import { auth } from '../../config/firebase';
 import { FEATURES } from '../../config/features';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -28,15 +26,6 @@ import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useOperabilityDiagnostics } from '../../hooks/useOperabilityDiagnostics';
 
 const APP_VERSION = 'v1.0.4';
-
-type UserProfile = {
-  firstName?: string;
-  lastName?: string;
-  city?: string;
-  district?: string;
-  phone?: string;
-  address?: string;
-};
 
 type ThemeColors = {
   background: string;
@@ -147,9 +136,44 @@ function formatOptionalText(value?: string | null): string {
   return '-';
 }
 
+function buildProfileDisplayName(params: {
+  firstName?: string;
+  lastName?: string;
+  displayName?: string;
+  email?: string | null;
+  fallback: string;
+}): string {
+  const firstName = params.firstName?.trim();
+  const lastName = params.lastName?.trim();
+
+  if (firstName || lastName) {
+    return `${firstName || ''} ${lastName || ''}`.trim();
+  }
+
+  const explicitDisplayName = params.displayName?.trim();
+
+  if (explicitDisplayName) {
+    return explicitDisplayName;
+  }
+
+  const emailName = params.email?.split('@')[0]?.trim();
+
+  if (emailName) {
+    return emailName
+      .replace(/[._-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .split(' ')
+      .filter((word: string) => word.length > 0)
+      .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+  }
+
+  return params.fallback;
+}
+
 export const SettingsScreen: React.FC = () => {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, profile, loading: authLoading, profileError, refreshProfile } = useAuth();
   const { colors, isDark, setIsDark, toggleTheme } = useTheme();
   const { locale, changeLanguage, supportedLanguages, ready: languageReady } = useLanguage();
 
@@ -184,73 +208,14 @@ export const SettingsScreen: React.FC = () => {
     [t]
   );
 
-  const [userData, setUserData] = useState<UserProfile | null>(null);
-  const [loadingProfile, setLoadingProfile] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [profileError, setProfileError] = useState<string | null>(null);
   const [logoutLoading, setLogoutLoading] = useState(false);
-
-  const loadUserProfile = useCallback(async () => {
-    try {
-      setProfileError(null);
-
-      if (!user) {
-        setUserData(null);
-        return;
-      }
-
-      const docRef = doc(db, 'users', user.uid);
-      const docSnap = await getDoc(docRef);
-
-      if (docSnap.exists()) {
-        setUserData(docSnap.data() as UserProfile);
-      } else {
-        setUserData(null);
-      }
-    } catch (error) {
-      console.error('Profile Fetch Error:', error);
-      setProfileError(tt('error_generic', 'Profil bilgileri yüklenemedi'));
-    } finally {
-      setLoadingProfile(false);
-    }
-  }, [tt, user]);
-
-  useFocusEffect(
-    useCallback(() => {
-      let isActive = true;
-
-      const fetchProfile = async () => {
-        setLoadingProfile(true);
-
-        try {
-          if (!isActive) {
-            return;
-          }
-
-          await loadUserProfile();
-        } catch {
-          if (!isActive) {
-            return;
-          }
-        }
-      };
-
-      void fetchProfile();
-
-      return () => {
-        isActive = false;
-      };
-    }, [loadUserProfile])
-  );
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([
-      loadUserProfile(),
-      refreshOperabilityDiagnostics(),
-    ]);
+    await Promise.all([refreshProfile(), refreshOperabilityDiagnostics()]);
     setRefreshing(false);
-  }, [loadUserProfile, refreshOperabilityDiagnostics]);
+  }, [refreshOperabilityDiagnostics, refreshProfile]);
 
   const handleSafeOpenUrl = useCallback(
     async (url: string, fallbackMessage?: string) => {
@@ -306,30 +271,26 @@ export const SettingsScreen: React.FC = () => {
   }, [tt]);
 
   const displayName = useMemo(() => {
-    const firstName = userData?.firstName?.trim();
-    const lastName = userData?.lastName?.trim();
-
-    if (firstName || lastName) {
-      return `${firstName || ''} ${lastName || ''}`.trim();
-    }
-
-    const emailName = user?.email?.split('@')[0]?.trim();
-    if (emailName) {
-      return emailName
-        .replace(/[._-]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .split(' ')
-        .filter((word: string) => word.length > 0)
-        .map((word: string) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-        .join(' ');
-    }
-
-    return tt('default_user_name', 'Kullanıcı');
-  }, [tt, user?.email, userData?.firstName, userData?.lastName]);
+    return buildProfileDisplayName({
+      firstName: profile?.firstName,
+      lastName: profile?.lastName,
+      displayName: profile?.displayName ?? user?.displayName ?? undefined,
+      email: profile?.email ?? user?.email,
+      fallback: tt('default_user_name', 'Kullanıcı'),
+    });
+  }, [
+    profile?.displayName,
+    profile?.email,
+    profile?.firstName,
+    profile?.lastName,
+    tt,
+    user?.displayName,
+    user?.email,
+  ]);
 
   const displayMeta = useMemo(() => {
-    const city = userData?.city?.trim();
-    const district = userData?.district?.trim();
+    const city = profile?.city?.trim();
+    const district = profile?.district?.trim();
 
     if (city && district) {
       return `${city} / ${district}`;
@@ -343,8 +304,8 @@ export const SettingsScreen: React.FC = () => {
       return district;
     }
 
-    return user?.email || tt('location_not_set', 'Konum bilgisi eklenmemiş');
-  }, [tt, user?.email, userData?.city, userData?.district]);
+    return profile?.email || user?.email || tt('location_not_set', 'Konum bilgisi eklenmemiş');
+  }, [profile?.city, profile?.district, profile?.email, tt, user?.email]);
 
   const avatarLetter = useMemo(() => {
     return displayName?.charAt(0)?.toUpperCase() || 'U';
@@ -436,7 +397,7 @@ export const SettingsScreen: React.FC = () => {
         </View>
 
         <View style={styles.profileInfo}>
-          {loadingProfile ? (
+          {authLoading ? (
             <ActivityIndicator size="small" color={colors.primary} />
           ) : (
             <>
