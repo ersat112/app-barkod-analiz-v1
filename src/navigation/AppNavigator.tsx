@@ -26,12 +26,15 @@ import { DetailScreen } from '../screens/main/DetailScreen';
 import { HistoryScreen } from '../screens/main/HistoryScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { MissingProductScreen } from '../screens/main/MissingProductScreen';
+import { PaywallScreen } from '../screens/main/PaywallScreen';
+import type { PaywallEntrySource } from '../types/monetization';
 
 export type RootStackParamList = {
   Main: undefined;
   Scanner: undefined;
   Detail: { barcode: string };
   MissingProduct: { barcode: string };
+  Paywall: { source?: PaywallEntrySource } | undefined;
   Login: undefined;
   SignUp: undefined;
 };
@@ -148,6 +151,11 @@ const AppStack = () => (
       name="MissingProduct"
       component={MissingProductScreen}
       options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="Paywall"
+      component={PaywallScreen}
+      options={{ animation: 'slide_from_bottom' }}
     />
   </Stack.Group>
 );
