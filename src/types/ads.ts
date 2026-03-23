@@ -82,7 +82,11 @@ export type AnalyticsEventName =
   | 'profile_save_succeeded'
   | 'profile_save_failed'
   | 'profile_completion_gate_viewed'
-  | 'profile_completion_cta_tapped';
+  | 'profile_completion_cta_tapped'
+  | 'monetization_settings_premium_tapped'
+  | 'monetization_paywall_viewed'
+  | 'monetization_paywall_cta_tapped'
+  | 'monetization_restore_tapped';
 
 export type AnalyticsEventPayload = Record<string, unknown>;
 
