@@ -1,0 +1,92 @@
+import { Alert, type AlertButton } from 'react-native';
+import { useCallback } from 'react';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+
+import { usePaginatedHistory } from './usePaginatedHistory';
+import { useRescanActions } from './useRescanActions';
+import type { HistoryListTranslationFn } from '../types/history';
+
+type HistoryScreenControllerParams = {
+  t: HistoryListTranslationFn;
+};
+
+export const useHistoryScreenController = ({
+  t,
+}: HistoryScreenControllerParams) => {
+  const navigation = useNavigation<any>();
+
+  const history = usePaginatedHistory(t);
+  const rescan = useRescanActions();
+
+  useFocusEffect(
+    useCallback(() => {
+      void history.loadInitial();
+      void rescan.load();
+
+      return undefined;
+    }, [history.loadInitial, rescan.load])
+  );
+
+  const openScanner = useCallback(() => {
+    navigation.navigate('Scanner');
+  }, [navigation]);
+
+  const openDetail = useCallback(
+    (barcode: string) => {
+      navigation.navigate('Detail', { barcode });
+    },
+    [navigation]
+  );
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([history.refresh(), rescan.refresh()]);
+  }, [history.refresh, rescan.refresh]);
+
+  const requestDeleteEntry = useCallback(
+    (id: number) => {
+      const buttons: AlertButton[] = [
+        { text: t('cancel', 'İptal'), style: 'cancel' },
+        {
+          text: t('delete', 'Sil'),
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await history.deleteEntry(id);
+              await rescan.refresh();
+            } catch (error) {
+              console.error('Delete history failed:', error);
+              Alert.alert(
+                t('error_title', 'Hata'),
+                t('delete_error', 'Geçmiş kaydı silinemedi')
+              );
+            }
+          },
+        },
+      ];
+
+      Alert.alert(
+        t('delete_title', 'Sil'),
+        t('delete_confirm', 'Bu geçmiş kaydını silmek istiyor musunuz?'),
+        buttons
+      );
+    },
+    [history.deleteEntry, rescan.refresh, t]
+  );
+
+  const toggleFavoriteForBarcode = useCallback(
+    (barcode: string) => {
+      void rescan.toggleFavorite(barcode);
+    },
+    [rescan.toggleFavorite]
+  );
+
+  return {
+    ...history,
+    openScanner,
+    openDetail,
+    refreshAll,
+    requestDeleteEntry,
+    toggleFavoriteForBarcode,
+    isFavorite: rescan.isFavorite,
+  };
+};
