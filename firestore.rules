@@ -64,6 +64,18 @@ service cloud.firestore {
       return value == null || value is timestamp;
     }
 
+    function isOptionalBoolean(value) {
+      return value == null || value is bool;
+    }
+
+    function isOptionalStringList(value) {
+      return value == null || value is list;
+    }
+
+    function isOptionalStringOrTimestamp(value) {
+      return value == null || value is string || value is timestamp;
+    }
+
     function isValidSharedCacheStatus(value) {
       return value is string && (value == 'found' || value == 'not_found');
     }
@@ -161,33 +173,37 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
           'firstName',
           'lastName',
+          'displayName',
           'phone',
           'city',
           'district',
           'address',
           'email',
+          'photoURL',
+          'providerIds',
+          'emailVerified',
           'kvkkAccepted',
           'createdAt',
-          'updatedAt'
+          'updatedAt',
+          'lastLoginAt',
+          'lastSeenAt'
         ])
         && isOptionalString(request.resource.data.firstName)
         && isOptionalString(request.resource.data.lastName)
+        && isOptionalString(request.resource.data.displayName)
         && isOptionalString(request.resource.data.phone)
         && isOptionalString(request.resource.data.city)
         && isOptionalString(request.resource.data.district)
         && isOptionalString(request.resource.data.address)
         && isOptionalString(request.resource.data.email)
-        && (request.resource.data.kvkkAccepted == null || request.resource.data.kvkkAccepted is bool)
-        && (
-          request.resource.data.createdAt == null
-          || request.resource.data.createdAt is string
-          || request.resource.data.createdAt is timestamp
-        )
-        && (
-          request.resource.data.updatedAt == null
-          || request.resource.data.updatedAt is string
-          || request.resource.data.updatedAt is timestamp
-        );
+        && isOptionalString(request.resource.data.photoURL)
+        && isOptionalStringList(request.resource.data.providerIds)
+        && isOptionalBoolean(request.resource.data.emailVerified)
+        && isOptionalBoolean(request.resource.data.kvkkAccepted)
+        && isOptionalStringOrTimestamp(request.resource.data.createdAt)
+        && isOptionalStringOrTimestamp(request.resource.data.updatedAt)
+        && isOptionalStringOrTimestamp(request.resource.data.lastLoginAt)
+        && isOptionalStringOrTimestamp(request.resource.data.lastSeenAt);
 
       allow delete: if false;
     }
