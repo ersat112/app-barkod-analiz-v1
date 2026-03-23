@@ -3,19 +3,16 @@ import {
   getHistoryPage,
   removeHistoryEntry,
   HISTORY_PAGE_SIZE,
-  type HistoryFilterType,
 } from './history.service';
 import {
   groupHistoryEntriesByDate,
   parseHistoryCreatedAt,
-  type HistoryPageResult,
+  type HistoryFeedPageReadModel,
+  type HistoryListTranslationFn,
+  type HistoryPageQuery,
   type HistorySection,
   type ParsedHistoryCreatedAt,
 } from '../types/history';
-
-export type HistoryFeedPageReadModel = HistoryPageResult & {
-  sections: HistorySection[];
-};
 
 export function areHistoryEntriesEqual(
   left: HistoryEntry[],
@@ -43,7 +40,7 @@ export function areHistoryEntriesEqual(
 
 export function groupHistoryFeedSections(
   items: HistoryEntry[],
-  t: (key: string, fallback: string) => string
+  t: HistoryListTranslationFn
 ): HistorySection[] {
   return groupHistoryEntriesByDate(items, t);
 }
@@ -54,13 +51,11 @@ export function parseHistoryFeedCreatedAt(
   return parseHistoryCreatedAt(createdAt);
 }
 
-export function getHistoryFeedPageReadModel(params: {
-  limit?: number;
-  offset?: number;
-  query?: string;
-  type?: HistoryFilterType;
-  t: (key: string, fallback: string) => string;
-}): HistoryFeedPageReadModel {
+export function getHistoryFeedPageReadModel(
+  params: HistoryPageQuery & {
+    t: HistoryListTranslationFn;
+  }
+): HistoryFeedPageReadModel {
   const page = getHistoryPage({
     limit: params.limit ?? HISTORY_PAGE_SIZE,
     offset: params.offset ?? 0,
