@@ -15,6 +15,14 @@ function normalizeOptionalString(value?: string | null): string | undefined {
   return normalized.length ? normalized : undefined;
 }
 
+function normalizeEditableString(value?: string | null): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  return value.trim();
+}
+
 function normalizeOptionalBoolean(value?: boolean | null): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
 }
@@ -76,8 +84,12 @@ function buildDisplayName(params: {
     return explicitDisplayName;
   }
 
-  const firstName = normalizeOptionalString(params.firstName);
-  const lastName = normalizeOptionalString(params.lastName);
+  const firstName = typeof params.firstName === 'string'
+    ? params.firstName.trim()
+    : normalizeOptionalString(params.firstName);
+  const lastName = typeof params.lastName === 'string'
+    ? params.lastName.trim()
+    : normalizeOptionalString(params.lastName);
 
   if (firstName && lastName) {
     return `${firstName} ${lastName}`;
@@ -108,6 +120,31 @@ function sanitizeUserProfileInput(input?: UserProfileInput): UserProfileInput {
     updatedAt: normalizeOptionalString(input.updatedAt),
     lastLoginAt: normalizeOptionalString(input.lastLoginAt),
     lastSeenAt: normalizeOptionalString(input.lastSeenAt),
+  };
+}
+
+function sanitizeEditableUserProfileInput(input?: UserProfileInput): UserProfileInput {
+  if (!input) {
+    return {};
+  }
+
+  return {
+    firstName: normalizeEditableString(input.firstName),
+    lastName: normalizeEditableString(input.lastName),
+    displayName: normalizeEditableString(input.displayName),
+    phone: normalizeEditableString(input.phone),
+    city: normalizeEditableString(input.city),
+    district: normalizeEditableString(input.district),
+    address: normalizeEditableString(input.address),
+    email: normalizeEditableString(input.email),
+    photoURL: normalizeEditableString(input.photoURL),
+    providerIds: normalizeProviderIds(input.providerIds),
+    emailVerified: normalizeOptionalBoolean(input.emailVerified),
+    kvkkAccepted: normalizeOptionalBoolean(input.kvkkAccepted),
+    createdAt: normalizeEditableString(input.createdAt),
+    updatedAt: normalizeEditableString(input.updatedAt),
+    lastLoginAt: normalizeEditableString(input.lastLoginAt),
+    lastSeenAt: normalizeEditableString(input.lastSeenAt),
   };
 }
 
@@ -266,4 +303,68 @@ export async function refreshCurrentUserProfile(): Promise<AppUserProfile | null
   return ensureUserProfileDocument(currentUser, {
     trackLogin: false,
   });
+}
+
+export async function updateCurrentUserProfile(input: {
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  city?: string;
+  district?: string;
+  address?: string;
+}): Promise<AppUserProfile | null> {
+  const currentUser = auth.currentUser;
+
+  if (!currentUser) {
+    return null;
+  }
+
+  const existingProfile = await getUserProfile(currentUser.uid);
+  const authProfile = deriveUserProfileFromAuthUser(currentUser);
+  const editableProfile = sanitizeEditableUserProfileInput(input);
+  const now = new Date().toISOString();
+
+  const firstName =
+    editableProfile.firstName ??
+    existingProfile?.firstName ??
+    authProfile.firstName ??
+    '';
+
+  const lastName =
+    editableProfile.lastName ??
+    existingProfile?.lastName ??
+    authProfile.lastName ??
+    '';
+
+  const mergedProfile = compactUserProfile({
+    firstName,
+    lastName,
+    displayName: buildDisplayName({
+      displayName: existingProfile?.displayName ?? authProfile.displayName,
+      firstName,
+      lastName,
+    }),
+    phone: editableProfile.phone ?? existingProfile?.phone ?? '',
+    city: editableProfile.city ?? existingProfile?.city ?? '',
+    district: editableProfile.district ?? existingProfile?.district ?? '',
+    address: editableProfile.address ?? existingProfile?.address ?? '',
+    email: authProfile.email ?? existingProfile?.email,
+    photoURL: authProfile.photoURL ?? existingProfile?.photoURL,
+    providerIds: normalizeProviderIds([
+      ...(existingProfile?.providerIds ?? []),
+      ...(authProfile.providerIds ?? []),
+    ]),
+    emailVerified: currentUser.emailVerified,
+    kvkkAccepted: existingProfile?.kvkkAccepted ?? false,
+    createdAt: existingProfile?.createdAt ?? now,
+    updatedAt: now,
+    lastLoginAt: existingProfile?.lastLoginAt,
+    lastSeenAt: now,
+  });
+
+  const ref = doc(db, USERS_COLLECTION, currentUser.uid);
+
+  await setDoc(ref, mergedProfile, { merge: true });
+
+  return mergedProfile;
 }
