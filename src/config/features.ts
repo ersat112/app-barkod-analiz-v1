@@ -8,7 +8,12 @@ export const PRODUCT_CACHE_SCHEMA_VERSION = 1 as const;
 export const REMOTE_PRODUCT_CACHE_WRITE_QUEUE_STORAGE_KEY =
   'erenesal_remote_product_cache_write_queue_v1' as const;
 
-export const AD_REMOTE_POLICY_COLLECTION = 'runtime_config' as const;
+export const RUNTIME_CONFIG_COLLECTION = 'runtime_config' as const;
+export const FIRESTORE_ROLLOUT_DOCUMENT = 'firestore_rollout' as const;
+export const FIRESTORE_RUNTIME_CONFIG_STORAGE_KEY =
+  'erenesal_firestore_runtime_config_v1' as const;
+
+export const AD_REMOTE_POLICY_COLLECTION = RUNTIME_CONFIG_COLLECTION;
 export const AD_REMOTE_POLICY_DOCUMENT = 'ad_policy' as const;
 export const AD_REMOTE_POLICY_STORAGE_KEY = 'erenesal_ad_remote_policy_v1' as const;
 export const ANALYTICS_EVENTS_COLLECTION = 'analytics_events' as const;
@@ -28,6 +33,8 @@ export const FEATURES = Object.freeze({
   }),
   firebase: Object.freeze({
     runtimeValidationEnabled: true,
+    authenticatedUserRequired: true,
+    runtimeConfigRolloutEnabled: true,
     sharedCacheReadValidationEnabled: true,
     sharedCacheWriteValidationEnabled: true,
     diagnosticsLoggingEnabled: __DEV__,
