@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -16,7 +16,7 @@ import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { useTheme } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { analyticsService } from '../../services/analytics.service';
-import { entitlementService } from '../../services/entitlement.service';
+import { purchaseService } from '../../services/purchase.service';
 import { useMonetizationStatus } from '../../hooks/useMonetizationStatus';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Paywall'>;
@@ -43,6 +43,8 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
 
   const { loading, policy, entitlement, error, load } = useMonetizationStatus();
   const hasTrackedViewRef = useRef(false);
+  const [purchasePending, setPurchasePending] = useState(false);
+  const [restorePending, setRestorePending] = useState(false);
 
   const tt = useCallback(
     (key: string, fallback: string) => {
@@ -88,6 +90,8 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [route.params?.source, tt]);
 
   const handleRestore = useCallback(async () => {
+    setRestorePending(true);
+
     try {
       void analyticsService.track(
         'monetization_restore_tapped',
@@ -97,7 +101,7 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
         { flush: false }
       );
 
-      const result = await entitlementService.restorePurchases();
+      const result = await purchaseService.restorePurchases();
 
       if (result.status === 'restored') {
         Alert.alert(tt('restore_success_title', 'Başarılı'), result.message);
@@ -123,28 +127,58 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
           ? error.message
           : tt('restore_error', 'Satın alma geri yükleme başarısız oldu.')
       );
+    } finally {
+      setRestorePending(false);
     }
   }, [load, route.params?.source, tt]);
 
-  const handlePurchasePress = useCallback(() => {
-    void analyticsService.track(
-      'monetization_paywall_cta_tapped',
-      {
-        source: route.params?.source ?? 'unknown',
-        annualProductId: policy?.annualProductId ?? null,
-        purchaseProviderEnabled: policy?.purchaseProviderEnabled ?? false,
-      },
-      { flush: false }
-    );
+  const handlePurchasePress = useCallback(async () => {
+    setPurchasePending(true);
 
-    Alert.alert(
-      tt('purchase_unavailable_title', 'Satın alma entegrasyonu hazır değil'),
-      tt(
-        'purchase_unavailable_message',
-        'Bu build içinde mağaza satın alma sağlayıcısı henüz aktif değil. Foundation hazır; gerçek satın alma entegrasyonu sonraki pakette bağlanacak.'
-      )
-    );
-  }, [policy?.annualProductId, policy?.purchaseProviderEnabled, route.params?.source, tt]);
+    try {
+      void analyticsService.track(
+        'monetization_paywall_cta_tapped',
+        {
+          source: route.params?.source ?? 'unknown',
+          annualProductId: policy?.annualProductId ?? null,
+          purchaseProviderEnabled: policy?.purchaseProviderEnabled ?? false,
+        },
+        { flush: false }
+      );
+
+      const result = await purchaseService.purchaseAnnualPlan();
+
+      if (result.status === 'purchased' || result.status === 'already_active') {
+        Alert.alert(
+          tt('purchase_success_title', 'Premium aktif'),
+          result.message
+        );
+      } else if (result.status === 'cancelled') {
+        Alert.alert(
+          tt('purchase_cancelled_title', 'İşlem iptal edildi'),
+          result.message
+        );
+      } else if (result.status === 'not_supported') {
+        Alert.alert(
+          tt('purchase_unavailable_title', 'Satın alma entegrasyonu hazır değil'),
+          result.message
+        );
+      } else {
+        Alert.alert(tt('error_title', 'Hata'), result.message);
+      }
+
+      await load({ forceRefresh: true });
+    } catch (error) {
+      Alert.alert(
+        tt('error_title', 'Hata'),
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : tt('purchase_error', 'Premium satın alma işlemi başarısız oldu.')
+      );
+    } finally {
+      setPurchasePending(false);
+    }
+  }, [load, policy?.annualProductId, policy?.purchaseProviderEnabled, route.params?.source, tt]);
 
   return (
     <ScrollView
@@ -272,17 +306,27 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                     policy?.purchaseProviderEnabled && policy?.annualPlanEnabled
                       ? colors.primary
                       : colors.border,
+                  opacity: purchasePending ? 0.7 : 1,
                 },
               ]}
-              disabled={!policy?.purchaseProviderEnabled || !policy?.annualPlanEnabled}
+              disabled={
+                !policy?.purchaseProviderEnabled ||
+                !policy?.annualPlanEnabled ||
+                purchasePending ||
+                restorePending
+              }
               onPress={handlePurchasePress}
               activeOpacity={0.9}
             >
-              <Text style={styles.primaryButtonText}>
-                {policy?.purchaseProviderEnabled
-                  ? tt('buy_yearly_premium', 'Yıllık Premium Satın Al')
-                  : tt('purchase_provider_inactive', 'Satın alma sağlayıcısı henüz aktif değil')}
-              </Text>
+              {purchasePending ? (
+                <ActivityIndicator size="small" color="#000" />
+              ) : (
+                <Text style={styles.primaryButtonText}>
+                  {policy?.purchaseProviderEnabled
+                    ? tt('buy_yearly_premium', 'Yıllık Premium Satın Al')
+                    : tt('purchase_provider_inactive', 'Satın alma sağlayıcısı henüz aktif değil')}
+                </Text>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -290,14 +334,20 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                 styles.secondaryButton,
                 {
                   borderColor: colors.border,
+                  opacity: restorePending ? 0.7 : 1,
                 },
               ]}
               onPress={handleRestore}
+              disabled={purchasePending || restorePending}
               activeOpacity={0.85}
             >
-              <Text style={[styles.secondaryButtonText, { color: colors.text }]}>
-                {tt('restore_purchase', 'Satın Alımı Geri Yükle')}
-              </Text>
+              {restorePending ? (
+                <ActivityIndicator size="small" color={colors.text} />
+              ) : (
+                <Text style={[styles.secondaryButtonText, { color: colors.text }]}>
+                  {tt('restore_purchase', 'Satın Alımı Geri Yükle')}
+                </Text>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity
