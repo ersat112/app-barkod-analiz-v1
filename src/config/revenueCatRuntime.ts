@@ -1,5 +1,3 @@
-import { Platform } from 'react-native';
-
 import { APP_RUNTIME, getEnvString } from './appRuntime';
 
 export type RevenueCatRuntimeSource = 'env_override' | 'fallback';
@@ -20,38 +18,11 @@ export type RevenueCatRuntimeDiagnosticsSnapshot = {
   missingKeys: string[];
 };
 
-function normalizePlatform(value: string): RevenueCatRuntimePlatform {
-  if (value === 'ios' || value === 'android') {
-    return value;
-  }
-
-  return 'web';
-}
-
 const FALLBACK_REVENUECAT_CONFIG = Object.freeze({
   iosApiKey: '',
   androidApiKey: '',
   entitlementIdentifier: 'premium',
   offeringIdentifier: 'default',
-});
-
-const runtimeConfig = Object.freeze({
-  iosApiKey: getEnvString(
-    'EXPO_PUBLIC_REVENUECAT_IOS_API_KEY',
-    FALLBACK_REVENUECAT_CONFIG.iosApiKey
-  ).trim(),
-  androidApiKey: getEnvString(
-    'EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY',
-    FALLBACK_REVENUECAT_CONFIG.androidApiKey
-  ).trim(),
-  entitlementIdentifier: getEnvString(
-    'EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID',
-    FALLBACK_REVENUECAT_CONFIG.entitlementIdentifier
-  ).trim(),
-  offeringIdentifier: getEnvString(
-    'EXPO_PUBLIC_REVENUECAT_OFFERING_ID',
-    FALLBACK_REVENUECAT_CONFIG.offeringIdentifier
-  ).trim(),
 });
 
 const hasRuntimeOverrides = [
@@ -61,54 +32,71 @@ const hasRuntimeOverrides = [
   'EXPO_PUBLIC_REVENUECAT_OFFERING_ID',
 ].some((key) => Boolean(process.env[key]?.trim()));
 
-const platform = normalizePlatform(Platform.OS);
+const platform: RevenueCatRuntimePlatform =
+  APP_RUNTIME.platform === 'ios' || APP_RUNTIME.platform === 'android'
+    ? APP_RUNTIME.platform
+    : 'web';
+
+const iosApiKey = getEnvString(
+  'EXPO_PUBLIC_REVENUECAT_IOS_API_KEY',
+  FALLBACK_REVENUECAT_CONFIG.iosApiKey
+).trim();
+
+const androidApiKey = getEnvString(
+  'EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY',
+  FALLBACK_REVENUECAT_CONFIG.androidApiKey
+).trim();
+
+const entitlementIdentifier = getEnvString(
+  'EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID',
+  FALLBACK_REVENUECAT_CONFIG.entitlementIdentifier
+).trim();
+
+const offeringIdentifier = getEnvString(
+  'EXPO_PUBLIC_REVENUECAT_OFFERING_ID',
+  FALLBACK_REVENUECAT_CONFIG.offeringIdentifier
+).trim();
 
 const activePlatformApiKey =
   platform === 'ios'
-    ? runtimeConfig.iosApiKey
+    ? iosApiKey
     : platform === 'android'
-      ? runtimeConfig.androidApiKey
+      ? androidApiKey
       : '';
 
 const missingKeys: string[] = [];
 
-if (platform === 'ios' && !runtimeConfig.iosApiKey) {
+if (platform === 'ios' && !iosApiKey) {
   missingKeys.push('EXPO_PUBLIC_REVENUECAT_IOS_API_KEY');
 }
 
-if (platform === 'android' && !runtimeConfig.androidApiKey) {
+if (platform === 'android' && !androidApiKey) {
   missingKeys.push('EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY');
 }
 
-if (!runtimeConfig.entitlementIdentifier) {
+if (!entitlementIdentifier) {
   missingKeys.push('EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID');
 }
 
-if (!runtimeConfig.offeringIdentifier) {
+if (!offeringIdentifier) {
   missingKeys.push('EXPO_PUBLIC_REVENUECAT_OFFERING_ID');
 }
 
-const source: RevenueCatRuntimeSource = hasRuntimeOverrides
-  ? 'env_override'
-  : 'fallback';
-
-const isReady =
-  platform !== 'web' &&
-  Boolean(activePlatformApiKey) &&
-  Boolean(runtimeConfig.entitlementIdentifier) &&
-  Boolean(runtimeConfig.offeringIdentifier);
-
 export const REVENUECAT_RUNTIME = Object.freeze({
-  source,
+  source: (hasRuntimeOverrides ? 'env_override' : 'fallback') as RevenueCatRuntimeSource,
   platform,
   isExpoGo: APP_RUNTIME.isExpoGo,
   supportsNativePurchases: APP_RUNTIME.isNativeBuild && platform !== 'web',
-  iosApiKey: runtimeConfig.iosApiKey,
-  androidApiKey: runtimeConfig.androidApiKey,
+  iosApiKey,
+  androidApiKey,
   activePlatformApiKey,
-  entitlementIdentifier: runtimeConfig.entitlementIdentifier,
-  offeringIdentifier: runtimeConfig.offeringIdentifier,
-  isReady,
+  entitlementIdentifier,
+  offeringIdentifier,
+  isReady:
+    platform !== 'web' &&
+    Boolean(activePlatformApiKey) &&
+    Boolean(entitlementIdentifier) &&
+    Boolean(offeringIdentifier),
   missingKeys,
 });
 
