@@ -19,6 +19,7 @@ export type PurchaseProviderName =
 
 export type PurchaseProviderRuntimeSource = 'env_override' | 'fallback';
 export type PurchaseProviderRuntimePlatform = 'ios' | 'android' | 'web';
+export type PurchaseProviderIdentityMode = 'anonymous' | 'authenticated' | 'unknown';
 
 export type MonetizationPolicySnapshot = {
   source: MonetizationPolicySource;
@@ -140,7 +141,12 @@ export type PurchaseProviderDiagnosticsSnapshot = {
   isExpoGo: boolean;
   supportsNativePurchases: boolean;
   runtimeReady: boolean;
+  sdkModulePresent: boolean;
   isConfigured: boolean;
+  authUidPresent: boolean;
+  configuredAppUserId: string | null;
+  identityMode: PurchaseProviderIdentityMode;
+  identitySynced: boolean;
   iosApiKeyPresent: boolean;
   androidApiKeyPresent: boolean;
   activePlatformApiKeyPresent: boolean;
