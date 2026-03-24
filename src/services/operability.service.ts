@@ -16,6 +16,7 @@ import {
 import { resolveFirestoreRuntimeConfig } from './firestoreRuntimeConfig.service';
 import { freeScanPolicyService } from './freeScanPolicy.service';
 import { monetizationPolicyService } from './monetizationPolicy.service';
+import { getPurchaseProviderDiagnosticsSnapshot } from './purchaseProvider.service';
 
 type OperabilitySection<T> = {
   data: T | null;
@@ -194,13 +195,14 @@ async function buildRemoteCacheDiagnosticsSnapshot(options?: {
 async function buildMonetizationDiagnosticsSnapshot(options?: {
   forceRefresh?: boolean;
 }): Promise<MonetizationDiagnosticsSnapshot> {
-  const [policy, entitlement, freeScan] = await Promise.all([
+  const [policy, entitlement, freeScan, providerDiagnostics] = await Promise.all([
     monetizationPolicyService.getResolvedPolicy({
       allowStale: !options?.forceRefresh,
       forceRefresh: Boolean(options?.forceRefresh),
     }),
     entitlementService.getSnapshot(),
     freeScanPolicyService.getSnapshot(),
+    getPurchaseProviderDiagnosticsSnapshot(),
   ]);
 
   return {
@@ -228,6 +230,7 @@ async function buildMonetizationDiagnosticsSnapshot(options?: {
     freeScanUsedCount: freeScan.usedCount,
     freeScanRemainingCount: freeScan.remainingCount,
     freeScanHasReachedLimit: freeScan.hasReachedLimit,
+    providerDiagnostics,
   };
 }
 
