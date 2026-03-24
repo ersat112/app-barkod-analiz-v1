@@ -86,7 +86,10 @@ export type AnalyticsEventName =
   | 'monetization_settings_premium_tapped'
   | 'monetization_paywall_viewed'
   | 'monetization_paywall_cta_tapped'
-  | 'monetization_restore_tapped';
+  | 'monetization_restore_tapped'
+  | 'monetization_purchase_started'
+  | 'monetization_purchase_result'
+  | 'monetization_restore_result';
 
 export type AnalyticsEventPayload = Record<string, unknown>;
 

@@ -6,9 +6,16 @@ export type EntitlementSource =
   | 'default'
   | 'local_cache'
   | 'provider_restore'
+  | 'provider_purchase'
   | 'manual_override';
 
 export type PaywallEntrySource = 'scan_limit' | 'settings' | 'unknown';
+
+export type PurchaseProviderName =
+  | 'none'
+  | 'adapter_unbound'
+  | 'revenuecat'
+  | 'native_iap';
 
 export type MonetizationPolicySnapshot = {
   source: MonetizationPolicySource;
@@ -48,6 +55,22 @@ export type StoredEntitlementState = {
   lastValidatedAt: string | null;
 };
 
+export type PurchaseAnnualPlanStatus =
+  | 'purchased'
+  | 'already_active'
+  | 'cancelled'
+  | 'not_supported'
+  | 'error';
+
+export type PurchaseAnnualPlanResult = {
+  status: PurchaseAnnualPlanStatus;
+  snapshot: EntitlementSnapshot;
+  providerName: PurchaseProviderName;
+  message: string;
+  transactionId: string | null;
+  customerId: string | null;
+};
+
 export type RestorePurchasesStatus =
   | 'restored'
   | 'not_supported'
@@ -57,7 +80,53 @@ export type RestorePurchasesStatus =
 export type RestorePurchasesResult = {
   status: RestorePurchasesStatus;
   snapshot: EntitlementSnapshot;
+  providerName: PurchaseProviderName;
   message: string;
+  transactionId: string | null;
+  customerId: string | null;
+};
+
+export type PurchaseProviderPurchaseParams = {
+  annualProductId: string;
+  authUid: string | null;
+};
+
+export type PurchaseProviderRestoreParams = {
+  annualProductId: string;
+  authUid: string | null;
+};
+
+export type PurchaseProviderPurchaseResult = {
+  status: PurchaseAnnualPlanStatus;
+  providerName: PurchaseProviderName;
+  message: string;
+  activatedAt: string | null;
+  expiresAt: string | null;
+  lastValidatedAt: string | null;
+  transactionId: string | null;
+  customerId: string | null;
+};
+
+export type PurchaseProviderRestoreResult = {
+  status: RestorePurchasesStatus;
+  providerName: PurchaseProviderName;
+  message: string;
+  activatedAt: string | null;
+  expiresAt: string | null;
+  lastValidatedAt: string | null;
+  transactionId: string | null;
+  customerId: string | null;
+};
+
+export type PurchaseProviderAdapter = {
+  name: PurchaseProviderName;
+  isConfigured: () => Promise<boolean>;
+  purchaseAnnualPlan: (
+    params: PurchaseProviderPurchaseParams
+  ) => Promise<PurchaseProviderPurchaseResult>;
+  restorePurchases: (
+    params: PurchaseProviderRestoreParams
+  ) => Promise<PurchaseProviderRestoreResult>;
 };
 
 export type FreeScanPolicyState = {
