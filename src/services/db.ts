@@ -1,5 +1,9 @@
 export { getDatabase, TABLES } from './db/core';
-export { initDatabase } from './db/migrations';
+export {
+  DATABASE_SCHEMA_VERSION,
+  getDatabaseDiagnosticsSnapshot,
+  initDatabase,
+} from './db/migrations';
 export {
   clearAllHistory,
   deleteHistoryEntryById,
@@ -9,11 +13,16 @@ export {
   getCurrentStreakDays,
   getHistoryByBarcode,
   getHistoryCount,
+  getHistoryPage,
+  getHomeDashboardSnapshot,
   getLastScannedProduct,
+  getLatestHistoryEntriesForBarcodes,
+  getRecentUniqueHistoryEntries,
   getTodayScanCount,
   getTodayUniqueProductCount,
   getWeeklyActiveDayCount,
   getWeeklyScanCount,
+  normalizeHistoryRow,
   saveProductToHistory,
 } from './db/history.repository';
 export {
@@ -29,8 +38,10 @@ export {
 export {
   addFavoriteBarcode,
   clearAllFavorites,
+  ensureFavoritesTableReady,
   getAllFavoriteBarcodes,
   getFavoriteCount,
+  getRecentFavoriteBarcodes,
   isFavoriteBarcode,
   removeFavoriteBarcode,
   toggleFavoriteBarcode,
@@ -47,3 +58,4 @@ export type {
   ProductCacheStatus,
   ProductCacheUpsertInput,
 } from './db/types';
+export type { DatabaseDiagnosticsSnapshot } from './db/migrations';

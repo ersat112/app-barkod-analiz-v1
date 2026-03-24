@@ -16,11 +16,9 @@ import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 
-import { AD_UNIT_ID, GLOBAL_AD_CONFIG } from '../../config/admob';
 import { useTheme } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { adService } from '../../services/adService';
-import { getAdMobModule } from '../../services/admobRuntime';
 import { entitlementService } from '../../services/entitlement.service';
 import { freeScanPolicyService } from '../../services/freeScanPolicy.service';
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
@@ -49,20 +47,17 @@ export const ScannerScreen: React.FC = () => {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [torch, setTorch] = useState(false);
-  const [adLoaded, setAdLoaded] = useState(false);
 
   const [isManualMode, setIsManualMode] = useState(false);
   const [manualBarcode, setManualBarcode] = useState('');
   const [manualError, setManualError] = useState('');
 
-  const interstitialRef = useRef<any>(null);
   const lineAnim = useRef(new Animated.Value(0)).current;
   const scanResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
     let disposed = false;
-    let cleanup: (() => void) | undefined;
 
     const setupInterstitial = async () => {
       try {
@@ -74,8 +69,6 @@ export const ScannerScreen: React.FC = () => {
 
         if (entitlement.isPremium) {
           console.log('[Interstitial] premium entitlement active, preload skipped');
-          interstitialRef.current = null;
-          setAdLoaded(false);
           return;
         }
 
@@ -87,74 +80,15 @@ export const ScannerScreen: React.FC = () => {
 
         if (!policy.enabled || !policy.interstitialEnabled) {
           console.log('[Interstitial] policy disabled, preload skipped');
-          interstitialRef.current = null;
-          setAdLoaded(false);
           return;
         }
-
-        const adsModule = getAdMobModule();
-
-        if (!adsModule?.InterstitialAd || !adsModule?.AdEventType) {
-          console.log('[Interstitial] native ads module unavailable');
-          setAdLoaded(false);
-          interstitialRef.current = null;
-          return;
-        }
-
-        const { InterstitialAd, AdEventType } = adsModule;
-        const interstitial = InterstitialAd.createForAdRequest(
-          AD_UNIT_ID.INTERSTITIAL,
-          GLOBAL_AD_CONFIG
-        );
-
-        const unsubscribeLoaded = interstitial.addAdEventListener(
-          AdEventType.LOADED,
-          () => {
-            console.log('[Interstitial] loaded');
-            setAdLoaded(true);
-          }
-        );
-
-        const unsubscribeClosed = interstitial.addAdEventListener(
-          AdEventType.CLOSED,
-          () => {
-            console.log('[Interstitial] closed');
-            setAdLoaded(false);
-            interstitial.load();
-          }
-        );
-
-        const unsubscribeError = interstitial.addAdEventListener(
-          AdEventType.ERROR,
-          (error: unknown) => {
-            console.log('[Interstitial] failed', error);
-            setAdLoaded(false);
-
-            void adService.trackInterstitialShowFailure(error, {
-              stage: 'load',
-              screen: 'Scanner',
-              unitId: AD_UNIT_ID.INTERSTITIAL,
-            });
-          }
-        );
-
-        interstitial.load();
-        interstitialRef.current = interstitial;
-
-        cleanup = () => {
-          unsubscribeLoaded?.();
-          unsubscribeClosed?.();
-          unsubscribeError?.();
-        };
+        await adService.prepareRewardedAd();
       } catch (error) {
         console.log('[Interstitial] setup failed', error);
-        interstitialRef.current = null;
-        setAdLoaded(false);
 
         void adService.trackInterstitialShowFailure(error, {
           stage: 'setup',
           screen: 'Scanner',
-          unitId: AD_UNIT_ID.INTERSTITIAL,
         });
       }
     };
@@ -163,7 +97,6 @@ export const ScannerScreen: React.FC = () => {
 
     return () => {
       disposed = true;
-      cleanup?.();
     };
   }, []);
 
@@ -248,57 +181,12 @@ export const ScannerScreen: React.FC = () => {
         console.error('Free scan policy failed, allowing scan:', error);
       }
 
-      try {
-        const entitlement = await entitlementService.getSnapshot();
-
-        if (!entitlement.isPremium) {
-          const decision = await adService.evaluateScanInterstitialOpportunity();
-
-          if (decision.shouldShow && adLoaded && interstitialRef.current) {
-            console.log('[Interstitial] show requested', decision);
-
-            await interstitialRef.current.show();
-
-            await adService.recordInterstitialShown({
-              shownAt: Date.now(),
-              successfulScanCount: decision.successfulScanCount,
-            });
-          } else if (decision.shouldShow) {
-            console.log('[Interstitial] blocked - not ready', {
-              reason: decision.reason,
-              adLoaded,
-              hasRef: Boolean(interstitialRef.current),
-            });
-
-            await adService.trackInterstitialShowFailure('interstitial_not_ready', {
-              stage: 'show_gate',
-              reason: decision.reason,
-              adLoaded,
-              hasRef: Boolean(interstitialRef.current),
-              successfulScanCount: decision.successfulScanCount,
-              screen: 'Scanner',
-            });
-          } else {
-            console.log('[Interstitial] skipped', {
-              reason: decision.reason,
-              adLoaded,
-            });
-          }
-        } else {
-          console.log('[Interstitial] premium entitlement active, ads suppressed');
-        }
-      } catch (error) {
-        console.error('Ad policy / show failed:', error);
-
-        await adService.trackInterstitialShowFailure(error, {
-          stage: 'show',
-          screen: 'Scanner',
-        });
-      }
-
       resetTransientState();
 
-      navigation.navigate('Detail', { barcode: validBarcodeData });
+      navigation.navigate('Detail', {
+        barcode: validBarcodeData,
+        entrySource: 'scanner',
+      });
 
       if (scanResetTimeoutRef.current) {
         clearTimeout(scanResetTimeoutRef.current);
@@ -308,7 +196,7 @@ export const ScannerScreen: React.FC = () => {
         setScanned(false);
       }, 1800);
     },
-    [adLoaded, navigation, resetTransientState, tt]
+    [navigation, resetTransientState, tt]
   );
 
   const handleBarCodeScanned = useCallback(

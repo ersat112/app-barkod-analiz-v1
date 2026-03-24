@@ -1,3 +1,4 @@
+import Purchases, { LOG_LEVEL as REVENUECAT_LOG_LEVEL } from 'react-native-purchases';
 import { REVENUECAT_RUNTIME, getRevenueCatRuntimeDiagnosticsSnapshot } from '../config/revenueCatRuntime';
 import type {
   PurchaseProviderAdapter,
@@ -8,13 +9,6 @@ import type {
   PurchaseProviderRestoreParams,
   PurchaseProviderRestoreResult,
 } from '../types/monetization';
-
-type RevenueCatModule = {
-  default?: RevenueCatPurchasesApi;
-  LOG_LEVEL?: {
-    VERBOSE?: unknown;
-  };
-};
 
 type RevenueCatPurchasesApi = {
   setLogLevel?: (level: unknown) => void;
@@ -64,10 +58,38 @@ type RevenueCatOfferings = {
   all?: Record<string, RevenueCatOffering | undefined>;
 };
 
+type OfferingSelectionSource = 'configured' | 'current' | 'none';
+type PackageSelectionSource =
+  | 'annual_exact'
+  | 'available_exact'
+  | 'annual_fallback'
+  | 'available_fallback'
+  | 'none';
+
+type OfferingsSmokeCheckResult = {
+  attempted: boolean;
+  success: boolean;
+  summary: string;
+  offeringIdentifier: string | null;
+  packageIdentifier: string | null;
+  productIdentifier: string | null;
+  matchedAnnualProductId: boolean;
+  availablePackagesCount: number;
+  error: string | null;
+};
+
 let providerConfigured = false;
 let configuredAppUserId: string | null = null;
 let lastKnownAuthUid: string | null = null;
 let registeredAdapter: PurchaseProviderAdapter | null = null;
+let lastConfigurationError: string | null = null;
+
+type RevenueCatErrorLike = {
+  code?: unknown;
+  message?: unknown;
+  underlyingErrorMessage?: unknown;
+  userCancelled?: unknown;
+};
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -79,6 +101,79 @@ function toErrorMessage(error: unknown): string {
   }
 
   return 'purchase_provider_unknown_error';
+}
+
+function getRevenueCatErrorDetails(error: unknown): {
+  code: string | null;
+  message: string | null;
+  underlyingMessage: string | null;
+  userCancelled: boolean;
+} {
+  if (!error || typeof error !== 'object') {
+    return {
+      code: null,
+      message: toErrorMessage(error),
+      underlyingMessage: null,
+      userCancelled: false,
+    };
+  }
+
+  const value = error as RevenueCatErrorLike;
+
+  return {
+    code: typeof value.code === 'string' && value.code.trim() ? value.code.trim() : null,
+    message:
+      typeof value.message === 'string' && value.message.trim()
+        ? value.message.trim()
+        : null,
+    underlyingMessage:
+      typeof value.underlyingErrorMessage === 'string' &&
+      value.underlyingErrorMessage.trim()
+        ? value.underlyingErrorMessage.trim()
+        : null,
+    userCancelled: value.userCancelled === true,
+  };
+}
+
+function formatRevenueCatUserMessage(
+  error: unknown,
+  fallbackMessage: string
+): string {
+  const details = getRevenueCatErrorDetails(error);
+  const joinedDetails = [details.underlyingMessage, details.message]
+    .filter((value): value is string => Boolean(value))
+    .join(' ');
+  const normalized = joinedDetails.toLowerCase();
+
+  if (details.userCancelled) {
+    return 'Satın alma işlemi kullanıcı tarafından iptal edildi.';
+  }
+
+  if (
+    details.code === 'ConfigurationError' &&
+    normalized.includes('no products registered') &&
+    normalized.includes('offerings')
+  ) {
+    return 'RevenueCat offering içinde store urunu bagli degil. Dashboard tarafinda offering, package ve product eslesmesini tamamla.';
+  }
+
+  if (
+    details.code === 'PurchaseNotAllowedError' &&
+    (normalized.includes('billing is not available in this device') ||
+      normalized.includes('billing_unavailable'))
+  ) {
+    return 'Google Play Billing bu cihazda kullanilamiyor. Smoke test icin Play Store destekli gercek Android cihaz ve tester hesabi kullan.';
+  }
+
+  if (details.underlyingMessage) {
+    return details.underlyingMessage;
+  }
+
+  if (details.message) {
+    return details.message;
+  }
+
+  return fallbackMessage;
 }
 
 function normalizeNullableDate(value: unknown): string | null {
@@ -97,87 +192,25 @@ function normalizeNullableDate(value: unknown): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
-function getRuntimeRequire(): ((name: string) => unknown) | null {
-  try {
-    return Function('return require')() as (name: string) => unknown;
-  } catch {
-    return null;
-  }
-}
-
-function getRevenueCatModule(): RevenueCatModule | null {
-  try {
-    const runtimeRequire = getRuntimeRequire();
-
-    if (!runtimeRequire) {
-      return null;
-    }
-
-    return runtimeRequire('react-native-purchases') as RevenueCatModule;
-  } catch {
-    return null;
-  }
-}
-
 function getRevenueCatApi(): {
   api: RevenueCatPurchasesApi | null;
   verboseLogLevel: unknown;
 } {
-  const module = getRevenueCatModule();
   const api =
-    module?.default && typeof module.default === 'object'
-      ? module.default
+    typeof Purchases === 'function' || typeof Purchases === 'object'
+      ? (Purchases as RevenueCatPurchasesApi)
       : null;
 
   return {
     api,
-    verboseLogLevel: module?.LOG_LEVEL?.VERBOSE,
+    verboseLogLevel: REVENUECAT_LOG_LEVEL?.VERBOSE,
   };
 }
 
-function createNoopPurchaseResult(
-  params: PurchaseProviderPurchaseParams
-): PurchaseProviderPurchaseResult {
-  return {
-    status: 'not_supported',
-    providerName: 'adapter_unbound',
-    message: `Satın alma adapter'ı bağlı değil: ${params.annualProductId}`,
-    activatedAt: null,
-    expiresAt: null,
-    lastValidatedAt: null,
-    transactionId: null,
-    customerId: null,
-  };
-}
-
-function createNoopRestoreResult(
-  params: PurchaseProviderRestoreParams
-): PurchaseProviderRestoreResult {
-  return {
-    status: 'not_supported',
-    providerName: 'adapter_unbound',
-    message: `Geri yükleme adapter'ı bağlı değil: ${params.annualProductId}`,
-    activatedAt: null,
-    expiresAt: null,
-    lastValidatedAt: null,
-    transactionId: null,
-    customerId: null,
-  };
-}
-
-function createNoopPurchaseProviderAdapter(): PurchaseProviderAdapter {
-  return {
-    name: 'adapter_unbound',
-    async isConfigured() {
-      return false;
-    },
-    async purchaseAnnualPlan(params) {
-      return createNoopPurchaseResult(params);
-    },
-    async restorePurchases(params) {
-      return createNoopRestoreResult(params);
-    },
-  };
+function log(...args: unknown[]) {
+  if (__DEV__) {
+    console.log('[PurchaseProvider]', ...args);
+  }
 }
 
 function resolveActiveEntitlement(
@@ -196,18 +229,34 @@ function resolveActiveEntitlement(
 
 function selectOffering(
   offerings: RevenueCatOfferings | null | undefined
-): RevenueCatOffering | null {
+): { offering: RevenueCatOffering | null; source: OfferingSelectionSource } {
   if (!offerings) {
-    return null;
+    return {
+      offering: null,
+      source: 'none',
+    };
   }
 
   const configured = offerings.all?.[REVENUECAT_RUNTIME.offeringIdentifier];
 
   if (configured) {
-    return configured;
+    return {
+      offering: configured,
+      source: 'configured',
+    };
   }
 
-  return offerings.current ?? null;
+  if (offerings.current) {
+    return {
+      offering: offerings.current,
+      source: 'current',
+    };
+  }
+
+  return {
+    offering: null,
+    source: 'none',
+  };
 }
 
 function matchesAnnualProductId(
@@ -224,9 +273,12 @@ function matchesAnnualProductId(
 function selectPackage(
   offering: RevenueCatOffering | null,
   annualProductId: string
-): RevenueCatPackage | null {
+): { pkg: RevenueCatPackage | null; source: PackageSelectionSource } {
   if (!offering) {
-    return null;
+    return {
+      pkg: null,
+      source: 'none',
+    };
   }
 
   const availablePackages = Array.isArray(offering.availablePackages)
@@ -234,7 +286,10 @@ function selectPackage(
     : [];
 
   if (offering.annual && matchesAnnualProductId(offering.annual, annualProductId)) {
-    return offering.annual;
+    return {
+      pkg: offering.annual,
+      source: 'annual_exact',
+    };
   }
 
   const exactMatch = availablePackages.find((pkg) =>
@@ -242,39 +297,139 @@ function selectPackage(
   );
 
   if (exactMatch) {
-    return exactMatch;
+    return {
+      pkg: exactMatch,
+      source: 'available_exact',
+    };
   }
 
   if (offering.annual) {
-    return offering.annual;
+    return {
+      pkg: offering.annual,
+      source: 'annual_fallback',
+    };
   }
 
-  return availablePackages[0] ?? null;
+  if (availablePackages[0]) {
+    return {
+      pkg: availablePackages[0],
+      source: 'available_fallback',
+    };
+  }
+
+  return {
+    pkg: null,
+    source: 'none',
+  };
+}
+
+function resolvePackageProductIdentifier(pkg: RevenueCatPackage | null): string | null {
+  if (!pkg) {
+    return null;
+  }
+
+  return pkg.productIdentifier ?? pkg.storeProduct?.identifier ?? pkg.storeProduct?.productIdentifier ?? null;
+}
+
+async function runOfferingsSmokeCheck(
+  annualProductId: string
+): Promise<OfferingsSmokeCheckResult> {
+  const { api } = getRevenueCatApi();
+
+  if (!api?.getOfferings) {
+    return {
+      attempted: false,
+      success: false,
+      summary: 'Offerings smoke check atlandı (API hazır değil).',
+      offeringIdentifier: null,
+      packageIdentifier: null,
+      productIdentifier: null,
+      matchedAnnualProductId: false,
+      availablePackagesCount: 0,
+      error: 'offerings_api_unavailable',
+    };
+  }
+
+  try {
+    const offerings = await api.getOfferings();
+    const selection = selectOffering(offerings);
+    const availablePackagesCount = Array.isArray(selection.offering?.availablePackages)
+      ? selection.offering?.availablePackages.length
+      : 0;
+    const packageSelection = selectPackage(selection.offering, annualProductId);
+    const resolvedProductIdentifier = resolvePackageProductIdentifier(packageSelection.pkg);
+    const matchedAnnualProductId =
+      resolvedProductIdentifier === annualProductId && annualProductId.trim().length > 0;
+    const summary =
+      selection.offering && packageSelection.pkg
+        ? `offering:${selection.source} package:${packageSelection.source}`
+        : 'offering/package çözümlenemedi';
+
+    return {
+      attempted: true,
+      success: Boolean(selection.offering && packageSelection.pkg),
+      summary,
+      offeringIdentifier: selection.offering?.identifier ?? null,
+      packageIdentifier: packageSelection.pkg?.identifier ?? null,
+      productIdentifier: resolvedProductIdentifier,
+      matchedAnnualProductId,
+      availablePackagesCount,
+      error: null,
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      success: false,
+      summary: 'Offerings smoke check hata verdi.',
+      offeringIdentifier: null,
+      packageIdentifier: null,
+      productIdentifier: null,
+      matchedAnnualProductId: false,
+      availablePackagesCount: 0,
+      error: formatRevenueCatUserMessage(
+        error,
+        'Offerings smoke check hata verdi.'
+      ),
+    };
+  }
 }
 
 async function ensureConfigured(authUid: string | null): Promise<boolean> {
   lastKnownAuthUid = authUid;
+  lastConfigurationError = null;
 
   if (!REVENUECAT_RUNTIME.isReady) {
+    lastConfigurationError = 'revenuecat_runtime_not_ready';
     return false;
   }
 
   const { api, verboseLogLevel } = getRevenueCatApi();
 
   if (!api?.configure) {
+    lastConfigurationError = 'revenuecat_configure_api_unavailable';
     return false;
   }
 
   if (!providerConfigured) {
-    if (__DEV__ && api.setLogLevel && verboseLogLevel !== undefined) {
-      api.setLogLevel(verboseLogLevel);
+    try {
+      if (__DEV__ && api.setLogLevel && verboseLogLevel !== undefined) {
+        api.setLogLevel(verboseLogLevel);
+      }
+
+      api.configure({
+        apiKey: REVENUECAT_RUNTIME.activePlatformApiKey,
+      });
+
+      providerConfigured = true;
+      log('configure completed', {
+        authUid,
+        platform: REVENUECAT_RUNTIME.platform,
+      });
+    } catch (error) {
+      providerConfigured = false;
+      lastConfigurationError = `revenuecat_configure_failed:${toErrorMessage(error)}`;
+      return false;
     }
-
-    api.configure({
-      apiKey: REVENUECAT_RUNTIME.activePlatformApiKey,
-    });
-
-    providerConfigured = true;
   }
 
   if (!REVENUECAT_RUNTIME.supportsNativePurchases) {
@@ -284,6 +439,7 @@ async function ensureConfigured(authUid: string | null): Promise<boolean> {
 
   if (authUid && configuredAppUserId !== authUid) {
     if (!api.logIn) {
+      lastConfigurationError = 'revenuecat_login_api_unavailable';
       return false;
     }
 
@@ -291,6 +447,7 @@ async function ensureConfigured(authUid: string | null): Promise<boolean> {
       await api.logIn(authUid);
       configuredAppUserId = authUid;
     } catch {
+      lastConfigurationError = 'revenuecat_login_failed';
       return false;
     }
 
@@ -306,6 +463,7 @@ async function ensureConfigured(authUid: string | null): Promise<boolean> {
     try {
       await api.logOut();
     } catch {
+      lastConfigurationError = 'revenuecat_logout_failed';
       return false;
     }
 
@@ -438,8 +596,12 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
 
       try {
         const offerings = await api.getOfferings();
-        const offering = selectOffering(offerings);
-        const selectedPackage = selectPackage(offering, params.annualProductId);
+        const offeringSelection = selectOffering(offerings);
+        const packageSelection = selectPackage(
+          offeringSelection.offering,
+          params.annualProductId
+        );
+        const selectedPackage = packageSelection.pkg;
 
         if (!selectedPackage) {
           return {
@@ -477,7 +639,10 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
         return {
           status: 'error',
           providerName: 'revenuecat',
-          message: toErrorMessage(error),
+          message: formatRevenueCatUserMessage(
+            error,
+            'RevenueCat satin alma akisi hata verdi.'
+          ),
           activatedAt: null,
           expiresAt: null,
           lastValidatedAt: null,
@@ -548,7 +713,10 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
         return {
           status: 'error',
           providerName: 'revenuecat',
-          message: toErrorMessage(error),
+          message: formatRevenueCatUserMessage(
+            error,
+            'RevenueCat restore akisi hata verdi.'
+          ),
           activatedAt: null,
           expiresAt: null,
           lastValidatedAt: null,
@@ -575,21 +743,34 @@ export function resetPurchaseProviderAdapter(): void {
   providerConfigured = false;
   configuredAppUserId = null;
   lastKnownAuthUid = null;
+  lastConfigurationError = null;
 }
 
 export function getPurchaseProviderAdapter(): PurchaseProviderAdapter {
   return registeredAdapter ?? createRevenueCatAdapter();
 }
 
-export async function getPurchaseProviderDiagnosticsSnapshot(): Promise<PurchaseProviderDiagnosticsSnapshot> {
+export function getLastPurchaseProviderConfigurationIssue(): string | null {
+  return lastConfigurationError;
+}
+
+export async function getPurchaseProviderDiagnosticsSnapshot(
+  options?: { annualProductId?: string }
+): Promise<PurchaseProviderDiagnosticsSnapshot> {
   const runtimeDiagnostics = getRevenueCatRuntimeDiagnosticsSnapshot();
   const { api } = getRevenueCatApi();
+  const annualProductId = options?.annualProductId?.trim() ?? '';
+  const smokeCheck = await runOfferingsSmokeCheck(annualProductId);
   const adapter = getPurchaseProviderAdapter();
   const isConfigured = await adapter.isConfigured();
   const authUidPresent = Boolean(lastKnownAuthUid);
   const configuredForCurrentUser = authUidPresent
     ? configuredAppUserId === lastKnownAuthUid
     : configuredAppUserId === null;
+  const identityMismatch = !configuredForCurrentUser;
+  const identityMismatchReason = identityMismatch
+    ? `authUid=${lastKnownAuthUid ?? '-'} configuredAppUserId=${configuredAppUserId ?? '-'}`
+    : lastConfigurationError;
 
   return {
     fetchedAt: new Date().toISOString(),
@@ -603,13 +784,25 @@ export async function getPurchaseProviderDiagnosticsSnapshot(): Promise<Purchase
     isConfigured,
     authUidPresent,
     configuredAppUserId,
+    authUid: lastKnownAuthUid,
     identityMode: resolveIdentityMode(),
     identitySynced: configuredForCurrentUser,
+    identityMismatch,
+    identityMismatchReason,
     iosApiKeyPresent: runtimeDiagnostics.iosApiKeyPresent,
     androidApiKeyPresent: runtimeDiagnostics.androidApiKeyPresent,
     activePlatformApiKeyPresent: runtimeDiagnostics.activePlatformApiKeyPresent,
     entitlementIdentifier: runtimeDiagnostics.entitlementIdentifier,
     offeringIdentifier: runtimeDiagnostics.offeringIdentifier,
     missingKeys: [...runtimeDiagnostics.missingKeys],
+    smokeCheckAttempted: smokeCheck.attempted,
+    smokeCheckSuccess: smokeCheck.success,
+    smokeCheckSummary: smokeCheck.summary,
+    smokeCheckResolvedOfferingId: smokeCheck.offeringIdentifier,
+    smokeCheckResolvedPackageId: smokeCheck.packageIdentifier,
+    smokeCheckResolvedProductId: smokeCheck.productIdentifier,
+    smokeCheckMatchedAnnualProductId: smokeCheck.matchedAnnualProductId,
+    smokeCheckAvailablePackagesCount: smokeCheck.availablePackagesCount,
+    smokeCheckError: smokeCheck.error,
   };
 }

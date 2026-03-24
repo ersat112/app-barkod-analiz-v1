@@ -17,14 +17,26 @@ export const useHistoryScreenController = ({
 
   const history = usePaginatedHistory(t);
   const rescan = useRescanActions();
+  const {
+    loadInitial,
+    refresh,
+    deleteEntry,
+    ...historyState
+  } = history;
+  const {
+    load: loadRescan,
+    refresh: refreshRescan,
+    toggleFavorite,
+    isFavorite,
+  } = rescan;
 
   useFocusEffect(
     useCallback(() => {
-      void history.loadInitial();
-      void rescan.load();
+      void loadInitial();
+      void loadRescan();
 
       return undefined;
-    }, [history.loadInitial, rescan.load])
+    }, [loadInitial, loadRescan])
   );
 
   const openScanner = useCallback(() => {
@@ -39,8 +51,8 @@ export const useHistoryScreenController = ({
   );
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([history.refresh(), rescan.refresh()]);
-  }, [history.refresh, rescan.refresh]);
+    await Promise.all([refresh(), refreshRescan()]);
+  }, [refresh, refreshRescan]);
 
   const requestDeleteEntry = useCallback(
     (id: number) => {
@@ -51,8 +63,8 @@ export const useHistoryScreenController = ({
           style: 'destructive',
           onPress: async () => {
             try {
-              await history.deleteEntry(id);
-              await rescan.refresh();
+              await deleteEntry(id);
+              await refreshRescan();
             } catch (error) {
               console.error('Delete history failed:', error);
               Alert.alert(
@@ -70,23 +82,26 @@ export const useHistoryScreenController = ({
         buttons
       );
     },
-    [history.deleteEntry, rescan.refresh, t]
+    [deleteEntry, refreshRescan, t]
   );
 
   const toggleFavoriteForBarcode = useCallback(
     (barcode: string) => {
-      void rescan.toggleFavorite(barcode);
+      void toggleFavorite(barcode);
     },
-    [rescan.toggleFavorite]
+    [toggleFavorite]
   );
 
   return {
-    ...history,
+    ...historyState,
     openScanner,
     openDetail,
     refreshAll,
     requestDeleteEntry,
     toggleFavoriteForBarcode,
-    isFavorite: rescan.isFavorite,
+    loadInitial,
+    refresh,
+    deleteEntry,
+    isFavorite,
   };
 };

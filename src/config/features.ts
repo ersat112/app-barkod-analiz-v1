@@ -7,6 +7,10 @@ export const MISSING_PRODUCT_DRAFTS_STORAGE_KEY =
 export const PRODUCT_CACHE_SCHEMA_VERSION = 1 as const;
 export const REMOTE_PRODUCT_CACHE_WRITE_QUEUE_STORAGE_KEY =
   'erenesal_remote_product_cache_write_queue_v1' as const;
+export const USERS_COLLECTION = 'users' as const;
+export const USER_SCAN_HISTORY_SUBCOLLECTION = 'scan_history' as const;
+export const REMOTE_HISTORY_SYNC_QUEUE_STORAGE_KEY =
+  'erenesal_remote_history_sync_queue_v1' as const;
 
 export const RUNTIME_CONFIG_COLLECTION = 'runtime_config' as const;
 export const FIRESTORE_ROLLOUT_DOCUMENT = 'firestore_rollout' as const;
@@ -23,6 +27,8 @@ export const MONETIZATION_POLICY_STORAGE_KEY =
 export const ENTITLEMENT_STORAGE_KEY = 'erenesal_entitlement_state_v1' as const;
 export const FREE_SCAN_POLICY_STORAGE_KEY =
   'erenesal_free_scan_policy_state_v1' as const;
+export const MONETIZATION_FLOW_LOG_STORAGE_KEY =
+  'erenesal_monetization_flow_logs_v1' as const;
 
 export const ANALYTICS_EVENTS_COLLECTION = 'analytics_events' as const;
 export const ANALYTICS_QUEUE_STORAGE_KEY = 'erenesal_analytics_queue_v1' as const;
@@ -80,6 +86,7 @@ export const FEATURES = Object.freeze({
   }),
   history: Object.freeze({
     paginationEnabled: false,
+    firestoreSyncEnabled: false,
   }),
   screens: Object.freeze({
     modularizationEnabled: false,

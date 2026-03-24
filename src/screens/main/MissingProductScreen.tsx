@@ -65,7 +65,7 @@ export const MissingProductScreen: React.FC = () => {
     void trackMissingProductScreenViewed(barcode, 'detail_not_found');
   }, [barcode, trackMissingProductScreenViewed]);
 
-  const typeOptions: Array<{ value: MissingProductType; label: string }> = useMemo(
+  const typeOptions: { value: MissingProductType; label: string }[] = useMemo(
     () => [
       { value: 'food', label: tt('food_label', 'Gıda') },
       { value: 'beauty', label: tt('beauty_label', 'Kozmetik') },

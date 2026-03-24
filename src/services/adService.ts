@@ -1,3 +1,4 @@
+import { AD_UNIT_ID, GLOBAL_AD_CONFIG } from '../config/admob';
 import type {
   AdPolicySnapshot,
   AdPolicyStats,
@@ -5,6 +6,7 @@ import type {
   InterstitialDecision,
 } from '../types/ads';
 import type { DiagnosticsTimestamp } from '../types/diagnostics';
+import { getAdMobModule } from './admobRuntime';
 import { analyticsService } from './analytics.service';
 import { adPolicyService } from './adPolicy.service';
 import { adRemotePolicyService } from './adRemotePolicy.service';
@@ -16,12 +18,41 @@ export type AdDiagnosticsSnapshot = {
   analyticsQueueSize: number;
 };
 
+let preparedInterstitial: any = null;
+let preparedInterstitialLoaded = false;
+let preparedInterstitialSetup = false;
+let preparedRewarded: any = null;
+let preparedRewardedLoaded = false;
+let preparedRewardedSetup = false;
+let preparedAppOpen: any = null;
+let preparedAppOpenLoaded = false;
+let preparedAppOpenSetup = false;
+let appOpenShownThisLaunch = false;
+
 function serializeError(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
 
   return typeof error === 'string' ? error : JSON.stringify(error);
+}
+
+function clearPreparedInterstitial() {
+  preparedInterstitial = null;
+  preparedInterstitialLoaded = false;
+  preparedInterstitialSetup = false;
+}
+
+function clearPreparedRewarded() {
+  preparedRewarded = null;
+  preparedRewardedLoaded = false;
+  preparedRewardedSetup = false;
+}
+
+function clearPreparedAppOpen() {
+  preparedAppOpen = null;
+  preparedAppOpenLoaded = false;
+  preparedAppOpenSetup = false;
 }
 
 export const adService = {
@@ -36,6 +67,207 @@ export const adService = {
 
   async getCurrentPolicy(): Promise<AdPolicySnapshot> {
     return adRemotePolicyService.getResolvedPolicy({ allowStale: true });
+  },
+
+  async prepareInterstitial(): Promise<boolean> {
+    const policy = await adRemotePolicyService.getResolvedPolicy({
+      allowStale: true,
+    });
+
+    if (!policy.enabled || !policy.interstitialEnabled) {
+      clearPreparedInterstitial();
+      return false;
+    }
+
+    if (preparedInterstitialSetup && preparedInterstitial) {
+      return preparedInterstitialLoaded;
+    }
+
+    const adsModule = getAdMobModule();
+
+    if (!adsModule?.InterstitialAd || !adsModule?.AdEventType) {
+      clearPreparedInterstitial();
+      return false;
+    }
+
+    const { InterstitialAd, AdEventType } = adsModule;
+    const interstitial = InterstitialAd.createForAdRequest(
+      AD_UNIT_ID.INTERSTITIAL,
+      GLOBAL_AD_CONFIG
+    );
+
+    interstitial.addAdEventListener(AdEventType.LOADED, () => {
+      console.log('[Interstitial] loaded');
+      preparedInterstitialLoaded = true;
+    });
+
+    interstitial.addAdEventListener(AdEventType.CLOSED, () => {
+      console.log('[Interstitial] closed');
+      preparedInterstitialLoaded = false;
+      interstitial.load();
+    });
+
+    interstitial.addAdEventListener(AdEventType.ERROR, (error: unknown) => {
+      console.log('[Interstitial] failed', error);
+      preparedInterstitialLoaded = false;
+    });
+
+    interstitial.load();
+
+    preparedInterstitial = interstitial;
+    preparedInterstitialSetup = true;
+
+    return preparedInterstitialLoaded;
+  },
+
+  async prepareRewardedAd(): Promise<boolean> {
+    const policy = await adRemotePolicyService.getResolvedPolicy({
+      allowStale: true,
+    });
+
+    if (!policy.enabled || !policy.interstitialEnabled) {
+      clearPreparedRewarded();
+      return false;
+    }
+
+    if (preparedRewardedSetup && preparedRewarded) {
+      return preparedRewardedLoaded;
+    }
+
+    const adsModule = getAdMobModule();
+
+    if (
+      !adsModule?.RewardedAd ||
+      !adsModule?.AdEventType ||
+      !adsModule?.RewardedAdEventType
+    ) {
+      clearPreparedRewarded();
+      return false;
+    }
+
+    const { RewardedAd, RewardedAdEventType, AdEventType } = adsModule;
+    const rewardedAd = RewardedAd.createForAdRequest(
+      AD_UNIT_ID.REWARDED,
+      GLOBAL_AD_CONFIG
+    );
+
+    rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
+      console.log('[RewardedAd] loaded');
+      preparedRewardedLoaded = true;
+    });
+
+    rewardedAd.addAdEventListener(RewardedAdEventType.EARNED_REWARD, (reward: unknown) => {
+      console.log('[RewardedAd] earned reward', reward);
+    });
+
+    rewardedAd.addAdEventListener(AdEventType.CLOSED, () => {
+      console.log('[RewardedAd] closed');
+      preparedRewardedLoaded = false;
+      rewardedAd.load();
+    });
+
+    rewardedAd.addAdEventListener(AdEventType.ERROR, (error: unknown) => {
+      console.log('[RewardedAd] failed', error);
+      preparedRewardedLoaded = false;
+    });
+
+    rewardedAd.load();
+
+    preparedRewarded = rewardedAd;
+    preparedRewardedSetup = true;
+
+    return preparedRewardedLoaded;
+  },
+
+  isRewardedAdReady(): boolean {
+    return Boolean(preparedRewarded && preparedRewardedLoaded);
+  },
+
+  async showPreparedRewardedAd(): Promise<boolean> {
+    if (!preparedRewarded || !preparedRewardedLoaded) {
+      return false;
+    }
+
+    await preparedRewarded.show();
+    return true;
+  },
+
+  async prepareAppOpenAd(): Promise<boolean> {
+    const policy = await adRemotePolicyService.getResolvedPolicy({
+      allowStale: true,
+    });
+
+    if (!policy.enabled || !policy.interstitialEnabled) {
+      clearPreparedAppOpen();
+      return false;
+    }
+
+    if (preparedAppOpenSetup && preparedAppOpen) {
+      return preparedAppOpenLoaded;
+    }
+
+    const adsModule = getAdMobModule();
+
+    if (!adsModule?.AppOpenAd || !adsModule?.AdEventType) {
+      clearPreparedAppOpen();
+      return false;
+    }
+
+    const { AppOpenAd, AdEventType } = adsModule;
+    const appOpenAd = AppOpenAd.createForAdRequest(
+      AD_UNIT_ID.APP_OPEN,
+      GLOBAL_AD_CONFIG
+    );
+
+    appOpenAd.addAdEventListener(AdEventType.LOADED, () => {
+      console.log('[AppOpenAd] loaded');
+      preparedAppOpenLoaded = true;
+    });
+
+    appOpenAd.addAdEventListener(AdEventType.CLOSED, () => {
+      console.log('[AppOpenAd] closed');
+      preparedAppOpenLoaded = false;
+      appOpenAd.load();
+    });
+
+    appOpenAd.addAdEventListener(AdEventType.ERROR, (error: unknown) => {
+      console.log('[AppOpenAd] failed', error);
+      preparedAppOpenLoaded = false;
+    });
+
+    appOpenAd.load();
+
+    preparedAppOpen = appOpenAd;
+    preparedAppOpenSetup = true;
+
+    return preparedAppOpenLoaded;
+  },
+
+  isAppOpenAdReady(): boolean {
+    return Boolean(preparedAppOpen && preparedAppOpenLoaded);
+  },
+
+  async showAppOpenAdOnce(): Promise<boolean> {
+    if (appOpenShownThisLaunch || !preparedAppOpen || !preparedAppOpenLoaded) {
+      return false;
+    }
+
+    appOpenShownThisLaunch = true;
+    await preparedAppOpen.show();
+    return true;
+  },
+
+  isInterstitialReady(): boolean {
+    return Boolean(preparedInterstitial && preparedInterstitialLoaded);
+  },
+
+  async showPreparedInterstitial(): Promise<boolean> {
+    if (!preparedInterstitial || !preparedInterstitialLoaded) {
+      return false;
+    }
+
+    await preparedInterstitial.show();
+    return true;
   },
 
   async syncRemotePolicy(forceRefresh = false): Promise<AdPolicySnapshot> {
@@ -75,6 +307,10 @@ export const adService = {
   },
 
   async reset(): Promise<void> {
+    clearPreparedInterstitial();
+    clearPreparedRewarded();
+    clearPreparedAppOpen();
+    appOpenShownThisLaunch = false;
     await adPolicyService.reset();
   },
 

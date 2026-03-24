@@ -10,6 +10,7 @@ export type EntitlementSource =
   | 'manual_override';
 
 export type PaywallEntrySource = 'scan_limit' | 'settings' | 'unknown';
+export type MonetizationFlowSource = PaywallEntrySource | 'service';
 
 export type PurchaseProviderName =
   | 'none'
@@ -73,6 +74,7 @@ export type PurchaseAnnualPlanResult = {
   message: string;
   transactionId: string | null;
   customerId: string | null;
+  identityMismatchWarning: string | null;
 };
 
 export type RestorePurchasesStatus =
@@ -88,6 +90,33 @@ export type RestorePurchasesResult = {
   message: string;
   transactionId: string | null;
   customerId: string | null;
+  identityMismatchWarning: string | null;
+};
+
+export type MonetizationFlowAction = 'purchase' | 'restore';
+export type MonetizationFlowLogStage = 'started' | 'result' | 'error';
+export type MonetizationFlowLogStatus =
+  | PurchaseAnnualPlanStatus
+  | RestorePurchasesStatus
+  | 'started';
+
+export type MonetizationFlowLogEntry = {
+  id: string;
+  createdAt: string;
+  action: MonetizationFlowAction;
+  stage: MonetizationFlowLogStage;
+  status: MonetizationFlowLogStatus;
+  source: MonetizationFlowSource;
+  providerName: PurchaseProviderName;
+  annualProductId: string;
+  authUid: string | null;
+  entitlementPlan: MonetizationPlan;
+  isPremium: boolean;
+  customerId: string | null;
+  transactionId: string | null;
+  identityMismatch: boolean;
+  identityMismatchWarning: string | null;
+  message: string;
 };
 
 export type PurchaseProviderPurchaseParams = {
@@ -145,14 +174,48 @@ export type PurchaseProviderDiagnosticsSnapshot = {
   isConfigured: boolean;
   authUidPresent: boolean;
   configuredAppUserId: string | null;
+  authUid: string | null;
   identityMode: PurchaseProviderIdentityMode;
   identitySynced: boolean;
+  identityMismatch: boolean;
+  identityMismatchReason: string | null;
   iosApiKeyPresent: boolean;
   androidApiKeyPresent: boolean;
   activePlatformApiKeyPresent: boolean;
   entitlementIdentifier: string;
   offeringIdentifier: string;
   missingKeys: string[];
+  smokeCheckAttempted: boolean;
+  smokeCheckSuccess: boolean;
+  smokeCheckSummary: string;
+  smokeCheckResolvedOfferingId: string | null;
+  smokeCheckResolvedPackageId: string | null;
+  smokeCheckResolvedProductId: string | null;
+  smokeCheckMatchedAnnualProductId: boolean;
+  smokeCheckAvailablePackagesCount: number;
+  smokeCheckError: string | null;
+};
+
+export type MonetizationReadinessState = 'blocked' | 'ready_for_store_smoke_test';
+
+export type MonetizationSmokeTestStepStatus = 'blocked' | 'ready' | 'manual';
+
+export type MonetizationSmokeTestStep = {
+  id: string;
+  title: string;
+  status: MonetizationSmokeTestStepStatus;
+  detail: string;
+};
+
+export type MonetizationReadinessSnapshot = {
+  state: MonetizationReadinessState;
+  summary: string;
+  storeSmokeTestReady: boolean;
+  blockerCount: number;
+  blockers: string[];
+  recommendedActions: string[];
+  smokeTestChecklist: MonetizationSmokeTestStep[];
+  smokeTestScenarios: string[];
 };
 
 export type FreeScanPolicyState = {
@@ -210,5 +273,7 @@ export type MonetizationDiagnosticsSnapshot = {
   freeScanUsedCount: number;
   freeScanRemainingCount: number | null;
   freeScanHasReachedLimit: boolean;
+  readiness: MonetizationReadinessSnapshot;
+  recentFlowLogs: MonetizationFlowLogEntry[];
   providerDiagnostics: PurchaseProviderDiagnosticsSnapshot;
 };

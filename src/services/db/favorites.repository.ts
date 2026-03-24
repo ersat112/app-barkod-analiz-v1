@@ -13,6 +13,8 @@ export const ensureFavoritesTableReady = (): void => {
 
 export const getAllFavoriteBarcodes = (limit?: number): string[] => {
   try {
+    initDatabase();
+
     const safeLimit =
       typeof limit === 'number' && Number.isFinite(limit) && limit > 0
         ? Math.min(Math.round(limit), 100)
@@ -45,6 +47,8 @@ export const getRecentFavoriteBarcodes = (limit = 8): string[] => {
 
 export const isFavoriteBarcode = (barcode: string): boolean => {
   try {
+    initDatabase();
+
     const normalizedBarcode = safeText(barcode);
 
     if (!normalizedBarcode) {
@@ -68,6 +72,8 @@ export const isFavoriteBarcode = (barcode: string): boolean => {
 
 export const addFavoriteBarcode = (barcode: string): void => {
   try {
+    initDatabase();
+
     const normalizedBarcode = safeText(barcode);
 
     if (!normalizedBarcode) {
@@ -91,6 +97,8 @@ export const addFavoriteBarcode = (barcode: string): void => {
 
 export const removeFavoriteBarcode = (barcode: string): void => {
   try {
+    initDatabase();
+
     const normalizedBarcode = safeText(barcode);
 
     if (!normalizedBarcode) {
@@ -123,6 +131,8 @@ export const toggleFavoriteBarcode = (barcode: string): boolean => {
 
 export const getFavoriteCount = (): number => {
   try {
+    initDatabase();
+
     const row = db.getFirstSync<{ count: number }>(
       `SELECT COUNT(*) as count FROM ${TABLES.FAVORITES}`
     );
@@ -136,6 +146,8 @@ export const getFavoriteCount = (): number => {
 
 export const clearAllFavorites = (): void => {
   try {
+    initDatabase();
+
     db.runSync(`DELETE FROM ${TABLES.FAVORITES}`);
   } catch (error) {
     console.error('Favorites clear error:', error);

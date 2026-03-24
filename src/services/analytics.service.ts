@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 
-import { db } from '../config/firebase';
+import { auth, db } from '../config/firebase';
 import {
   ANALYTICS_EVENTS_COLLECTION,
   ANALYTICS_INSTALLATION_ID_STORAGE_KEY,
@@ -367,5 +367,3 @@ export const analyticsService = {
     }
   },
 };
-
-import { auth } from '../config/firebase';

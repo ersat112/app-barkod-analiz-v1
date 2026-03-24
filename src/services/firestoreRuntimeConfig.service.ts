@@ -20,6 +20,7 @@ export type FirestoreRuntimeConfigSnapshot = {
   fetchedAt: number | null;
   allowSharedCacheReads: boolean;
   allowClientSharedCacheWrites: boolean;
+  allowUserScanHistoryWrites: boolean;
   allowClientAnalyticsWrites: boolean;
   allowMissingProductContributionWrites: boolean;
   allowAdPolicyReads: boolean;
@@ -34,6 +35,7 @@ type RemoteFirestoreRolloutDocument = Partial<{
   version: number;
   allowSharedCacheReads: boolean;
   allowClientSharedCacheWrites: boolean;
+  allowUserScanHistoryWrites: boolean;
   allowClientAnalyticsWrites: boolean;
   allowMissingProductContributionWrites: boolean;
   allowAdPolicyReads: boolean;
@@ -84,6 +86,7 @@ function createDefaultRuntimeConfig(
     fetchedAt: null,
     allowSharedCacheReads: false,
     allowClientSharedCacheWrites: false,
+    allowUserScanHistoryWrites: false,
     allowClientAnalyticsWrites: true,
     allowMissingProductContributionWrites: false,
     allowAdPolicyReads: true,
@@ -116,6 +119,10 @@ function normalizeRuntimeConfig(
     allowClientSharedCacheWrites: toBoolean(
       raw.allowClientSharedCacheWrites,
       fallback.allowClientSharedCacheWrites
+    ),
+    allowUserScanHistoryWrites: toBoolean(
+      raw.allowUserScanHistoryWrites,
+      fallback.allowUserScanHistoryWrites
     ),
     allowClientAnalyticsWrites: toBoolean(
       raw.allowClientAnalyticsWrites,
@@ -163,6 +170,7 @@ async function readStoredConfig(): Promise<FirestoreRuntimeConfigSnapshot | null
         version: config.version,
         allowSharedCacheReads: config.allowSharedCacheReads,
         allowClientSharedCacheWrites: config.allowClientSharedCacheWrites,
+        allowUserScanHistoryWrites: config.allowUserScanHistoryWrites,
         allowClientAnalyticsWrites: config.allowClientAnalyticsWrites,
         allowMissingProductContributionWrites:
           config.allowMissingProductContributionWrites,

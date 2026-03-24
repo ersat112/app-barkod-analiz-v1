@@ -5,9 +5,19 @@ import {
 } from '../config/firebase';
 import { FEATURES } from '../config/features';
 import type { DiagnosticsTimestamp } from '../types/diagnostics';
-import type { MonetizationDiagnosticsSnapshot } from '../types/monetization';
+import type {
+  MonetizationDiagnosticsSnapshot,
+  MonetizationReadinessSnapshot,
+  MonetizationSmokeTestStep,
+  PurchaseProviderDiagnosticsSnapshot,
+} from '../types/monetization';
 import { adService, type AdDiagnosticsSnapshot } from './adService';
-import { getAdMobRuntimeState, initializeAdMob } from './admobRuntime';
+import { getAdMobRuntimeState } from './admobRuntime';
+import {
+  ensureAppBootstrap,
+  getLastAppBootstrapSnapshot,
+  runAuthenticatedAppBootstrap,
+} from './appBootstrap.service';
 import { entitlementService } from './entitlement.service';
 import {
   getFirebaseAccessSnapshot,
@@ -16,6 +26,7 @@ import {
 import { resolveFirestoreRuntimeConfig } from './firestoreRuntimeConfig.service';
 import { freeScanPolicyService } from './freeScanPolicy.service';
 import { monetizationPolicyService } from './monetizationPolicy.service';
+import { getRecentMonetizationFlowLogs } from './purchaseFlowLog.service';
 import { getPurchaseProviderDiagnosticsSnapshot } from './purchaseProvider.service';
 
 type OperabilitySection<T> = {
@@ -111,41 +122,38 @@ async function captureSection<T>(
 async function buildStartupBootstrapSnapshot(options?: {
   forceRefresh?: boolean;
 }): Promise<StartupBootstrapSnapshot> {
-  const [adPolicy, adMobInitialized] = await Promise.all([
-    adService.syncRemotePolicy(Boolean(options?.forceRefresh)),
-    initializeAdMob(),
-  ]);
-
-  let firestoreRuntimeConfigResolved = false;
-
-  try {
-    await resolveFirestoreRuntimeConfig({
-      forceRefresh: Boolean(options?.forceRefresh),
-      allowStale: true,
-    });
-    firestoreRuntimeConfigResolved = true;
-  } catch {
-    firestoreRuntimeConfigResolved = false;
-  }
+  const forceRefresh = Boolean(options?.forceRefresh);
+  const authUid = auth.currentUser?.uid ?? null;
+  const lastSnapshot = getLastAppBootstrapSnapshot();
+  const bootstrapSnapshot =
+    authUid == null
+      ? forceRefresh || !lastSnapshot?.localBootstrapCompleted
+        ? await ensureAppBootstrap()
+        : lastSnapshot
+      : !forceRefresh &&
+          lastSnapshot?.localBootstrapCompleted &&
+          lastSnapshot.authUid === authUid &&
+          lastSnapshot.firestoreRuntimeConfigResolved
+        ? lastSnapshot
+        : await runAuthenticatedAppBootstrap({
+            forceRefresh,
+          });
 
   const adMobRuntimeState = getAdMobRuntimeState();
 
   return {
     fetchedAt: new Date().toISOString(),
-    localBootstrapCompleted: true,
-    databaseReady:
-      FEATURES.productRepository.foundationEnabled &&
-      FEATURES.productRepository.sqliteCacheEnabled,
-    queueLifecycleAttached:
-      FEATURES.ads.localAnalyticsQueueEnabled ||
-      FEATURES.ads.firestoreAnalyticsEnabled ||
-      FEATURES.productRepository.firestoreWriteEnabled,
-    admobInitialized: adMobInitialized || adMobRuntimeState.initCompleted,
-    firestoreRuntimeConfigResolved,
-    sharedCacheFlushCount: 0,
-    analyticsFlushCount: 0,
-    adPolicySynced: adPolicy.version >= 1,
-    authUid: auth.currentUser?.uid ?? null,
+    localBootstrapCompleted: bootstrapSnapshot.localBootstrapCompleted,
+    databaseReady: bootstrapSnapshot.databaseReady,
+    queueLifecycleAttached: bootstrapSnapshot.queueLifecycleAttached,
+    admobInitialized:
+      bootstrapSnapshot.admobInitialized || adMobRuntimeState.initCompleted,
+    firestoreRuntimeConfigResolved:
+      bootstrapSnapshot.firestoreRuntimeConfigResolved,
+    sharedCacheFlushCount: bootstrapSnapshot.sharedCacheFlushCount,
+    analyticsFlushCount: bootstrapSnapshot.analyticsFlushCount,
+    adPolicySynced: bootstrapSnapshot.adPolicySynced,
+    authUid: bootstrapSnapshot.authUid,
   };
 }
 
@@ -192,18 +200,237 @@ async function buildRemoteCacheDiagnosticsSnapshot(options?: {
   };
 }
 
+function buildMonetizationReadinessSnapshot(input: {
+  annualPlanEnabled: boolean;
+  annualProductId: string;
+  paywallEnabled: boolean;
+  restoreEnabled: boolean;
+  purchaseProviderEnabled: boolean;
+  providerDiagnostics: PurchaseProviderDiagnosticsSnapshot;
+}): MonetizationReadinessSnapshot {
+  const blockers: string[] = [];
+  const recommendedActions: string[] = [];
+  const annualProductId = input.annualProductId.trim();
+  const provider = input.providerDiagnostics;
+
+  const addRecommendation = (value: string) => {
+    if (!recommendedActions.includes(value)) {
+      recommendedActions.push(value);
+    }
+  };
+
+  if (!input.annualPlanEnabled) {
+    blockers.push('Yillik premium plan rollout kapali.');
+    addRecommendation('annualPlanEnabled rolloutunu test build icin ac.');
+  }
+
+  if (!input.purchaseProviderEnabled) {
+    blockers.push('Purchase provider rollout kapali.');
+    addRecommendation('purchaseProviderEnabled rolloutunu test build icin ac.');
+  }
+
+  if (!input.paywallEnabled) {
+    blockers.push('Paywall rollout kapali.');
+    addRecommendation('Paywall giris noktasini test build icin etkinlestir.');
+  }
+
+  if (provider.isExpoGo || !provider.supportsNativePurchases) {
+    blockers.push('Gercek satin alma icin Expo Go yerine dev veya release build gerekli.');
+    addRecommendation('Smoke testleri Expo Go yerine native dev build ile calistir.');
+  }
+
+  if (!provider.sdkModulePresent) {
+    blockers.push('react-native-purchases native modulu yuklenemedi.');
+    addRecommendation('Native prebuild ve react-native-purchases baglantisini dogrula.');
+  }
+
+  if (provider.missingKeys.length > 0) {
+    blockers.push(`Eksik RevenueCat anahtarlari: ${provider.missingKeys.join(', ')}`);
+    addRecommendation('EXPO_PUBLIC_REVENUECAT_* ortam degiskenlerini doldur.');
+  }
+
+  if (!provider.runtimeReady) {
+    blockers.push('RevenueCat runtime hazir degil.');
+    addRecommendation('Aktif platform API key, entitlement ve offering ayarlarini kontrol et.');
+  }
+
+  if (!provider.isConfigured) {
+    blockers.push('Provider configure veya identity sync tamamlanamadi.');
+    addRecommendation('Auth acilis akisi ve foreground identity re-sync sonucunu dogrula.');
+  }
+
+  if (provider.identityMismatch) {
+    blockers.push('Auth UID ile provider app user id eslesmiyor.');
+    addRecommendation('Login/logout sonrasi provider kimlik eslesmesini gercek cihazda kontrol et.');
+  }
+
+  if (!annualProductId) {
+    blockers.push('Annual product id tanimli degil.');
+    addRecommendation('Monetization policy icindeki annualProductId degerini doldur.');
+  }
+
+  if (!provider.smokeCheckAttempted) {
+    blockers.push('Offerings smoke check calismadi.');
+    addRecommendation('Dev build uzerinde getOfferings akisinin calistigini dogrula.');
+  } else if (!provider.smokeCheckSuccess) {
+    blockers.push('Offerings smoke check basarisiz.');
+    addRecommendation('RevenueCat dashboard offering ve package konfigurasyonunu kontrol et.');
+  } else if (!provider.smokeCheckMatchedAnnualProductId) {
+    blockers.push('Offerings smoke check annual product id ile eslesmeyen bir urun cozumledi.');
+    addRecommendation('RevenueCat package mapping ile annualProductId degerini eslestir.');
+  }
+
+  if (
+    provider.smokeCheckAttempted &&
+    provider.smokeCheckSuccess &&
+    provider.smokeCheckAvailablePackagesCount === 0
+  ) {
+    blockers.push('Smoke check sirasinda offering icinde paket bulunamadi.');
+    addRecommendation('RevenueCat offering icindeki available packages listesini kontrol et.');
+  }
+
+  const storeSmokeTestReady = blockers.length === 0;
+
+  if (storeSmokeTestReady) {
+    addRecommendation('Gercek cihazda test kullanicisi ile purchase ve restore smoke testini calistir.');
+  }
+
+  const smokeTestChecklist: MonetizationSmokeTestStep[] = [
+    {
+      id: 'native_build',
+      title: 'Native build kullan',
+      status:
+        !provider.isExpoGo && provider.supportsNativePurchases && provider.sdkModulePresent
+          ? 'ready'
+          : 'blocked',
+      detail:
+        !provider.isExpoGo && provider.supportsNativePurchases && provider.sdkModulePresent
+          ? 'Dev veya release build uzerinden gercek magaza satin alma akisi denenebilir.'
+          : 'Expo Go yerine react-native-purchases yuklu native dev veya release build gerekli.',
+    },
+    {
+      id: 'runtime_config',
+      title: 'RevenueCat runtime hazir',
+      status:
+        provider.runtimeReady && provider.missingKeys.length === 0 ? 'ready' : 'blocked',
+      detail:
+        provider.runtimeReady && provider.missingKeys.length === 0
+          ? 'Aktif platform API key, entitlement ve offering degerleri mevcut.'
+          : provider.missingKeys.length > 0
+            ? `Eksik anahtarlar: ${provider.missingKeys.join(', ')}`
+            : 'RevenueCat runtime henüz hazir görünmuyor.',
+    },
+    {
+      id: 'rollout',
+      title: 'Rollout ve giris noktalari acik',
+      status:
+        input.annualPlanEnabled &&
+        input.purchaseProviderEnabled &&
+        input.paywallEnabled &&
+        input.restoreEnabled
+          ? 'ready'
+          : 'blocked',
+      detail:
+        input.annualPlanEnabled &&
+        input.purchaseProviderEnabled &&
+        input.paywallEnabled &&
+        input.restoreEnabled
+          ? 'Purchase, restore ve paywall akislari test icin acik.'
+          : 'annual plan, purchase provider, paywall veya restore rolloutlarindan en az biri kapali.',
+    },
+    {
+      id: 'identity_sync',
+      title: 'Auth ve provider kimligi eslesiyor',
+      status: provider.isConfigured && !provider.identityMismatch ? 'ready' : 'blocked',
+      detail:
+        provider.isConfigured && !provider.identityMismatch
+          ? 'Mevcut auth kullanicisi ile provider app user id uyumlu.'
+          : provider.identityMismatchReason ??
+            'Provider configure veya identity sync henüz tamamlanmamis.',
+    },
+    {
+      id: 'offering_match',
+      title: 'Offering annual product ile eslesiyor',
+      status:
+        provider.smokeCheckAttempted &&
+        provider.smokeCheckSuccess &&
+        provider.smokeCheckMatchedAnnualProductId &&
+        provider.smokeCheckAvailablePackagesCount > 0
+          ? 'ready'
+          : 'blocked',
+      detail:
+        provider.smokeCheckAttempted &&
+        provider.smokeCheckSuccess &&
+        provider.smokeCheckMatchedAnnualProductId &&
+        provider.smokeCheckAvailablePackagesCount > 0
+          ? `Offering ${provider.smokeCheckResolvedOfferingId ?? '-'} icindeki paket ${annualProductId || '-'} ile eslesti.`
+          : provider.smokeCheckError ??
+            'Offering/package çözümlemesi smoke test icin henüz guvenli degil.',
+    },
+    {
+      id: 'purchase_flow',
+      title: 'Paywall uzerinden satin alma dene',
+      status: storeSmokeTestReady ? 'manual' : 'blocked',
+      detail: storeSmokeTestReady
+        ? 'Beklenen sonuc: purchase basarili, entitlement premium, paywall kapanir.'
+        : 'Önce blocker listesini kapat, sonra gercek cihazda paywall purchase akisini dene.',
+    },
+    {
+      id: 'restore_flow',
+      title: 'Ayni hesapla restore akisini dogrula',
+      status: storeSmokeTestReady ? 'manual' : 'blocked',
+      detail: storeSmokeTestReady
+        ? 'Beklenen sonuc: restore basariliysa entitlement premium döner ve mismatch uyarisi cikmaz.'
+        : 'Restore testine gecmeden once runtime ve offering blockerlarini kapat.',
+    },
+  ];
+
+  const smokeTestScenarios: string[] = [
+    'Settings paywall uzerinden annual purchase dene; beklenen sonuc purchased veya already_active.',
+    'Purchase ekraninda islemi kullanici olarak iptal et; beklenen sonuc cancelled ve entitlement degismez.',
+    'Basarili satin alma sonrasi restore akisini ayni hesapta calistir; beklenen sonuc restored.',
+    'Satin alma gecmisi olmayan hesapta restore dene; beklenen sonuc no_active_purchase.',
+    'Login, logout ve foreground resume sonrasi provider identity mismatch olusmadigini dogrula.',
+  ];
+
+  return {
+    state: storeSmokeTestReady ? 'ready_for_store_smoke_test' : 'blocked',
+    summary: storeSmokeTestReady
+      ? 'RevenueCat store smoke testine hazir.'
+      : `${blockers.length} engel nedeniyle RevenueCat store smoke testi hazir degil.`,
+    storeSmokeTestReady,
+    blockerCount: blockers.length,
+    blockers,
+    recommendedActions,
+    smokeTestChecklist,
+    smokeTestScenarios,
+  };
+}
+
 async function buildMonetizationDiagnosticsSnapshot(options?: {
   forceRefresh?: boolean;
 }): Promise<MonetizationDiagnosticsSnapshot> {
-  const [policy, entitlement, freeScan, providerDiagnostics] = await Promise.all([
-    monetizationPolicyService.getResolvedPolicy({
-      allowStale: !options?.forceRefresh,
-      forceRefresh: Boolean(options?.forceRefresh),
-    }),
+  const policy = await monetizationPolicyService.getResolvedPolicy({
+    allowStale: !options?.forceRefresh,
+    forceRefresh: Boolean(options?.forceRefresh),
+  });
+
+  const [entitlement, freeScan, providerDiagnostics, recentFlowLogs] = await Promise.all([
     entitlementService.getSnapshot(),
     freeScanPolicyService.getSnapshot(),
-    getPurchaseProviderDiagnosticsSnapshot(),
+    getPurchaseProviderDiagnosticsSnapshot({
+      annualProductId: policy.annualProductId,
+    }),
+    getRecentMonetizationFlowLogs(),
   ]);
+  const readiness = buildMonetizationReadinessSnapshot({
+    annualPlanEnabled: policy.annualPlanEnabled,
+    annualProductId: policy.annualProductId,
+    paywallEnabled: policy.paywallEnabled,
+    restoreEnabled: policy.restoreEnabled,
+    purchaseProviderEnabled: policy.purchaseProviderEnabled,
+    providerDiagnostics,
+  });
 
   return {
     fetchedAt: new Date().toISOString(),
@@ -230,6 +457,8 @@ async function buildMonetizationDiagnosticsSnapshot(options?: {
     freeScanUsedCount: freeScan.usedCount,
     freeScanRemainingCount: freeScan.remainingCount,
     freeScanHasReachedLimit: freeScan.hasReachedLimit,
+    readiness,
+    recentFlowLogs,
     providerDiagnostics,
   };
 }

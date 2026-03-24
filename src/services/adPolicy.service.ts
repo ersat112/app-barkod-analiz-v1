@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { AD_POLICY, FEATURES } from '../config/features';
+import { FEATURES } from '../config/features';
 import type {
   AdPolicySnapshot,
   AdPolicyStats,

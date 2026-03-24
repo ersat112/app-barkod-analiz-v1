@@ -45,7 +45,7 @@ function getChangedFields(
 ): string[] {
   const changed: string[] = [];
 
-  (Object.keys(draft) as Array<keyof SettingsProfileDraft>).forEach((key) => {
+  (Object.keys(draft) as (keyof SettingsProfileDraft)[]).forEach((key) => {
     if (source[key] !== draft[key]) {
       changed.push(key);
     }

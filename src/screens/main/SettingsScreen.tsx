@@ -7,6 +7,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  StatusBar,
   Text,
   TextInput,
   TouchableOpacity,
@@ -21,29 +22,24 @@ import { signOut } from 'firebase/auth';
 import { auth } from '../../config/firebase';
 import { FEATURES } from '../../config/features';
 import { useAuth } from '../../context/AuthContext';
-import { useTheme } from '../../context/ThemeContext';
+import { useTheme, type ThemeColors } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { AdBanner } from '../../components/AdBanner';
+import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useOperabilityDiagnostics } from '../../hooks/useOperabilityDiagnostics';
 import { useSettingsProfileEditor } from '../../hooks/useSettingsProfileEditor';
 import { useMonetizationStatus } from '../../hooks/useMonetizationStatus';
 import { analyticsService } from '../../services/analytics.service';
+import { clearMonetizationFlowLogs } from '../../services/purchaseFlowLog.service';
 import {
   buildAvatarLetter,
   buildUserDisplayName,
   buildUserMetaText,
 } from '../../services/userPresentation.service';
+import { withAlpha } from '../../utils/color';
 
 const APP_VERSION = 'v1.0.4';
-
-type ThemeColors = {
-  background: string;
-  card: string;
-  text: string;
-  border: string;
-  primary: string;
-};
 
 type SettingsItemProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -83,7 +79,14 @@ const SettingsItem: React.FC<SettingsItemProps> = ({
   colors,
 }) => (
   <TouchableOpacity
-    style={[styles.item, { backgroundColor: colors.card, borderColor: colors.border }]}
+    style={[
+      styles.item,
+      {
+        backgroundColor: withAlpha(colors.cardElevated, 'EE'),
+        borderColor: withAlpha(colors.border, 'B8'),
+        shadowColor: colors.shadow,
+      },
+    ]}
     onPress={onPress}
     disabled={!onPress}
     activeOpacity={onPress ? 0.82 : 1}
@@ -106,7 +109,16 @@ const SettingsItem: React.FC<SettingsItemProps> = ({
             {value}
           </Text>
         )}
-        <Ionicons name="chevron-forward" size={18} color={colors.border} />
+        {onPress ? (
+          <View
+            style={[
+              styles.itemChevronWrap,
+              { backgroundColor: withAlpha(colors.primary, '10') },
+            ]}
+          >
+            <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+          </View>
+        ) : null}
       </View>
     )}
   </TouchableOpacity>
@@ -136,8 +148,8 @@ const ProfileField: React.FC<ProfileFieldProps> = ({
           multiline && styles.profileInputMultiline,
           {
             color: colors.text,
-            borderColor: colors.border,
-            backgroundColor: isDark ? '#181818' : '#FAFAFA',
+            borderColor: withAlpha(colors.border, 'CC'),
+            backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
           },
         ]}
       />
@@ -154,13 +166,23 @@ const PremiumCard: React.FC<PremiumCardProps> = ({
   onPress,
   colors,
 }) => {
+  const { t } = useTranslation();
+  const tt = useCallback(
+    (key: string, fallback: string) => {
+      const value = t(key, { defaultValue: fallback });
+      return value === key ? fallback : value;
+    },
+    [t]
+  );
+
   return (
     <TouchableOpacity
       style={[
         styles.premiumCard,
         {
-          backgroundColor: colors.card,
-          borderColor: colors.border,
+          backgroundColor: withAlpha(colors.cardElevated, 'F1'),
+          borderColor: withAlpha(colors.border, 'B8'),
+          shadowColor: colors.shadow,
         },
       ]}
       onPress={onPress}
@@ -187,14 +209,14 @@ const PremiumCard: React.FC<PremiumCardProps> = ({
         <View style={styles.premiumFeatureItem}>
           <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
           <Text style={[styles.premiumFeatureText, { color: colors.text }]}>
-            Reklamsız kullanım
+            {tt('value_chip_adfree', 'Reklamsız')}
           </Text>
         </View>
 
         <View style={styles.premiumFeatureItem}>
           <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
           <Text style={[styles.premiumFeatureText, { color: colors.text }]}>
-            Limitsiz tarama
+            {tt('value_chip_unlimited', 'Limitsiz tarama')}
           </Text>
         </View>
       </View>
@@ -203,7 +225,9 @@ const PremiumCard: React.FC<PremiumCardProps> = ({
         <Text style={[styles.premiumMetaText, { color: colors.text }]}>{metaLabel}</Text>
 
         <View style={[styles.premiumCtaButton, { backgroundColor: colors.primary }]}>
-          <Text style={styles.premiumCtaText}>{ctaLabel}</Text>
+          <Text style={[styles.premiumCtaText, { color: colors.primaryContrast }]}>
+            {ctaLabel}
+          </Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -243,7 +267,7 @@ function formatTimeValue(value?: string | number | null): string {
       return '-';
     }
 
-    return date.toLocaleTimeString('tr-TR', {
+    return date.toLocaleTimeString(undefined, {
       hour: '2-digit',
       minute: '2-digit',
     });
@@ -264,7 +288,7 @@ function formatDateTimeValue(value?: string | number | null): string {
       return '-';
     }
 
-    return date.toLocaleString('tr-TR', {
+    return date.toLocaleString(undefined, {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -289,12 +313,124 @@ function formatOptionalText(value?: string | null): string {
 }
 
 function formatTryPrice(value: number): string {
-  return new Intl.NumberFormat('tr-TR', {
+  return new Intl.NumberFormat(undefined, {
     style: 'currency',
     currency: 'TRY',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+function formatDiagnosticsList(items: string[]): string {
+  if (!items.length) {
+    return '-';
+  }
+
+  return items.map((item) => `• ${item}`).join('\n');
+}
+
+function formatNumberedDiagnosticsList(items: string[]): string {
+  if (!items.length) {
+    return '-';
+  }
+
+  return items.map((item, index) => `${index + 1}. ${item}`).join('\n');
+}
+
+function formatShortDiagnosticId(value?: string | null): string {
+  if (typeof value !== 'string' || !value.trim()) {
+    return '-';
+  }
+
+  const normalized = value.trim();
+
+  if (normalized.length <= 18) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 8)}...${normalized.slice(-4)}`;
+}
+
+function formatDiagnosticDateTime(value?: string | null): string {
+  if (!value) {
+    return '-';
+  }
+
+  try {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return '-';
+    }
+
+    return date.toLocaleString(undefined, {
+      day: '2-digit',
+      month: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '-';
+  }
+}
+
+function trimDiagnosticsText(value: string, maxLength = 84): string {
+  const normalized = value.trim();
+
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function formatSmokeTestChecklist(
+  items: { title: string; status: 'blocked' | 'ready' | 'manual'; detail: string }[]
+): string {
+  if (!items.length) {
+    return '-';
+  }
+
+  const statusLabel = {
+    ready: '[READY]',
+    blocked: '[BLOCKED]',
+    manual: '[MANUAL]',
+  } as const;
+
+  return items
+    .map((item) => `${statusLabel[item.status]} ${item.title}: ${item.detail}`)
+    .join('\n');
+}
+
+function formatRecentMonetizationFlowLogs(
+  items: {
+    createdAt: string;
+    action: 'purchase' | 'restore';
+    stage: 'started' | 'result' | 'error';
+    status: string;
+    source: 'scan_limit' | 'settings' | 'unknown' | 'service';
+    providerName: string;
+    customerId: string | null;
+    transactionId: string | null;
+    message: string;
+    identityMismatch: boolean;
+  }[]
+): string {
+  if (!items.length) {
+    return '-';
+  }
+
+  return items
+    .map((item) => {
+      const mismatchSuffix = item.identityMismatch ? ' | mismatch' : '';
+
+      return [
+        `${formatDiagnosticDateTime(item.createdAt)} ${item.action}/${item.stage}/${item.status}`,
+        `provider:${item.providerName} source:${item.source} customer:${formatShortDiagnosticId(item.customerId)} tx:${formatShortDiagnosticId(item.transactionId)}${mismatchSuffix}`,
+        trimDiagnosticsText(item.message),
+      ].join(' | ');
+    })
+    .join('\n');
 }
 
 export const SettingsScreen: React.FC = () => {
@@ -312,9 +448,13 @@ export const SettingsScreen: React.FC = () => {
     horizontalPadding: 25,
   });
 
-  const adDiagnosticsEnabled = FEATURES.ads.diagnosticsLoggingEnabled;
-  const firebaseDiagnosticsEnabled = FEATURES.firebase.diagnosticsLoggingEnabled;
-  const monetizationDiagnosticsEnabled = FEATURES.monetization.diagnosticsLoggingEnabled;
+  const showInternalDiagnostics = false;
+  const adDiagnosticsEnabled =
+    showInternalDiagnostics && FEATURES.ads.diagnosticsLoggingEnabled;
+  const firebaseDiagnosticsEnabled =
+    showInternalDiagnostics && FEATURES.firebase.diagnosticsLoggingEnabled;
+  const monetizationDiagnosticsEnabled =
+    showInternalDiagnostics && FEATURES.monetization.diagnosticsLoggingEnabled;
   const operabilityDiagnosticsEnabled =
     adDiagnosticsEnabled ||
     firebaseDiagnosticsEnabled ||
@@ -354,6 +494,7 @@ export const SettingsScreen: React.FC = () => {
 
   const [refreshing, setRefreshing] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
+  const [flowLogResetting, setFlowLogResetting] = useState(false);
 
   const handleOpenPaywall = useCallback(() => {
     void analyticsService.track(
@@ -377,13 +518,54 @@ export const SettingsScreen: React.FC = () => {
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await Promise.all([
-      refreshProfile(),
-      refreshOperabilityDiagnostics(),
-      monetization.refresh(),
-    ]);
+    const tasks: Promise<unknown>[] = [refreshProfile(), monetization.refresh()];
+
+    if (showInternalDiagnostics) {
+      tasks.push(refreshOperabilityDiagnostics());
+    }
+
+    await Promise.all(tasks);
     setRefreshing(false);
-  }, [monetization, refreshOperabilityDiagnostics, refreshProfile]);
+  }, [monetization, refreshOperabilityDiagnostics, refreshProfile, showInternalDiagnostics]);
+
+  const handleResetMonetizationFlowLogs = useCallback(() => {
+    Alert.alert(
+      tt('clear_logs_title', 'Test loglarını temizle'),
+      tt(
+        'clear_logs_message',
+        'Purchase / restore test logları temizlenecek. Devam etmek istiyor musun?'
+      ),
+      [
+        {
+          text: tt('cancel', 'İptal'),
+          style: 'cancel',
+        },
+        {
+          text: tt('clear', 'Temizle'),
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              setFlowLogResetting(true);
+
+              try {
+                await clearMonetizationFlowLogs();
+                await refreshOperabilityDiagnostics();
+              } catch (error) {
+                Alert.alert(
+                  tt('error_title', 'Hata'),
+                  error instanceof Error && error.message.trim()
+                    ? error.message
+                    : tt('clear_logs_error', 'Test logları temizlenemedi.')
+                );
+              } finally {
+                setFlowLogResetting(false);
+              }
+            })();
+          },
+        },
+      ]
+    );
+  }, [refreshOperabilityDiagnostics, tt]);
 
   const handleSafeOpenUrl = useCallback(
     async (url: string, fallbackMessage?: string) => {
@@ -560,48 +742,122 @@ export const SettingsScreen: React.FC = () => {
       : '39,99 TL / yıl';
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      contentContainerStyle={{ paddingBottom: layout.contentBottomPadding }}
-      showsVerticalScrollIndicator={false}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={handleRefresh}
-          tintColor={colors.primary}
-        />
-      }
-    >
-      <View
-        style={[
-          styles.header,
-          {
-            paddingTop: layout.headerTopPadding,
-            paddingHorizontal: layout.horizontalPadding,
-          },
-        ]}
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+      <AmbientBackdrop colors={colors} variant="settings" />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={{ paddingBottom: layout.contentBottomPadding }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+          />
+        }
       >
-        <Text style={[styles.headerTitle, { color: colors.primary }]}>
-          {tt('settings', 'Ayarlar')}
-        </Text>
-        <Text style={[styles.headerSubtitle, { color: colors.text }]}>
-          {tt(
-            'settings_subtitle',
-            'Uygulama tercihlerinizi ve hesap bilgilerinizi yönetin.'
-          )}
-        </Text>
-      </View>
+        <View
+          style={[
+            styles.header,
+            {
+              paddingTop: layout.headerTopPadding,
+              paddingHorizontal: layout.horizontalPadding,
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.settingsHero,
+              {
+                backgroundColor: withAlpha(colors.card, 'F2'),
+                borderColor: withAlpha(colors.border, 'B8'),
+                shadowColor: colors.shadow,
+              },
+            ]}
+          >
+            <View style={styles.settingsHeroTopRow}>
+              <View style={styles.settingsHeroTextWrap}>
+                <Text style={[styles.heroEyebrow, { color: colors.primary }]}>
+                  {tt('settings', 'Ayarlar')}
+                </Text>
+                <Text style={[styles.headerTitle, { color: colors.text }]}>
+                  {tt('application_settings', 'Uygulama Ayarları')}
+                </Text>
+              </View>
 
-      <View
-        style={[
-          styles.profileCard,
-          {
-            backgroundColor: colors.card,
-            borderColor: colors.border,
-            marginHorizontal: layout.horizontalPadding,
-          },
-        ]}
-      >
+              <View
+                style={[
+                  styles.headerStatusChip,
+                  {
+                    backgroundColor: withAlpha(
+                      monetization.entitlement?.isPremium ? colors.success : colors.primary,
+                      '14'
+                    ),
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.headerStatusChipText,
+                    {
+                      color: monetization.entitlement?.isPremium
+                        ? colors.success
+                        : colors.primary,
+                    },
+                  ]}
+                >
+                  {monetization.entitlement?.isPremium ? premiumStatusLabel : verifiedText}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={[styles.headerSubtitle, { color: colors.mutedText }]}>
+              {tt(
+                'settings_subtitle',
+                'Uygulama tercihlerinizi ve hesap bilgilerinizi yönetin.'
+              )}
+            </Text>
+
+            <View style={styles.heroMetaRow}>
+              <View
+                style={[
+                  styles.heroMetaPill,
+                  { backgroundColor: withAlpha(colors.primary, '10') },
+                ]}
+              >
+                <Ionicons name="globe-outline" size={14} color={colors.primary} />
+                <Text style={[styles.heroMetaPillText, { color: colors.primary }]}>
+                  {locale.toUpperCase()}
+                </Text>
+              </View>
+
+              <View
+                style={[
+                  styles.heroMetaPill,
+                  { backgroundColor: withAlpha(colors.teal, '10') },
+                ]}
+              >
+                <Ionicons name="diamond-outline" size={14} color={colors.teal} />
+                <Text style={[styles.heroMetaPillText, { color: colors.teal }]}>
+                  {premiumStatusLabel}
+                </Text>
+              </View>
+            </View>
+          </View>
+        </View>
+
+        <View
+          style={[
+            styles.profileCard,
+            {
+              backgroundColor: withAlpha(colors.cardElevated, 'F3'),
+              borderColor: withAlpha(colors.border, 'B8'),
+              marginHorizontal: layout.horizontalPadding,
+              shadowColor: colors.shadow,
+            },
+          ]}
+        >
         <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
           <Text style={styles.avatarText}>{avatarLetter}</Text>
         </View>
@@ -614,10 +870,10 @@ export const SettingsScreen: React.FC = () => {
               <Text style={[styles.userName, { color: colors.text }]} numberOfLines={1}>
                 {displayName}
               </Text>
-              <Text style={[styles.userMeta, { color: colors.text }]} numberOfLines={2}>
+              <Text style={[styles.userMeta, { color: colors.mutedText }]} numberOfLines={2}>
                 {displayMeta}
               </Text>
-              <Text style={[styles.userMeta, { color: colors.text }]} numberOfLines={1}>
+              <Text style={[styles.userMeta, { color: colors.mutedText }]} numberOfLines={1}>
                 {verifiedText}
               </Text>
               {profileError ? (
@@ -626,7 +882,7 @@ export const SettingsScreen: React.FC = () => {
             </>
           )}
         </View>
-      </View>
+        </View>
 
       <Text
         style={[
@@ -643,8 +899,8 @@ export const SettingsScreen: React.FC = () => {
             style={[
               styles.premiumLoadingCard,
               {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
+                backgroundColor: withAlpha(colors.cardElevated, 'F1'),
+                borderColor: withAlpha(colors.border, 'B8'),
               },
             ]}
           >
@@ -680,8 +936,8 @@ export const SettingsScreen: React.FC = () => {
         style={[
           styles.profileEditorCard,
           {
-            backgroundColor: colors.card,
-            borderColor: colors.border,
+            backgroundColor: withAlpha(colors.cardElevated, 'F1'),
+            borderColor: withAlpha(colors.border, 'B8'),
             marginHorizontal: layout.horizontalPadding,
           },
         ]}
@@ -913,8 +1169,8 @@ export const SettingsScreen: React.FC = () => {
         style={[
           styles.languageBox,
           {
-            backgroundColor: colors.card,
-            borderColor: colors.border,
+            backgroundColor: withAlpha(colors.cardElevated, 'EE'),
+            borderColor: withAlpha(colors.border, 'B8'),
             marginHorizontal: layout.horizontalPadding,
           },
         ]}
@@ -1039,27 +1295,51 @@ export const SettingsScreen: React.FC = () => {
                 </View>
               </View>
 
-              <TouchableOpacity
-                style={[
-                  styles.diagnosticsRefreshButton,
-                  operabilityRefreshing && styles.diagnosticsRefreshButtonDisabled,
-                  {
-                    borderColor: colors.border,
-                    backgroundColor: `${colors.primary}10`,
-                  },
-                ]}
-                onPress={() => {
-                  void refreshOperabilityDiagnostics();
-                }}
-                disabled={operabilityRefreshing}
-                activeOpacity={0.85}
-              >
-                {operabilityRefreshing ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <Ionicons name="refresh" size={18} color={colors.primary} />
-                )}
-              </TouchableOpacity>
+              <View style={styles.diagnosticsHeaderActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.diagnosticsRefreshButton,
+                    (operabilityRefreshing || flowLogResetting) &&
+                      styles.diagnosticsRefreshButtonDisabled,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: '#D6454514',
+                    },
+                  ]}
+                  onPress={handleResetMonetizationFlowLogs}
+                  disabled={operabilityRefreshing || flowLogResetting}
+                  activeOpacity={0.85}
+                >
+                  {flowLogResetting ? (
+                    <ActivityIndicator size="small" color="#D64545" />
+                  ) : (
+                    <Ionicons name="trash-outline" size={18} color="#D64545" />
+                  )}
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.diagnosticsRefreshButton,
+                    (operabilityRefreshing || flowLogResetting) &&
+                      styles.diagnosticsRefreshButtonDisabled,
+                    {
+                      borderColor: colors.border,
+                      backgroundColor: `${colors.primary}10`,
+                    },
+                  ]}
+                  onPress={() => {
+                    void refreshOperabilityDiagnostics();
+                  }}
+                  disabled={operabilityRefreshing || flowLogResetting}
+                  activeOpacity={0.85}
+                >
+                  {operabilityRefreshing ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <Ionicons name="refresh" size={18} color={colors.primary} />
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
 
             {operabilityLoading ? (
@@ -1617,9 +1897,52 @@ export const SettingsScreen: React.FC = () => {
                       Native IAP: {boolStateText(monetizationDiagnostics.providerDiagnostics.supportsNativePurchases)}
                     </Text>
                   </View>
+
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      {
+                        backgroundColor: monetizationDiagnostics.readiness.storeSmokeTestReady
+                          ? `${colors.primary}14`
+                          : '#C25B0016',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        {
+                          color: monetizationDiagnostics.readiness.storeSmokeTestReady
+                            ? colors.primary
+                            : '#C25B00',
+                        },
+                      ]}
+                    >
+                      Smoke: {monetizationDiagnostics.readiness.storeSmokeTestReady ? 'READY' : 'BLOCKED'}
+                    </Text>
+                  </View>
                 </View>
 
                 <View style={styles.diagnosticsGrid}>
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Smoke readiness
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {monetizationDiagnostics.readiness.summary}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Store smoke ready / blockers
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(monetizationDiagnostics.readiness.storeSmokeTestReady)} /{' '}
+                      {monetizationDiagnostics.readiness.blockerCount}
+                    </Text>
+                  </View>
+
                   <View style={styles.diagnosticsRow}>
                     <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
                       Policy source / version
@@ -1676,6 +1999,15 @@ export const SettingsScreen: React.FC = () => {
 
                   <View style={styles.diagnosticsRow}>
                     <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      SDK module present
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(monetizationDiagnostics.providerDiagnostics.sdkModulePresent)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
                       Provider runtime source
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
@@ -1703,10 +2035,197 @@ export const SettingsScreen: React.FC = () => {
 
                   <View style={styles.diagnosticsRow}>
                     <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Auth UID / configured user
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(monetizationDiagnostics.providerDiagnostics.authUid)} /{' '}
+                      {formatOptionalText(monetizationDiagnostics.providerDiagnostics.configuredAppUserId)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Identity mode / synced
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {monetizationDiagnostics.providerDiagnostics.identityMode} /{' '}
+                      {boolStateText(monetizationDiagnostics.providerDiagnostics.identitySynced)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Identity mismatch
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(monetizationDiagnostics.providerDiagnostics.identityMismatch)}
+                    </Text>
+                  </View>
+
+                  {monetizationDiagnostics.providerDiagnostics.identityMismatchReason ? (
+                    <View style={styles.diagnosticsRow}>
+                      <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                        Identity mismatch reason
+                      </Text>
+                      <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                        {monetizationDiagnostics.providerDiagnostics.identityMismatchReason}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
                       Entitlement / offering
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
                       {monetizationDiagnostics.providerDiagnostics.entitlementIdentifier} / {monetizationDiagnostics.providerDiagnostics.offeringIdentifier}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Offerings smoke check
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(monetizationDiagnostics.providerDiagnostics.smokeCheckSuccess)} /{' '}
+                      {monetizationDiagnostics.providerDiagnostics.smokeCheckSummary}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Smoke offering/package
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(
+                        monetizationDiagnostics.providerDiagnostics.smokeCheckResolvedOfferingId
+                      )}{' '}
+                      /{' '}
+                      {formatOptionalText(
+                        monetizationDiagnostics.providerDiagnostics.smokeCheckResolvedPackageId
+                      )}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Smoke product / annual match
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(
+                        monetizationDiagnostics.providerDiagnostics.smokeCheckResolvedProductId
+                      )}{' '}
+                      /{' '}
+                      {boolStateText(
+                        monetizationDiagnostics.providerDiagnostics.smokeCheckMatchedAnnualProductId
+                      )}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Smoke package count
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {monetizationDiagnostics.providerDiagnostics.smokeCheckAvailablePackagesCount}
+                    </Text>
+                  </View>
+
+                  {monetizationDiagnostics.providerDiagnostics.smokeCheckError ? (
+                    <View style={styles.diagnosticsRow}>
+                      <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                        Smoke check error
+                      </Text>
+                      <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                        {monetizationDiagnostics.providerDiagnostics.smokeCheckError}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {monetizationDiagnostics.readiness.blockers.length ? (
+                    <View style={[styles.diagnosticsRow, styles.diagnosticsRowTopAligned]}>
+                      <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                        Readiness blockers
+                      </Text>
+                      <Text
+                        style={[
+                          styles.diagnosticsValue,
+                          styles.diagnosticsValueMultiline,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {formatDiagnosticsList(monetizationDiagnostics.readiness.blockers)}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  {monetizationDiagnostics.readiness.recommendedActions.length ? (
+                    <View style={[styles.diagnosticsRow, styles.diagnosticsRowTopAligned]}>
+                      <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                        Next actions
+                      </Text>
+                      <Text
+                        style={[
+                          styles.diagnosticsValue,
+                          styles.diagnosticsValueMultiline,
+                          { color: colors.text },
+                        ]}
+                      >
+                        {formatDiagnosticsList(
+                          monetizationDiagnostics.readiness.recommendedActions
+                        )}
+                      </Text>
+                    </View>
+                  ) : null}
+
+                  <View style={[styles.diagnosticsRow, styles.diagnosticsRowTopAligned]}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Smoke test checklist
+                    </Text>
+                    <Text
+                      style={[
+                        styles.diagnosticsValue,
+                        styles.diagnosticsValueMultiline,
+                        { color: colors.text },
+                      ]}
+                    >
+                      {formatSmokeTestChecklist(
+                        monetizationDiagnostics.readiness.smokeTestChecklist
+                      )}
+                    </Text>
+                  </View>
+
+                  <View style={[styles.diagnosticsRow, styles.diagnosticsRowTopAligned]}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Smoke test scenarios
+                    </Text>
+                    <Text
+                      style={[
+                        styles.diagnosticsValue,
+                        styles.diagnosticsValueMultiline,
+                        { color: colors.text },
+                      ]}
+                    >
+                      {formatNumberedDiagnosticsList(
+                        monetizationDiagnostics.readiness.smokeTestScenarios
+                      )}
+                    </Text>
+                  </View>
+
+                  <View style={[styles.diagnosticsRow, styles.diagnosticsRowTopAligned]}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Recent purchase / restore logs
+                    </Text>
+                    <Text
+                      style={[
+                        styles.diagnosticsValue,
+                        styles.diagnosticsValueMultiline,
+                        { color: colors.text },
+                      ]}
+                    >
+                      {formatRecentMonetizationFlowLogs(
+                        monetizationDiagnostics.recentFlowLogs
+                      )}
                     </Text>
                   </View>
 
@@ -2143,14 +2662,74 @@ export const SettingsScreen: React.FC = () => {
           {tt('footer_slogan', 'Sağlık için akıllı seçimler')}
         </Text>
       </View>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
   container: { flex: 1 },
   header: {
     marginBottom: 20,
+  },
+  settingsHero: {
+    borderWidth: 1,
+    borderRadius: 30,
+    padding: 20,
+    shadowOpacity: 0.16,
+    shadowRadius: 28,
+    shadowOffset: {
+      width: 0,
+      height: 18,
+    },
+  },
+  settingsHeroTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  settingsHeroTextWrap: {
+    flex: 1,
+  },
+  heroEyebrow: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  headerStatusChip: {
+    minHeight: 34,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+  },
+  headerStatusChipText: {
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  heroMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 16,
+  },
+  heroMetaPill: {
+    minHeight: 34,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heroMetaPillText: {
+    fontSize: 12,
+    fontWeight: '900',
   },
   headerTitle: {
     fontSize: 32,
@@ -2165,11 +2744,17 @@ const styles = StyleSheet.create({
   },
   profileCard: {
     padding: 20,
-    borderRadius: 20,
+    borderRadius: 24,
     flexDirection: 'row',
     alignItems: 'center',
     borderWidth: 1,
     marginBottom: 22,
+    shadowOpacity: 0.12,
+    shadowRadius: 20,
+    shadowOffset: {
+      width: 0,
+      height: 14,
+    },
   },
   avatar: {
     width: 60,
@@ -2220,8 +2805,14 @@ const styles = StyleSheet.create({
   },
   premiumCard: {
     borderWidth: 1,
-    borderRadius: 22,
-    padding: 16,
+    borderRadius: 24,
+    padding: 18,
+    shadowOpacity: 0.12,
+    shadowRadius: 22,
+    shadowOffset: {
+      width: 0,
+      height: 14,
+    },
   },
   premiumHeader: {
     flexDirection: 'row',
@@ -2428,9 +3019,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     marginBottom: 10,
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
   },
   itemLeft: {
     flexDirection: 'row',
@@ -2463,9 +3060,16 @@ const styles = StyleSheet.create({
     marginRight: 8,
     maxWidth: 110,
   },
+  itemChevronWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   languageBox: {
     padding: 16,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
     marginBottom: 10,
     marginHorizontal: 25,
@@ -2499,6 +3103,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
+  },
+  diagnosticsHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   diagnosticsHeaderLeft: {
     flexDirection: 'row',
@@ -2558,6 +3167,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 16,
   },
+  diagnosticsRowTopAligned: {
+    alignItems: 'flex-start',
+  },
   diagnosticsLabel: {
     flex: 1,
     fontSize: 13,
@@ -2568,6 +3180,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
     textAlign: 'right',
+  },
+  diagnosticsValueMultiline: {
+    fontWeight: '700',
+    lineHeight: 18,
+    textAlign: 'left',
   },
   diagnosticsErrorText: {
     marginTop: 14,
@@ -2581,6 +3198,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 30,
     padding: 20,
+    borderRadius: 18,
   },
   logoutBtnDisabled: {
     opacity: 0.7,

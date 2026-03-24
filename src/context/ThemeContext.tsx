@@ -11,12 +11,21 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const STORAGE_KEY = 'erenesal-theme';
 
-type ThemeColors = {
+export type ThemeColors = {
   background: string;
+  backgroundMuted: string;
   card: string;
+  cardElevated: string;
   text: string;
+  mutedText: string;
   primary: string;
+  primaryContrast: string;
   border: string;
+  success: string;
+  warning: string;
+  danger: string;
+  teal: string;
+  shadow: string;
 };
 
 type ThemeContextValue = {
@@ -28,19 +37,37 @@ type ThemeContextValue = {
 };
 
 const darkColors: ThemeColors = {
-  background: '#121212',
-  card: '#1E1E1E',
-  text: '#FFFFFF',
-  primary: '#FFD700',
-  border: '#333333',
+  background: '#0B1016',
+  backgroundMuted: '#111823',
+  card: '#141C27',
+  cardElevated: '#1A2532',
+  text: '#F5F7FA',
+  mutedText: '#94A1B3',
+  primary: '#D8A847',
+  primaryContrast: '#120F08',
+  border: '#253344',
+  success: '#44C086',
+  warning: '#E8A249',
+  danger: '#E26868',
+  teal: '#249B96',
+  shadow: '#000000',
 };
 
 const lightColors: ThemeColors = {
-  background: '#F5F5F5',
+  background: '#F4F0E8',
+  backgroundMuted: '#FFFCF4',
   card: '#FFFFFF',
-  text: '#111111',
-  primary: '#D4AF37',
-  border: '#DDDDDD',
+  cardElevated: '#FFF8EA',
+  text: '#17202B',
+  mutedText: '#5E6C79',
+  primary: '#A7791F',
+  primaryContrast: '#FFF8E5',
+  border: '#DCCFBA',
+  success: '#238159',
+  warning: '#B97719',
+  danger: '#BF4B48',
+  teal: '#127A78',
+  shadow: '#000000',
 };
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);

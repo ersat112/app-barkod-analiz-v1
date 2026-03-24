@@ -32,7 +32,10 @@ import type { PaywallEntrySource } from '../types/monetization';
 export type RootStackParamList = {
   Main: undefined;
   Scanner: undefined;
-  Detail: { barcode: string };
+  Detail: {
+    barcode: string;
+    entrySource?: 'scanner' | 'history' | 'home' | 'unknown';
+  };
   MissingProduct: { barcode: string };
   Paywall: { source?: PaywallEntrySource } | undefined;
   Login: undefined;

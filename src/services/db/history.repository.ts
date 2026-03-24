@@ -342,7 +342,7 @@ export const getHistoryPage = ({
   const normalizedDigits = normalizedQuery.replace(/[^\d]/g, '');
 
   const whereClauses: string[] = [];
-  const params: Array<string | number> = [];
+  const params: (string | number)[] = [];
 
   if (type === 'food' || type === 'beauty') {
     whereClauses.push(`type = ?`);

@@ -1,6 +1,7 @@
 import { CACHE_POLICY, PRODUCT_CACHE_SCHEMA_VERSION } from '../../config/features';
 import type { Product } from '../../utils/analysis';
 import { TABLES, getDatabase, safeNumber, safeText } from './core';
+import { initDatabase } from './migrations';
 import type { ProductCacheRecord, ProductCacheStatus, ProductCacheUpsertInput } from './types';
 
 export type LocalProductCacheHit =
@@ -65,6 +66,8 @@ export const getProductCacheByBarcode = (
   barcode: string
 ): { record: ProductCacheRecord; product: Product | null } | null => {
   try {
+    initDatabase();
+
     const normalizedBarcode = normalizeProductCacheBarcode(barcode);
 
     if (!isProductCacheBarcodeValid(normalizedBarcode)) {
@@ -155,6 +158,8 @@ export const getLocalProductCacheHit = (
 
 export const upsertProductCache = (input: ProductCacheUpsertInput): void => {
   try {
+    initDatabase();
+
     const normalizedBarcode = normalizeProductCacheBarcode(input.barcode);
 
     if (!isProductCacheBarcodeValid(normalizedBarcode)) {
@@ -290,6 +295,8 @@ export const markProductCacheAccessed = (
   accessedAt = Date.now()
 ): void => {
   try {
+    initDatabase();
+
     const normalizedBarcode = normalizeProductCacheBarcode(barcode);
 
     if (!isProductCacheBarcodeValid(normalizedBarcode)) {
@@ -311,6 +318,8 @@ export const markProductCacheAccessed = (
 
 export const deleteProductCacheByBarcode = (barcode: string): void => {
   try {
+    initDatabase();
+
     const normalizedBarcode = normalizeProductCacheBarcode(barcode);
 
     if (!normalizedBarcode) {
@@ -329,6 +338,8 @@ export const invalidateLocalProductCacheBarcode = (barcode: string): void => {
 
 export const clearExpiredProductCache = (now = Date.now()): void => {
   try {
+    initDatabase();
+
     db.runSync(
       `DELETE FROM ${TABLES.PRODUCT_CACHE}
        WHERE expires_at > 0 AND expires_at <= ?`,
@@ -341,6 +352,8 @@ export const clearExpiredProductCache = (now = Date.now()): void => {
 
 export const clearAllProductCache = (): void => {
   try {
+    initDatabase();
+
     db.runSync(`DELETE FROM ${TABLES.PRODUCT_CACHE}`);
   } catch (error) {
     console.error('Clear all product cache error:', error);
@@ -349,6 +362,8 @@ export const clearAllProductCache = (): void => {
 
 export const getProductCacheCount = (): number => {
   try {
+    initDatabase();
+
     const row = db.getFirstSync<{ count: number }>(
       `SELECT COUNT(*) as count FROM ${TABLES.PRODUCT_CACHE}`
     );

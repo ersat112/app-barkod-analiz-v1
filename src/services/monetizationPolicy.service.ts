@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, getDoc } from 'firebase/firestore';
 
+import { getEnvBoolean, getEnvNumber, getEnvString } from '../config/appRuntime';
 import { auth, db } from '../config/firebase';
 import {
   FEATURES,
@@ -36,6 +37,8 @@ const SCHEMA_VERSION = 1;
 
 let inMemoryPolicy: MonetizationPolicySnapshot | null = null;
 let refreshPromise: Promise<MonetizationPolicySnapshot> | null = null;
+
+const ENV = process.env as Record<string, string | undefined>;
 
 function log(...args: unknown[]) {
   if (FEATURES.monetization.diagnosticsLoggingEnabled) {
@@ -81,6 +84,81 @@ function clampPrice(value: unknown, fallback: number): number {
   }
 
   return Math.round(value * 100) / 100;
+}
+
+function hasRuntimeOverride(key: string): boolean {
+  return typeof ENV[key] === 'string' && ENV[key]!.trim().length > 0;
+}
+
+function applyRuntimeOverrides(
+  policy: MonetizationPolicySnapshot
+): MonetizationPolicySnapshot {
+  let nextPolicy = policy;
+
+  if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_ANNUAL_PLAN_ENABLED')) {
+    nextPolicy = {
+      ...nextPolicy,
+      annualPlanEnabled: getEnvBoolean(
+        'EXPO_PUBLIC_MONETIZATION_ANNUAL_PLAN_ENABLED',
+        nextPolicy.annualPlanEnabled
+      ),
+    };
+  }
+
+  if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_PURCHASE_PROVIDER_ENABLED')) {
+    nextPolicy = {
+      ...nextPolicy,
+      purchaseProviderEnabled: getEnvBoolean(
+        'EXPO_PUBLIC_MONETIZATION_PURCHASE_PROVIDER_ENABLED',
+        nextPolicy.purchaseProviderEnabled
+      ),
+    };
+  }
+
+  if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_RESTORE_ENABLED')) {
+    nextPolicy = {
+      ...nextPolicy,
+      restoreEnabled: getEnvBoolean(
+        'EXPO_PUBLIC_MONETIZATION_RESTORE_ENABLED',
+        nextPolicy.restoreEnabled
+      ),
+    };
+  }
+
+  if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_PAYWALL_ENABLED')) {
+    nextPolicy = {
+      ...nextPolicy,
+      paywallEnabled: getEnvBoolean(
+        'EXPO_PUBLIC_MONETIZATION_PAYWALL_ENABLED',
+        nextPolicy.paywallEnabled
+      ),
+    };
+  }
+
+  if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_ANNUAL_PRODUCT_ID')) {
+    nextPolicy = {
+      ...nextPolicy,
+      annualProductId: getEnvString(
+        'EXPO_PUBLIC_MONETIZATION_ANNUAL_PRODUCT_ID',
+        nextPolicy.annualProductId
+      ).trim(),
+    };
+  }
+
+  if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_ANNUAL_PRICE_TRY')) {
+    nextPolicy = {
+      ...nextPolicy,
+      annualPriceTry: clampPrice(
+        getEnvNumber(
+          'EXPO_PUBLIC_MONETIZATION_ANNUAL_PRICE_TRY',
+          nextPolicy.annualPriceTry
+        ),
+        nextPolicy.annualPriceTry
+      ),
+    };
+  }
+
+  return nextPolicy;
 }
 
 function createDefaultPolicy(
@@ -313,31 +391,31 @@ export const monetizationPolicyService = {
     allowStale?: boolean;
   }): Promise<MonetizationPolicySnapshot> {
     if (!FEATURES.monetization.remotePolicyEnabled) {
-      return createDefaultPolicy();
+      return applyRuntimeOverrides(createDefaultPolicy());
     }
 
     if (options?.forceRefresh) {
-      return refreshInternal();
+      return applyRuntimeOverrides(await refreshInternal());
     }
 
     if (inMemoryPolicy && isPolicyFresh(inMemoryPolicy)) {
-      return inMemoryPolicy;
+      return applyRuntimeOverrides(inMemoryPolicy);
     }
 
     const storedPolicy = inMemoryPolicy ?? (await readStoredPolicy());
 
     if (storedPolicy && isPolicyFresh(storedPolicy)) {
       inMemoryPolicy = storedPolicy;
-      return storedPolicy;
+      return applyRuntimeOverrides(storedPolicy);
     }
 
     if (storedPolicy && options?.allowStale) {
       inMemoryPolicy = storedPolicy;
       void refreshInternal().catch(() => undefined);
-      return storedPolicy;
+      return applyRuntimeOverrides(storedPolicy);
     }
 
-    return refreshInternal();
+    return applyRuntimeOverrides(await refreshInternal());
   },
 
   async refreshPolicy(): Promise<MonetizationPolicySnapshot> {

@@ -10,16 +10,6 @@ import { buildUserDisplayName } from '../services/userPresentation.service';
 import { calculateProfileCompletion } from '../services/profileCompletion.service';
 import { authAnalyticsService } from '../services/authAnalytics.service';
 
-const DAILY_GOAL = 3;
-const WEEKLY_GOAL = 10;
-
-const getTodayKey = (): string => {
-  const now = new Date();
-
-  return `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, '0')}-${`${now.getDate()}`.padStart(2, '0')}`;
-};
-
-const getMissionIndex = (): number => new Date().getDate() % 4;
 const getInsightIndex = (): number => new Date().getDay() % 4;
 
 const getTimeBasedGreetingKey = (): string => {
@@ -87,10 +77,6 @@ export const useHomeScreenController = () => {
     navigation.navigate('Scanner');
   }, [navigation]);
 
-  const openHistory = useCallback(() => {
-    navigation.navigate('History');
-  }, [navigation]);
-
   const openSettings = useCallback(() => {
     navigation.navigate('Settings');
   }, [navigation]);
@@ -114,9 +100,6 @@ export const useHomeScreenController = () => {
 
     return tt(key, fallback);
   }, [tt]);
-
-  const todayKey = useMemo(() => getTodayKey(), []);
-
   const profileCompletion = useMemo(() => {
     return calculateProfileCompletion({
       profile,
@@ -191,35 +174,6 @@ export const useHomeScreenController = () => {
     openSettings();
   }, [openSettings, profileCompletion.missingFields, profileCompletion.score]);
 
-  const dailyMission = useMemo(() => {
-    const index = getMissionIndex();
-
-    const map = [
-      {
-        title: tt('mission_today_1_title', 'Bugünün Görevi'),
-        text: tt('mission_today_1_text', 'En az 3 ürün tarayıp içerik farkındalığını artır.'),
-        icon: 'trophy-outline' as keyof typeof Ionicons.glyphMap,
-      },
-      {
-        title: tt('mission_today_2_title', 'Sağlıklı Seçim Görevi'),
-        text: tt('mission_today_2_text', 'Bugün en az 1 üründe katkı maddelerini incele.'),
-        icon: 'leaf-outline' as keyof typeof Ionicons.glyphMap,
-      },
-      {
-        title: tt('mission_today_3_title', 'Bilinçli Tüketim Görevi'),
-        text: tt('mission_today_3_text', 'Yeni bir ürün barkodu tara ve geçmişini büyüt.'),
-        icon: 'scan-outline' as keyof typeof Ionicons.glyphMap,
-      },
-      {
-        title: tt('mission_today_4_title', 'Günün Mini Challenge’ı'),
-        text: tt('mission_today_4_text', 'Aynı gün içinde 2 farklı kategoriden ürün analiz et.'),
-        icon: 'flash-outline' as keyof typeof Ionicons.glyphMap,
-      },
-    ];
-
-    return map[index];
-  }, [tt]);
-
   const dailyInsight = useMemo(() => {
     const index = getInsightIndex();
 
@@ -282,45 +236,6 @@ export const useHomeScreenController = () => {
     );
   }, [snapshot.todayCount, tt]);
 
-  const missionProgress = useMemo(() => {
-    return Math.min(snapshot.todayCount / DAILY_GOAL, 1);
-  }, [snapshot.todayCount]);
-
-  const missionProgressText = useMemo(() => {
-    if (snapshot.todayCount >= DAILY_GOAL) {
-      return tt('daily_mission_completed', 'Görev tamamlandı');
-    }
-
-    return tt(
-      'daily_mission_progress',
-      `${snapshot.todayCount}/${DAILY_GOAL} tarama tamamlandı`
-    )
-      .replace('{{current}}', String(snapshot.todayCount))
-      .replace('{{goal}}', String(DAILY_GOAL));
-  }, [snapshot.todayCount, tt]);
-
-  const motivationText = useMemo(() => {
-    if (snapshot.todayCount === 0) {
-      return tt('daily_mission_start', 'Bugünün ilk analizini yap ve günlük görevi başlat.');
-    }
-
-    if (snapshot.todayCount < DAILY_GOAL) {
-      return tt(
-        'daily_mission_remaining',
-        `Hedefe çok yakınsın. ${DAILY_GOAL - snapshot.todayCount} tarama daha yapman yeterli.`
-      ).replace('{{count}}', String(DAILY_GOAL - snapshot.todayCount));
-    }
-
-    return tt(
-      'daily_mission_done_message',
-      'Bugünkü hedef tamamlandı. İstersen yeni ürünler keşfetmeye devam et.'
-    );
-  }, [snapshot.todayCount, tt]);
-
-  const weeklyProgress = useMemo(() => {
-    return Math.min(snapshot.weeklyScanTotal / WEEKLY_GOAL, 1);
-  }, [snapshot.weeklyScanTotal]);
-
   const streakText = useMemo(() => {
     if (snapshot.streakCount <= 0) return tt('streak_start', 'Seri başlat');
     if (snapshot.streakCount === 1) return tt('streak_one_day', '1 günlük seri');
@@ -330,19 +245,6 @@ export const useHomeScreenController = () => {
       String(snapshot.streakCount)
     );
   }, [snapshot.streakCount, tt]);
-
-  const weeklyChallengeText = useMemo(() => {
-    if (snapshot.weeklyScanTotal >= WEEKLY_GOAL) {
-      return tt('weekly_goal_completed', 'Haftalık challenge tamamlandı');
-    }
-
-    return tt(
-      'weekly_goal_progress',
-      `${snapshot.weeklyScanTotal}/${WEEKLY_GOAL} haftalık tarama tamamlandı`
-    )
-      .replace('{{current}}', String(snapshot.weeklyScanTotal))
-      .replace('{{goal}}', String(WEEKLY_GOAL));
-  }, [snapshot.weeklyScanTotal, tt]);
 
   const quickInsights = useMemo(
     () => [
@@ -365,6 +267,61 @@ export const useHomeScreenController = () => {
     [snapshot.totalHistoryCount, snapshot.weeklyActiveDays, snapshot.weeklyScanTotal, tt]
   );
 
+  const liveInsightItems = useMemo(
+    () => [
+      dailyInsight,
+      {
+        icon:
+          snapshot.todayCount > 0
+            ? ('scan-circle-outline' as keyof typeof Ionicons.glyphMap)
+            : ('sparkles-outline' as keyof typeof Ionicons.glyphMap),
+        title: tt('today_brief_title', 'Bugünkü Durum'),
+        text:
+          snapshot.todayCount > 0
+            ? tt(
+                'today_brief_progress',
+                'Bugün {{count}} tarama tamamlandı. En iyi skor {{score}} olarak görünüyor.'
+              )
+                .replace('{{count}}', String(snapshot.todayCount))
+                .replace('{{score}}', String(snapshot.bestScoreToday ?? '-'))
+            : tt(
+                'today_brief_empty',
+                'Henüz bugün tarama yapılmadı. Şimdi Tara ile ilk analizi başlatabilirsiniz.'
+              ),
+      },
+      {
+        icon: 'flame-outline' as keyof typeof Ionicons.glyphMap,
+        title: tt('streak_focus_title', 'Seri Durumu'),
+        text:
+          snapshot.streakCount > 0
+            ? tt(
+                'streak_focus_active',
+                '{{count}} günlük seri devam ediyor. Son 7 günde {{days}} aktif gün kaydedildi.'
+              )
+                .replace('{{count}}', String(snapshot.streakCount))
+                .replace('{{days}}', String(snapshot.weeklyActiveDays))
+            : tt(
+                'streak_focus_empty',
+                'Yeni bir seri başlatmak için bugün bir ürün tarayın.'
+              ),
+      },
+      {
+        icon: 'bulb-outline' as keyof typeof Ionicons.glyphMap,
+        title: tt('did_you_know', 'Biliyor muydunuz?'),
+        text: insightText,
+      },
+    ],
+    [
+      dailyInsight,
+      insightText,
+      snapshot.bestScoreToday,
+      snapshot.streakCount,
+      snapshot.todayCount,
+      snapshot.weeklyActiveDays,
+      tt,
+    ]
+  );
+
   return {
     tt,
     snapshot,
@@ -378,23 +335,13 @@ export const useHomeScreenController = () => {
     handleRefresh,
     openBarcodeDetail,
     openScanner,
-    openHistory,
-    openSettings,
     openSettingsFromProfileGate,
     toggleFavorite,
     displayName,
     greeting,
-    todayKey,
-    dailyMission,
-    dailyInsight,
-    insightText,
-    missionProgress,
-    missionProgressText,
-    motivationText,
-    weeklyProgress,
     streakText,
-    weeklyChallengeText,
     quickInsights,
+    liveInsightItems,
     profileCompletion,
     shouldShowProfileCompletionGate,
     profileCompletionSummaryText,

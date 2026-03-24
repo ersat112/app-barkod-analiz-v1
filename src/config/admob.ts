@@ -4,6 +4,7 @@ export const AD_UNIT_ID = Object.freeze({
   INTERSTITIAL: resolveAdUnitId('INTERSTITIAL'),
   BANNER: resolveAdUnitId('BANNER'),
   REWARDED: resolveAdUnitId('REWARDED'),
+  APP_OPEN: resolveAdUnitId('APP_OPEN'),
 });
 
 export const GLOBAL_AD_CONFIG: AdRequestOptions = {

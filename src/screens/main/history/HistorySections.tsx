@@ -106,7 +106,7 @@ export const HistoryFilterBar: React.FC<HistoryFilterBarProps> = ({
   clearLabel,
   colors,
 }) => {
-  const filterOptions: Array<{ key: HistoryFilterType; label: string }> = [
+  const filterOptions: { key: HistoryFilterType; label: string }[] = [
     { key: 'all', label: allLabel },
     { key: 'food', label: foodLabel },
     { key: 'beauty', label: beautyLabel },

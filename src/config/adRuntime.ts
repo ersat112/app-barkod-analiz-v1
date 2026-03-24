@@ -7,7 +7,7 @@ export type AdRequestOptions = {
   keywords?: string[];
 };
 
-export type AdUnitKey = 'INTERSTITIAL' | 'BANNER' | 'REWARDED';
+export type AdUnitKey = 'INTERSTITIAL' | 'BANNER' | 'REWARDED' | 'APP_OPEN';
 
 const DEFAULT_KEYWORDS = [
   'health',
@@ -24,6 +24,7 @@ const TEST_IDS = Object.freeze({
   INTERSTITIAL: 'ca-app-pub-3940256099942544/1033173712',
   BANNER: 'ca-app-pub-3940256099942544/6300978111',
   REWARDED: 'ca-app-pub-3940256099942544/5224354917',
+  APP_OPEN: 'ca-app-pub-3940256099942544/9257395921',
 });
 
 const REAL_AD_UNITS = Object.freeze({
@@ -40,7 +41,7 @@ const REAL_AD_UNITS = Object.freeze({
   BANNER: Object.freeze({
     android: getEnvString(
       'EXPO_PUBLIC_ADMOB_BANNER_ANDROID',
-      'ca-app-pub-9503865696579023/3580127941'
+      'ca-app-pub-9503865696579023/5814530735'
     ),
     ios: getEnvString(
       'EXPO_PUBLIC_ADMOB_BANNER_IOS',
@@ -50,17 +51,30 @@ const REAL_AD_UNITS = Object.freeze({
   REWARDED: Object.freeze({
     android: getEnvString(
       'EXPO_PUBLIC_ADMOB_REWARDED_ANDROID',
-      TEST_IDS.REWARDED
+      'ca-app-pub-9503865696579023/7004190022'
     ),
     ios: getEnvString(
       'EXPO_PUBLIC_ADMOB_REWARDED_IOS',
       TEST_IDS.REWARDED
     ),
   }),
+  APP_OPEN: Object.freeze({
+    android: getEnvString(
+      'EXPO_PUBLIC_ADMOB_APP_OPEN_ANDROID',
+      'ca-app-pub-9503865696579023/4501449060'
+    ),
+    ios: getEnvString(
+      'EXPO_PUBLIC_ADMOB_APP_OPEN_IOS',
+      TEST_IDS.APP_OPEN
+    ),
+  }),
 });
 
 const ADMOB_APP_IDS = Object.freeze({
-  android: getEnvString('EXPO_PUBLIC_ADMOB_APP_ID_ANDROID', ''),
+  android: getEnvString(
+    'EXPO_PUBLIC_ADMOB_APP_ID_ANDROID',
+    'ca-app-pub-9503865696579023~4685281890'
+  ),
   ios: getEnvString('EXPO_PUBLIC_ADMOB_APP_ID_IOS', ''),
 });
 

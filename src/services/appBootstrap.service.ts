@@ -6,6 +6,10 @@ import { initDatabase } from './db';
 import { getFirebaseAccessSnapshot } from './firebaseAccess.service';
 import { resolveFirestoreRuntimeConfig } from './firestoreRuntimeConfig.service';
 import {
+  flushHistoryRemoteSyncQueue,
+  initializeHistoryRemoteSyncQueue,
+} from './historyRemoteSync.service';
+import {
   flushRemoteProductCacheWriteQueue,
   initializeRemoteProductCacheWriteQueue,
 } from './productRemoteWriteQueue.service';
@@ -78,6 +82,7 @@ export const ensureAppBootstrap = async (): Promise<AppBootstrapSnapshot> => {
     try {
       initDatabase();
       initializeRemoteProductCacheWriteQueue();
+      initializeHistoryRemoteSyncQueue();
       const admobInitialized = await initializeAdMob();
 
       localBootstrapCompleted = true;
@@ -152,6 +157,12 @@ export const runAuthenticatedAppBootstrap = async (options?: {
             reason: 'app_boot',
           })
         : 0;
+
+      if (accessSnapshot.historyWriteAllowed) {
+        await flushHistoryRemoteSyncQueue({
+          reason: 'app_boot',
+        });
+      }
 
       const analyticsFlushCount = await analyticsService.flushPending();
 

@@ -21,6 +21,7 @@ export type FirebaseAccessSnapshot = {
   firestoreRuntimeConfigVersion: number;
   sharedCacheReadAllowed: boolean;
   sharedCacheWriteAllowed: boolean;
+  historyWriteAllowed: boolean;
   analyticsWriteAllowed: boolean;
   missingProductContributionWriteAllowed: boolean;
   adPolicyReadAllowed: boolean;
@@ -63,6 +64,13 @@ export const getFirebaseAccessSnapshot =
       (!FEATURES.firebase.runtimeConfigRolloutEnabled ||
         runtimeConfig.allowClientSharedCacheWrites);
 
+    const historyWriteAllowed =
+      runtimeReady &&
+      authGateSatisfied &&
+      FEATURES.history.firestoreSyncEnabled &&
+      (!FEATURES.firebase.runtimeConfigRolloutEnabled ||
+        runtimeConfig.allowUserScanHistoryWrites);
+
     const analyticsWriteAllowed =
       runtimeReady &&
       authGateSatisfied &&
@@ -96,6 +104,7 @@ export const getFirebaseAccessSnapshot =
       firestoreRuntimeConfigVersion: runtimeConfig.version,
       sharedCacheReadAllowed,
       sharedCacheWriteAllowed,
+      historyWriteAllowed,
       analyticsWriteAllowed,
       missingProductContributionWriteAllowed,
       adPolicyReadAllowed,
@@ -115,6 +124,11 @@ export const canWriteSharedProductCache = async (): Promise<boolean> => {
 export const canWriteAnalyticsEvents = async (): Promise<boolean> => {
   const snapshot = await getFirebaseAccessSnapshot();
   return snapshot.analyticsWriteAllowed;
+};
+
+export const canWriteUserScanHistory = async (): Promise<boolean> => {
+  const snapshot = await getFirebaseAccessSnapshot();
+  return snapshot.historyWriteAllowed;
 };
 
 export const canReadAdRuntimeConfig = async (): Promise<boolean> => {

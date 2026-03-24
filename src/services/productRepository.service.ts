@@ -22,6 +22,7 @@ import type {
   ProductRepositoryDiagnostics,
   ProductRepositoryLookupMeta,
   ProductRepositoryRemoteFetchResult,
+  ProductRepositorySource,
   ProductRepositoryResolveResult,
   ProductRepositoryRemoteMode,
 } from '../types/productRepository';
@@ -256,14 +257,14 @@ const createLookupMeta = ({
   startedAt: number;
   normalizedBarcode: string;
   remoteMode: ProductRepositoryRemoteMode;
-  resolvedSource?: ProductRepositoryResolveResult extends infer _T ? never : never;
+  resolvedSource?: ProductRepositorySource;
   cacheTier?: 'local' | 'remote' | 'network';
 }): ProductRepositoryLookupMeta => {
   return {
     lookupId,
     durationMs: Math.max(0, Date.now() - startedAt),
     normalizedBarcode,
-    resolvedSource: resolvedSource as never,
+    resolvedSource,
     cacheTier,
     remoteMode,
   };

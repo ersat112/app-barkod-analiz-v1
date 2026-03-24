@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useCallback, useMemo } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Linking,
   RefreshControl,
   ScrollView,
   StatusBar,
@@ -12,18 +13,18 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { useLanguage } from '../../context/LanguageContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AdBanner } from '../../components/AdBanner';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
+import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { useHomeScreenController } from '../../hooks/useHomeScreenController';
+import { useWhoNews } from '../../hooks/useWhoNews';
+import { withAlpha } from '../../utils/color';
 import {
-  ChallengeCard,
-  DidYouKnowCard,
   HomeLoadingState,
-  InsightCard,
   LastProductCard,
-  MissionCard,
-  QuickActionCard,
+  LiveInsightCard,
   QuickInsightsStrip,
   RecentProductsCarousel,
   StatCard,
@@ -34,6 +35,7 @@ const FALLBACK_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
 
 export const HomeScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
+  const { locale } = useLanguage();
   const layout = useAppScreenLayout({
     topInsetExtra: 18,
     topInsetMin: 70,
@@ -55,90 +57,282 @@ export const HomeScreen: React.FC = () => {
     handleRefresh,
     openBarcodeDetail,
     openScanner,
-    openHistory,
-    openSettings,
     openSettingsFromProfileGate,
     toggleFavorite,
     displayName,
     greeting,
-    todayKey,
-    dailyMission,
-    dailyInsight,
-    insightText,
-    missionProgress,
-    missionProgressText,
-    motivationText,
-    weeklyProgress,
     streakText,
-    weeklyChallengeText,
     quickInsights,
+    liveInsightItems,
     profileCompletion,
     shouldShowProfileCompletionGate,
     profileCompletionSummaryText,
   } = useHomeScreenController();
+  const {
+    snapshot: whoNewsSnapshot,
+    refreshing: whoNewsRefreshing,
+    refresh: refreshWhoNews,
+  } = useWhoNews(locale);
+
+  const formatWhoNewsDate = useCallback(
+    (publishedAt: string | null) => {
+      if (!publishedAt) {
+        return tt('who_news_recent', 'Güncel');
+      }
+
+      const parsed = new Date(`${publishedAt}T00:00:00Z`);
+
+      if (Number.isNaN(parsed.getTime())) {
+        return tt('who_news_recent', 'Güncel');
+      }
+
+      return new Intl.DateTimeFormat(locale, {
+        day: 'numeric',
+        month: 'short',
+      }).format(parsed);
+    },
+    [locale, tt]
+  );
+
+  const mapWhoTypeIcon = useCallback((type: string) => {
+    const normalized = type.toLowerCase();
+
+    if (normalized.includes('release') || normalized.includes('communiqu')) {
+      return 'newspaper-outline' as const;
+    }
+
+    if (normalized.includes('update')) {
+      return 'pulse-outline' as const;
+    }
+
+    return 'globe-outline' as const;
+  }, []);
+
+  const openWhoNewsItem = useCallback(
+    async (url: string) => {
+      try {
+        await Linking.openURL(url);
+      } catch (error) {
+        console.error('WHO news link open failed:', error);
+      }
+    },
+    []
+  );
+
+  const liveCardItems = useMemo(() => {
+    if (whoNewsSnapshot?.items?.length) {
+      return whoNewsSnapshot.items.map((item) => ({
+        icon: mapWhoTypeIcon(item.type),
+        title: item.title,
+        meta: `${item.type} • ${formatWhoNewsDate(item.publishedAt)}`,
+        text: tt('who_news_card_text', 'Dünya Sağlık Örgütü haber odasından canlı başlık'),
+        onPress: () => {
+          void openWhoNewsItem(item.url);
+        },
+      }));
+    }
+
+    return liveInsightItems;
+  }, [
+    formatWhoNewsDate,
+    liveInsightItems,
+    mapWhoTypeIcon,
+    openWhoNewsItem,
+    tt,
+    whoNewsSnapshot?.items,
+  ]);
+
+  const liveCardBadgeLabel = whoNewsSnapshot?.items?.length
+    ? tt('who_news_badge', 'WHO Haberleri')
+    : tt('live_updates_label', 'Canlı Bilgi');
+
+  const liveCardHelperText = useMemo(() => {
+    if (!whoNewsSnapshot?.items?.length) {
+      return tt('tap_for_next_insight', 'Dokunarak bir sonraki bilgi kartına geçin');
+    }
+
+    if (whoNewsSnapshot.isFallback) {
+      return tt(
+        'who_news_fallback_notice',
+        'WHO bu uygulama dili için resmi newsroom sunmadığı için başlıklar İngilizce kaynaktan gösteriliyor.'
+      );
+    }
+
+    return tt(
+      'who_news_tap_helper',
+      'Habere gitmek için karta dokunun, sağ üstten sonraki başlığa geçin.'
+    );
+  }, [tt, whoNewsSnapshot]);
 
   if (loading) {
     return <HomeLoadingState label={tt('home', 'Ana Sayfa')} colors={colors} />;
   }
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{
-        ...styles.scrollContent,
-        paddingTop: layout.headerTopPadding,
-        paddingBottom: layout.contentBottomPadding,
-        paddingHorizontal: layout.horizontalPadding,
-      }}
-      refreshControl={
-        <RefreshControl
-          refreshing={refreshing || rescanRefreshing}
-          onRefresh={handleRefresh}
-          tintColor={colors.primary}
-        />
-      }
-    >
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <AmbientBackdrop colors={colors} variant="home" />
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
-      <View style={styles.header}>
-        <Text style={[styles.welcomeText, { color: colors.text }]}>{greeting},</Text>
-        <Text style={[styles.userName, { color: colors.primary }]} numberOfLines={1}>
-          {displayName}
-        </Text>
-        <Text style={[styles.subtitle, { color: colors.text }]}>
-          {tt('home_subtitle', 'Bugünkü barkod analiz özeti ve hızlı işlemler burada.')}
-        </Text>
-      </View>
-
-      {shouldShowProfileCompletionGate ? (
+      <ScrollView
+        style={styles.container}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{
+          ...styles.scrollContent,
+          paddingTop: layout.headerTopPadding,
+          paddingBottom: layout.contentBottomPadding,
+          paddingHorizontal: layout.horizontalPadding,
+        }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing || rescanRefreshing || whoNewsRefreshing}
+            onRefresh={() => {
+              void Promise.all([handleRefresh(), refreshWhoNews()]);
+            }}
+            tintColor={colors.primary}
+          />
+        }
+      >
         <View
           style={[
-            styles.profileGateCard,
+            styles.dashboardHero,
             {
-              backgroundColor: colors.card,
-              borderColor: colors.border,
+              backgroundColor: withAlpha(colors.card, isDark ? 'F0' : 'FA'),
+              borderColor: withAlpha(colors.border, 'BC'),
+              shadowColor: colors.shadow,
             },
           ]}
         >
+          <View style={styles.dashboardHeroTopRow}>
+            <View style={styles.dashboardHeroTextWrap}>
+              <Text style={[styles.eyebrow, { color: colors.primary }]}>
+                {tt('dashboard_eyebrow', 'Barkod analiz paneli')}
+              </Text>
+              <Text style={[styles.welcomeText, { color: colors.mutedText }]}>
+                {greeting},
+              </Text>
+              <Text style={[styles.userName, { color: colors.text }]} numberOfLines={1}>
+                {displayName}
+              </Text>
+              <Text style={[styles.subtitle, { color: colors.mutedText }]}>
+                {tt(
+                  'home_subtitle_refined',
+                  'Son taramalarınıza, favorilerinize ve canlı içgörülere tek ekrandan ulaşın.'
+                )}
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.heroStatusPill,
+                {
+                  backgroundColor: withAlpha(colors.primary, '14'),
+                  borderColor: withAlpha(colors.primary, '2A'),
+                },
+              ]}
+            >
+              <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+              <Text style={[styles.heroStatusPillText, { color: colors.primary }]}>
+                {shouldShowProfileCompletionGate
+                  ? `%${profileCompletion.score}`
+                  : tt('ready_label', 'Hazir')}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.dashboardMetricRow}>
+            <View
+              style={[
+                styles.heroMetricCard,
+                { backgroundColor: withAlpha(colors.primary, '10') },
+              ]}
+            >
+              <Text style={[styles.heroMetricLabel, { color: colors.mutedText }]}>
+                {tt('today_short', 'Bugun')}
+              </Text>
+              <Text style={[styles.heroMetricValue, { color: colors.text }]}>
+                {snapshot.todayCount}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.heroMetricCard,
+                { backgroundColor: withAlpha(colors.teal, '11') },
+              ]}
+            >
+              <Text style={[styles.heroMetricLabel, { color: colors.mutedText }]}>
+                {tt('streak_short', 'Seri')}
+              </Text>
+              <Text style={[styles.heroMetricValue, { color: colors.text }]}>
+                {snapshot.streakCount}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.heroMetricCard,
+                { backgroundColor: withAlpha(colors.border, '42') },
+              ]}
+            >
+              <Text style={[styles.heroMetricLabel, { color: colors.mutedText }]}>
+                {tt('archive_short', 'Arsiv')}
+              </Text>
+              <Text style={[styles.heroMetricValue, { color: colors.text }]}>
+                {snapshot.totalHistoryCount}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.dashboardActionRow}>
+            <TouchableOpacity
+              style={[styles.heroPrimaryAction, { backgroundColor: colors.primary }]}
+              onPress={openScanner}
+              activeOpacity={0.92}
+            >
+              <Ionicons name="scan-outline" size={20} color={colors.primaryContrast} />
+              <Text style={[styles.heroPrimaryActionText, { color: colors.primaryContrast }]}>
+                {tt('scan_now', 'Simdi Tara')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {shouldShowProfileCompletionGate ? (
+          <View
+            style={[
+              styles.profileGateCard,
+              {
+                backgroundColor: withAlpha(colors.cardElevated, isDark ? 'F2' : 'FC'),
+                borderColor: withAlpha(colors.border, 'B6'),
+              },
+            ]}
+          >
           <View style={styles.profileGateHeader}>
             <View style={styles.profileGateHeaderTextWrap}>
               <Text style={[styles.profileGateTitle, { color: colors.text }]}>
                 {tt('complete_profile_title', 'Profilini Tamamla')}
               </Text>
-              <Text style={[styles.profileGateSubtitle, { color: colors.text }]}>
+              <Text style={[styles.profileGateSubtitle, { color: colors.mutedText }]}>
                 {profileCompletionSummaryText}
               </Text>
             </View>
 
-            <View style={[styles.profileGateScoreBadge, { backgroundColor: `${colors.primary}12` }]}>
+            <View
+              style={[
+                styles.profileGateScoreBadge,
+                { backgroundColor: withAlpha(colors.primary, '12') },
+              ]}
+            >
               <Text style={[styles.profileGateScoreText, { color: colors.primary }]}>
                 %{profileCompletion.score}
               </Text>
             </View>
           </View>
 
-          <View style={[styles.profileGateProgressTrack, { backgroundColor: colors.border }]}>
+          <View
+            style={[
+              styles.profileGateProgressTrack,
+              { backgroundColor: withAlpha(colors.border, '72') },
+            ]}
+          >
             <View
               style={[
                 styles.profileGateProgressFill,
@@ -155,25 +349,17 @@ export const HomeScreen: React.FC = () => {
             onPress={openSettingsFromProfileGate}
             activeOpacity={0.9}
           >
-            <Ionicons name="person-circle-outline" size={18} color="#000" />
-            <Text style={styles.profileGateButtonText}>
+            <Ionicons name="person-circle-outline" size={18} color={colors.primaryContrast} />
+            <Text style={[styles.profileGateButtonText, { color: colors.primaryContrast }]}>
               {tt('complete_profile_cta', 'Profili Tamamla')}
             </Text>
           </TouchableOpacity>
-        </View>
-      ) : null}
+          </View>
+        ) : null}
 
-      <MissionCard
-        icon={dailyMission.icon}
-        title={dailyMission.title}
-        description={dailyMission.text}
-        progressLabel={missionProgressText}
-        progressMeta={todayKey}
-        progressValue={missionProgress}
-        motivationText={motivationText}
-        actionLabel={tt('scan_now', 'Şimdi Tara')}
-        onActionPress={openScanner}
-        colors={colors}
+      <AdBanner
+        placement="home_mid_feed"
+        containerStyle={{ marginBottom: 18 }}
       />
 
       <View style={styles.statsRow}>
@@ -219,23 +405,10 @@ export const HomeScreen: React.FC = () => {
         colors={colors}
       />
 
-      <ChallengeCard
-        title={tt('weekly_mini_challenge', 'Haftalık Mini Challenge')}
-        subtitle={tt('weekly_active_days', `Son 7 günde ${snapshot.weeklyActiveDays} aktif günün var.`).replace(
-          '{{count}}',
-          String(snapshot.weeklyActiveDays)
-        )}
-        progressLabel={weeklyChallengeText}
-        progressMeta={tt('weekly_goal', 'Hedef: 10').replace('{{count}}', '10')}
-        progressValue={weeklyProgress}
-        footerText={
-          snapshot.weeklyScanTotal >= 10
-            ? tt('weekly_goal_done_message', 'Haftalık hedefi tamamladın. Yeni rekor için devam et.')
-            : tt(
-                'weekly_goal_remaining_message',
-                `Bu hafta hedefe ulaşmak için ${10 - snapshot.weeklyScanTotal} tarama daha yapabilirsin.`
-              ).replace('{{count}}', String(10 - snapshot.weeklyScanTotal))
-        }
+      <LiveInsightCard
+        items={liveCardItems}
+        badgeLabel={liveCardBadgeLabel}
+        helperText={liveCardHelperText}
         colors={colors}
       />
 
@@ -380,134 +553,6 @@ export const HomeScreen: React.FC = () => {
         )}
       </View>
 
-      <View
-        style={[
-          styles.shortcutsSurface,
-          {
-            backgroundColor: colors.card,
-            borderColor: colors.border,
-          },
-        ]}
-      >
-        <View style={styles.sectionHeaderRow}>
-          <View style={styles.sectionHeaderTextWrap}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {tt('quick_rescan', 'Hızlı Yeniden Sorgula')}
-            </Text>
-            <Text style={[styles.sectionSubtitle, { color: colors.text }]}>
-              {tt(
-                'quick_rescan_subtitle',
-                'Son baktığınız ürünleri tekrar açmak için aşağıdaki kısayolları kullanın.'
-              )}
-            </Text>
-          </View>
-        </View>
-
-        {rescanLoading && !rescanSnapshot.recentItems.length ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator size="small" color={colors.primary} />
-          </View>
-        ) : rescanLoadError && !rescanSnapshot.recentItems.length ? (
-          <View style={styles.sectionEmptyWrap}>
-            <Text style={[styles.sectionEmptyText, { color: colors.text }]}>
-              {tt('rescan_shortcuts_error', 'Kısayollar yüklenemedi. Yenileyip tekrar deneyin.')}
-            </Text>
-          </View>
-        ) : rescanSnapshot.recentItems.length ? (
-          <View style={styles.quickShortcutGrid}>
-            {rescanSnapshot.recentItems.map((item) => (
-              <View
-                key={item.barcode}
-                style={[
-                  styles.quickShortcutCard,
-                  {
-                    backgroundColor: colors.background,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <View style={styles.quickShortcutHeader}>
-                  <View style={styles.quickShortcutTextWrap}>
-                    <Text
-                      style={[styles.quickShortcutBrand, { color: colors.primary }]}
-                      numberOfLines={1}
-                    >
-                      {item.brand || tt('unknown_brand', 'Bilinmeyen Marka')}
-                    </Text>
-                    <Text
-                      style={[styles.quickShortcutName, { color: colors.text }]}
-                      numberOfLines={2}
-                    >
-                      {item.name || tt('unnamed_product', 'İsimsiz Ürün')}
-                    </Text>
-                  </View>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.favoriteIconButton,
-                      {
-                        backgroundColor: `${colors.primary}12`,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                    onPress={() => {
-                      void toggleFavorite(item.barcode);
-                    }}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons
-                      name={item.isFavorite ? 'star' : 'star-outline'}
-                      size={18}
-                      color={colors.primary}
-                    />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.favoriteMetaRow}>
-                  <View style={[styles.metaChip, { backgroundColor: `${colors.primary}12` }]}>
-                    <Text style={[styles.metaChipText, { color: colors.primary }]}>
-                      {item.score ?? '-'} / 100
-                    </Text>
-                  </View>
-                  <View style={[styles.metaChip, { backgroundColor: `${colors.primary}12` }]}>
-                    <Text style={[styles.metaChipText, { color: colors.primary }]}>
-                      {item.type === 'beauty'
-                        ? tt('beauty_label', 'Kozmetik')
-                        : tt('food_label', 'Gıda')}
-                    </Text>
-                  </View>
-                </View>
-
-                <TouchableOpacity
-                  style={[
-                    styles.secondaryShortcutButton,
-                    {
-                      borderColor: colors.border,
-                    },
-                  ]}
-                  onPress={() => openBarcodeDetail(item.barcode)}
-                  activeOpacity={0.9}
-                >
-                  <Ionicons name="refresh-outline" size={16} color={colors.primary} />
-                  <Text style={[styles.secondaryShortcutButtonText, { color: colors.text }]}>
-                    {tt('open_again', 'Tekrar Aç')}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <View style={styles.sectionEmptyWrap}>
-            <Text style={[styles.sectionEmptyText, { color: colors.text }]}>
-              {tt(
-                'quick_rescan_empty',
-                'Tarama geçmişiniz büyüdükçe burada hızlı yeniden sorgulama kısayolları görünür.'
-              )}
-            </Text>
-          </View>
-        )}
-      </View>
-
       <RecentProductsCarousel
         title={tt('recent_products', 'Son Ürünler')}
         subtitle={tt('recent_products_subtitle', 'Son taradığınız ürünlere hızlı dönün')}
@@ -517,85 +562,127 @@ export const HomeScreen: React.FC = () => {
         onItemPress={openBarcodeDetail}
         colors={colors}
       />
-
-      <View style={styles.quickActionsRow}>
-        <QuickActionCard
-          icon="time-outline"
-          title={tt('history', 'Geçmiş')}
-          description={tt(
-            'history_card_desc',
-            'Önceki barkod taramalarınızı görüntüleyin.'
-          )}
-          onPress={openHistory}
-          colors={colors}
-        />
-
-        <QuickActionCard
-          icon="settings-outline"
-          title={tt('settings', 'Ayarlar')}
-          description={tt(
-            'settings_card_desc',
-            'Dil, tema ve hesap tercihlerinizi yönetin.'
-          )}
-          onPress={openSettings}
-          colors={colors}
-        />
-      </View>
-
-      <InsightCard
-        icon={dailyInsight.icon}
-        title={dailyInsight.title}
-        text={dailyInsight.text}
-        colors={colors}
-      />
-
-      <DidYouKnowCard
-        title={tt('did_you_know', 'Biliyor muydunuz?')}
-        text={insightText}
-        colors={colors}
-      />
-
-      <AdBanner containerStyle={{ marginTop: 24 }} />
-
-      <View style={styles.footerBrand}>
+        <View style={styles.footerBrand}>
         <Ionicons name="shield-checkmark-sharp" size={16} color={colors.primary} />
         <Text style={[styles.footerText, { color: colors.text }]}>
           {tt('ai_food_safety', 'AI DESTEKLİ BARKOD ANALİZİ')}
         </Text>
-      </View>
-    </ScrollView>
+        </View>
+      </ScrollView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
   scrollContent: {},
-  header: {
-    marginBottom: 24,
+  dashboardHero: {
+    borderWidth: 1,
+    borderRadius: 32,
+    padding: 22,
+    marginBottom: 20,
+    shadowOpacity: 0.16,
+    shadowRadius: 28,
+    shadowOffset: {
+      width: 0,
+      height: 18,
+    },
+    elevation: 10,
+  },
+  dashboardHeroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 14,
+  },
+  dashboardHeroTextWrap: {
+    flex: 1,
+  },
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    marginBottom: 10,
+  },
+  heroStatusPill: {
+    minHeight: 38,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  heroStatusPillText: {
+    fontSize: 12,
+    fontWeight: '900',
   },
   welcomeText: {
     fontSize: 18,
-    fontWeight: '300',
-    opacity: 0.8,
+    fontWeight: '500',
   },
   userName: {
-    fontSize: 32,
+    fontSize: 33,
     fontWeight: '900',
     textTransform: 'capitalize',
-    letterSpacing: -0.5,
-    marginTop: 2,
+    letterSpacing: -0.9,
+    marginTop: 4,
   },
   subtitle: {
-    marginTop: 8,
+    marginTop: 10,
     fontSize: 14,
-    lineHeight: 22,
-    opacity: 0.65,
+    lineHeight: 23,
+  },
+  dashboardMetricRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 22,
+  },
+  heroMetricCard: {
+    flex: 1,
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    minHeight: 84,
+    justifyContent: 'space-between',
+  },
+  heroMetricLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  heroMetricValue: {
+    fontSize: 24,
+    fontWeight: '900',
+    marginTop: 10,
+  },
+  dashboardActionRow: {
+    flexDirection: 'row',
+    marginTop: 18,
+  },
+  heroPrimaryAction: {
+    width: '100%',
+    minHeight: 52,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  heroPrimaryActionText: {
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.2,
   },
   profileGateCard: {
     borderWidth: 1,
-    borderRadius: 22,
-    padding: 16,
-    marginBottom: 18,
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 20,
   },
   profileGateHeader: {
     flexDirection: 'row',
@@ -614,7 +701,6 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 13,
     lineHeight: 20,
-    opacity: 0.72,
   },
   profileGateScoreBadge: {
     minWidth: 56,
@@ -650,7 +736,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   profileGateButtonText: {
-    color: '#000',
     fontSize: 13,
     fontWeight: '900',
   },

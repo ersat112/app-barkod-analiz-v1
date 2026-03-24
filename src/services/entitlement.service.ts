@@ -209,6 +209,7 @@ export const entitlementService = {
         message: 'Geri yükleme akışı bu rollout içinde kapalı.',
         transactionId: null,
         customerId: null,
+        identityMismatchWarning: null,
       };
     }
 
@@ -222,6 +223,7 @@ export const entitlementService = {
         message: 'Mağaza satın alma entegrasyonu bu build içinde aktif değil.',
         transactionId: null,
         customerId: null,
+        identityMismatchWarning: null,
       };
     }
 
@@ -232,6 +234,7 @@ export const entitlementService = {
       message: 'Geri yüklenecek aktif premium satın alma bulunamadı.',
       transactionId: null,
       customerId: null,
+      identityMismatchWarning: null,
     };
   },
 

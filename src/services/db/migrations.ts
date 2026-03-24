@@ -40,12 +40,12 @@ export type DatabaseDiagnosticsSnapshot = {
     favorites: TableDiagnosticsSnapshot;
     productCache: TableDiagnosticsSnapshot;
   };
-  migrations: Array<{
+  migrations: {
     version: number;
     key: MigrationDefinition['key'];
     label: string;
     applied: boolean;
-  }>;
+  }[];
 };
 
 const db = getDatabase();
@@ -439,6 +439,14 @@ const getPendingMigrationVersions = (userVersion: number): number[] => {
   );
 };
 
+const isSchemaFoundationReady = (): boolean => {
+  return (
+    tableExists(TABLES.HISTORY) &&
+    tableExists(TABLES.FAVORITES) &&
+    tableExists(TABLES.PRODUCT_CACHE)
+  );
+};
+
 const getTableDiagnostics = (tableName: string): TableDiagnosticsSnapshot => {
   const exists = tableExists(tableName);
   const columns = exists ? getTableColumns(tableName).map((column) => column.name) : [];
@@ -451,7 +459,11 @@ const getTableDiagnostics = (tableName: string): TableDiagnosticsSnapshot => {
 };
 
 export const initDatabase = (): void => {
-  if (initialized && getUserVersion() >= DATABASE_SCHEMA_VERSION) {
+  if (
+    initialized &&
+    getUserVersion() >= DATABASE_SCHEMA_VERSION &&
+    isSchemaFoundationReady()
+  ) {
     return;
   }
 
@@ -460,17 +472,28 @@ export const initDatabase = (): void => {
 
     let currentVersion = getUserVersion();
     const appliedVersions: number[] = [];
+    const requiresFoundationRepair =
+      currentVersion >= DATABASE_SCHEMA_VERSION && !isSchemaFoundationReady();
 
-    MIGRATIONS.forEach((migration) => {
-      if (migration.version <= currentVersion) {
-        return;
-      }
+    if (requiresFoundationRepair) {
+      migrateLegacyHistoryIfNeeded();
+      migrateFavoritesIfNeeded();
+      migrateProductCacheIfNeeded();
+      setUserVersion(DATABASE_SCHEMA_VERSION);
+      currentVersion = DATABASE_SCHEMA_VERSION;
+      appliedVersions.push(...MIGRATIONS.map((migration) => migration.version));
+    } else {
+      MIGRATIONS.forEach((migration) => {
+        if (migration.version <= currentVersion) {
+          return;
+        }
 
-      migration.run();
-      setUserVersion(migration.version);
-      currentVersion = migration.version;
-      appliedVersions.push(migration.version);
-    });
+        migration.run();
+        setUserVersion(migration.version);
+        currentVersion = migration.version;
+        appliedVersions.push(migration.version);
+      });
+    }
 
     initialized = true;
     lastInitializedAt = new Date().toISOString();

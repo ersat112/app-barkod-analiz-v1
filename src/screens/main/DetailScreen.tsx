@@ -1,9 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  Linking,
+  Modal,
   ScrollView,
   Share,
   StyleSheet,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
@@ -17,8 +20,12 @@ import { FEATURES } from '../../config/features';
 import { useTheme } from '../../context/ThemeContext';
 import { useMissingProductFlow } from '../../hooks/useMissingProductFlow';
 import { RootStackParamList } from '../../navigation/AppNavigator';
+import { adService } from '../../services/adService';
 import { analyticsService } from '../../services/analytics.service';
 import { saveProductToHistory } from '../../services/db';
+import { entitlementService } from '../../services/entitlement.service';
+import { freeScanPolicyService } from '../../services/freeScanPolicy.service';
+import { enqueueRemoteHistorySync } from '../../services/historyRemoteSync.service';
 import { useScanStore } from '../../store/useScanStore';
 import {
   analyzeProduct,
@@ -40,6 +47,7 @@ import {
   NoticeCard,
   ProductHeadingSection,
   ScoreOverviewCard,
+  ShareSheet,
   SummarySection,
   TextSection,
 } from './detail/DetailSections';
@@ -58,6 +66,9 @@ type DetailLookupContext = {
   cacheTier?: ProductRepositoryCacheTier;
   lookupMeta?: ProductRepositoryLookupMeta;
 };
+
+type RiskLevelKey = 'low' | 'medium' | 'high';
+type TranslateFn = (key: string, fallback: string) => string;
 
 const scoreToGrade = (score: number): 'A' | 'B' | 'C' | 'D' | 'E' => {
   if (score >= 85) return 'A';
@@ -91,6 +102,182 @@ const mapStoreSourceToLookupSource = (
   return undefined;
 };
 
+const buildProductShareUrl = (
+  barcode: string,
+  productType?: Product['type'],
+  sourceName?: Product['sourceName']
+): string => {
+  const normalizedBarcode = String(barcode || '').replace(/[^\d]/g, '').trim();
+  const source = sourceName === 'openbeautyfacts' || productType === 'beauty'
+    ? 'openbeautyfacts'
+    : 'openfoodfacts';
+
+  if (!normalizedBarcode) {
+    return source === 'openbeautyfacts'
+      ? 'https://world.openbeautyfacts.org'
+      : 'https://world.openfoodfacts.org';
+  }
+
+  return source === 'openbeautyfacts'
+    ? `https://world.openbeautyfacts.org/product/${normalizedBarcode}`
+    : `https://world.openfoodfacts.org/product/${normalizedBarcode}`;
+};
+
+const applyTemplate = (
+  template: string,
+  replacements: Record<string, string | number>
+): string => {
+  return Object.entries(replacements).reduce((result, [key, value]) => {
+    return result.replace(new RegExp(`{{\\s*${key}\\s*}}`, 'g'), String(value));
+  }, template);
+};
+
+const normalizeRiskLevelKey = (value?: string | null): RiskLevelKey => {
+  const normalized = String(value || '')
+    .trim()
+    .toLowerCase();
+
+  if (normalized === 'yüksek' || normalized === 'high') {
+    return 'high';
+  }
+
+  if (normalized === 'orta' || normalized === 'medium') {
+    return 'medium';
+  }
+
+  return 'low';
+};
+
+const translateRiskLevel = (tt: TranslateFn, value?: string | null): string => {
+  switch (normalizeRiskLevelKey(value)) {
+    case 'high':
+      return tt('risk_high', 'Yüksek');
+    case 'medium':
+      return tt('risk_medium', 'Orta');
+    default:
+      return tt('risk_low', 'Düşük');
+  }
+};
+
+const translateRiskCompound = (tt: TranslateFn, value?: string | null): string => {
+  switch (normalizeRiskLevelKey(value)) {
+    case 'high':
+      return tt('risk_high_compound', 'Yüksek risk');
+    case 'medium':
+      return tt('risk_medium_compound', 'Orta risk');
+    default:
+      return tt('risk_low_compound', 'Düşük risk');
+  }
+};
+
+const buildLocalizedAnalysisSummary = (params: {
+  tt: TranslateFn;
+  foundECodesCount: number;
+  hasApiScore: boolean;
+}): string => {
+  if (params.foundECodesCount > 0) {
+    return applyTemplate(
+      params.tt(
+        'analysis_summary_additive_signal',
+        '{{count}} içerik bileşeni incelendi, katkı bazlı risk etkisi hesaba katıldı.'
+      ),
+      { count: params.foundECodesCount }
+    );
+  }
+
+  if (params.hasApiScore) {
+    return params.tt(
+      'analysis_summary_api_complete',
+      'API skoru ve ürün derecesi üzerinden analiz tamamlandı.'
+    );
+  }
+
+  return params.tt(
+    'analysis_summary_clean_default',
+    'İçerikte belirgin riskli madde tespit edilmedi.'
+  );
+};
+
+const buildLocalizedRecommendation = (params: {
+  tt: TranslateFn;
+  type: Product['type'];
+  riskLevel: string;
+  foundECodesCount: number;
+  hasApiScore: boolean;
+}): string => {
+  const riskLevel = normalizeRiskLevelKey(params.riskLevel);
+
+  if (params.type === 'beauty') {
+    if (riskLevel === 'high') {
+      return params.foundECodesCount > 0
+        ? params.tt(
+            'recommendation_beauty_high_additive',
+            'İçerikte dikkat gerektiren bileşenler bulundu. Kozmetik ürünü kullanmadan önce içerik detayını kontrol edin.'
+          )
+        : params.tt(
+            'recommendation_beauty_high_basic',
+            'Kozmetik ürün için risk seviyesi yüksek görünüyor. İçerik ve kullanım amacı dikkatle incelenmeli.'
+          );
+    }
+
+    if (riskLevel === 'medium') {
+      return params.foundECodesCount > 0
+        ? params.tt(
+            'recommendation_beauty_medium_additive',
+            'Kozmetik içerikte bazı dikkat edilmesi gereken maddeler bulunuyor.'
+          )
+        : params.tt(
+            'recommendation_beauty_medium_basic',
+            'Kozmetik ürün orta risk seviyesinde görünüyor.'
+          );
+    }
+
+    return params.hasApiScore
+      ? params.tt(
+          'recommendation_beauty_low_api',
+          'Kozmetik ürün mevcut verilere göre düşük risk seviyesinde görünüyor.'
+        )
+      : params.tt(
+          'recommendation_beauty_low_clean',
+          'Kozmetik içerik genel olarak temiz görünüyor.'
+        );
+  }
+
+  if (riskLevel === 'high') {
+    return params.foundECodesCount > 0
+      ? params.tt(
+          'recommendation_food_high_additive',
+          'Ürün hem API skoru hem de içerik bileşenleri açısından yüksek risk gösterebilir.'
+        )
+      : params.tt(
+          'recommendation_food_high_basic',
+          'API skoruna göre ürün risk seviyesi yüksek görünüyor.'
+        );
+  }
+
+  if (riskLevel === 'medium') {
+    return params.foundECodesCount > 0
+      ? params.tt(
+          'recommendation_food_medium_additive',
+          'Ürün içerik ve skor açısından orta seviyede dikkat gerektiriyor.'
+        )
+      : params.tt(
+          'recommendation_food_medium_basic',
+          'API skoruna göre ürün orta risk seviyesinde.'
+        );
+  }
+
+  return params.hasApiScore
+    ? params.tt(
+        'recommendation_food_low_api',
+        'API skoruna göre ürün düşük risk seviyesinde görünüyor.'
+      )
+    : params.tt(
+        'recommendation_food_low_clean',
+        'İçerik temiz ve güvenle değerlendirilebilir görünüyor.'
+      );
+};
+
 export const DetailScreen: React.FC = () => {
   const { t } = useTranslation();
   const { colors, isDark } = useTheme();
@@ -117,7 +304,10 @@ export const DetailScreen: React.FC = () => {
     [t]
   );
 
-  const { barcode } = route.params;
+  const {
+    barcode,
+    entrySource = 'unknown',
+  } = route.params;
   const { setAnalysis, currentProduct, currentAnalysis } = useScanStore();
 
   const normalizedRouteBarcode = useMemo(
@@ -130,6 +320,7 @@ export const DetailScreen: React.FC = () => {
   const [loading, setLoading] = useState(!isCurrentBarcodeInStore);
   const [error, setError] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
+  const [shareSheetVisible, setShareSheetVisible] = useState(false);
   const [notFoundReason, setNotFoundReason] = useState<'not_found' | 'invalid_barcode' | 'unknown' | null>(null);
 
   const [localProduct, setLocalProduct] = useState<Product | null>(
@@ -151,6 +342,7 @@ export const DetailScreen: React.FC = () => {
   const lastResolvedBarcodeRef = useRef<string | null>(null);
   const lastSavedHistoryKeyRef = useRef<string | null>(null);
   const lastTrackedDetailViewKeyRef = useRef<string | null>(null);
+  const lastInterstitialAttemptKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (isCurrentBarcodeInStore && currentProduct) {
@@ -185,8 +377,8 @@ export const DetailScreen: React.FC = () => {
     if (!extendedProduct?.sourceName) return tt('source_unknown', 'Bilinmeyen Kaynak');
 
     return extendedProduct.sourceName === 'openfoodfacts'
-      ? 'Open Food Facts'
-      : 'Open Beauty Facts';
+      ? tt('source_open_food_facts', 'Open Food Facts')
+      : tt('source_open_beauty_facts', 'Open Beauty Facts');
   }, [extendedProduct?.sourceName, tt]);
 
   const actualOriginRaw = useMemo(() => {
@@ -254,12 +446,49 @@ export const DetailScreen: React.FC = () => {
     return scoreToGrade(displayScore);
   }, [displayScore, displayedProduct?.grade]);
 
+  const riskCompoundLabel = useMemo(() => {
+    return translateRiskCompound(tt, displayedAnalysis?.riskLevel);
+  }, [displayedAnalysis?.riskLevel, tt]);
+
+  const hasApiScoreSignal = useMemo(() => {
+    return (
+      typeof displayedProduct?.score === 'number' ||
+      Boolean(displayedProduct?.grade?.trim())
+    );
+  }, [displayedProduct?.grade, displayedProduct?.score]);
+
+  const recommendationText = useMemo(() => {
+    if (!displayedProduct || !displayedAnalysis) {
+      return '';
+    }
+
+    return buildLocalizedRecommendation({
+      tt,
+      type: displayedProduct.type,
+      riskLevel: displayedAnalysis.riskLevel,
+      foundECodesCount: displayedAnalysis.foundECodes.length,
+      hasApiScore: hasApiScoreSignal,
+    });
+  }, [displayedAnalysis, displayedProduct, hasApiScoreSignal, tt]);
+
+  const summaryText = useMemo(() => {
+    if (!displayedAnalysis) {
+      return '';
+    }
+
+    return buildLocalizedAnalysisSummary({
+      tt,
+      foundECodesCount: displayedAnalysis.foundECodes.length,
+      hasApiScore: hasApiScoreSignal,
+    });
+  }, [displayedAnalysis, hasApiScoreSignal, tt]);
+
   const familyAlerts = useMemo(() => {
     if (!displayedProduct || !displayedAnalysis) return [];
 
     const alerts = [];
 
-    if (displayedAnalysis.riskLevel === 'Yüksek') {
+    if (normalizeRiskLevelKey(displayedAnalysis.riskLevel) === 'high') {
       alerts.push({
         id: 'high-risk',
         title: tt('family_high_risk_title', 'Çocuklar ve hassas bireyler için dikkat'),
@@ -331,6 +560,65 @@ export const DetailScreen: React.FC = () => {
       },
     ],
     [actualOriginLabel, displayedProduct?.score, gs1PrefixLabel, sourceLabel, tt]
+  );
+
+  const shareProductUrl = useMemo(() => {
+    return buildProductShareUrl(
+      normalizedRouteBarcode,
+      displayedProduct?.type,
+      displayedProduct?.sourceName
+    );
+  }, [displayedProduct?.sourceName, displayedProduct?.type, normalizedRouteBarcode]);
+
+  const shareMessage = useMemo(() => {
+    return (
+      `${displayedProduct?.brand || tt('unknown_brand', 'Bilinmeyen Marka')} - ${displayedProduct?.name || tt('unnamed_product', 'İsimsiz Ürün')}\n` +
+      `${tt('source', 'Kaynak')}: ${sourceLabel}\n` +
+      `${tt('origin_label', 'Menşei')}: ${actualOriginLabel}\n` +
+      `GS1: ${gs1PrefixLabel}\n` +
+      `${tt('analysis_summary', 'Analiz Özeti')}: ${riskCompoundLabel}\n` +
+      `${tt('score_label', 'Skor')}: ${displayScore}/100\n` +
+      `${tt('grade_note_label', 'Not')}: ${displayGrade}\n` +
+      `${tt('barcode_label', 'Barkod')}: ${normalizedRouteBarcode}`
+    );
+  }, [
+    actualOriginLabel,
+    displayGrade,
+    displayScore,
+    displayedProduct?.brand,
+    displayedProduct?.name,
+    gs1PrefixLabel,
+    normalizedRouteBarcode,
+    riskCompoundLabel,
+    sourceLabel,
+    tt,
+  ]);
+
+  const sharePreviewBody = useMemo(() => {
+    return `${tt('score_label', 'Skor')}: ${displayScore}/100 • ${riskCompoundLabel} • ${sourceLabel}`;
+  }, [displayScore, riskCompoundLabel, sourceLabel, tt]);
+
+  const openShareSheet = useCallback(() => {
+    setShareSheetVisible(true);
+  }, []);
+
+  const closeShareSheet = useCallback(() => {
+    setShareSheetVisible(false);
+  }, []);
+
+  const openLinkOrFallback = useCallback(
+    async (url: string) => {
+      try {
+        await Linking.openURL(url);
+      } catch (linkError) {
+        console.warn('Share link open failed, falling back to system share:', linkError);
+        await Share.share({
+          message: `${shareMessage}\n${shareProductUrl}`,
+          url: shareProductUrl,
+        });
+      }
+    },
+    [shareMessage, shareProductUrl]
   );
 
   const loadProduct = useCallback(async () => {
@@ -409,6 +697,11 @@ export const DetailScreen: React.FC = () => {
       if (lastSavedHistoryKeyRef.current !== historySaveKey) {
         try {
           await Promise.resolve(saveProductToHistory(product, analysis.score));
+          void enqueueRemoteHistorySync({
+            product,
+            score: analysis.score,
+            riskLevel: analysis.riskLevel,
+          });
           lastSavedHistoryKeyRef.current = historySaveKey;
         } catch (historyError) {
           console.warn('History save failed:', historyError);
@@ -488,6 +781,101 @@ export const DetailScreen: React.FC = () => {
     normalizedRouteBarcode,
   ]);
 
+  useEffect(() => {
+    if (
+      entrySource !== 'scanner' ||
+      !displayedProduct ||
+      !displayedAnalysis
+    ) {
+      return;
+    }
+
+    const attemptKey = [normalizedRouteBarcode, entrySource].join(':');
+
+    if (lastInterstitialAttemptKeyRef.current === attemptKey) {
+      return;
+    }
+
+    lastInterstitialAttemptKeyRef.current = attemptKey;
+
+    let cancelled = false;
+
+    const showDeferredInterstitial = async () => {
+      try {
+        const [entitlement, freeScan, policy, stats] = await Promise.all([
+          entitlementService.getSnapshot(),
+          freeScanPolicyService.getSnapshot(),
+          adService.getCurrentPolicy(),
+          adService.getStats(),
+        ]);
+
+        if (cancelled || entitlement.isPremium) {
+          return;
+        }
+
+        if (freeScan.usedCount <= 3) {
+          return;
+        }
+
+        if (!policy.enabled || !policy.interstitialEnabled) {
+          return;
+        }
+
+        if (stats.dailyInterstitialCount >= policy.maxDailyInterstitials) {
+          return;
+        }
+
+        if (!adService.isRewardedAdReady()) {
+          await adService.prepareRewardedAd();
+          await new Promise((resolve) => setTimeout(resolve, 240));
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const shown = await adService.showPreparedRewardedAd();
+
+        if (!shown) {
+          await adService.trackInterstitialShowFailure('interstitial_not_ready', {
+            stage: 'detail_show_gate',
+            screen: 'Detail',
+            entrySource,
+            barcode: normalizedRouteBarcode,
+            successfulScanCount: freeScan.usedCount,
+          });
+          return;
+        }
+
+        await adService.recordInterstitialShown({
+          shownAt: Date.now(),
+          successfulScanCount: freeScan.usedCount,
+        });
+      } catch (error) {
+        console.error('Detail interstitial show failed:', error);
+
+        await adService.trackInterstitialShowFailure(error, {
+          stage: 'detail_show',
+          screen: 'Detail',
+          entrySource,
+          barcode: normalizedRouteBarcode,
+          successfulScanCount: undefined,
+        });
+      }
+    };
+
+    void showDeferredInterstitial();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    displayedAnalysis,
+    displayedProduct,
+    entrySource,
+    normalizedRouteBarcode,
+  ]);
+
   const handleRetry = useCallback(async () => {
     await trackNotFoundRetryTapped({
       barcode: normalizedRouteBarcode,
@@ -500,39 +888,176 @@ export const DetailScreen: React.FC = () => {
     await loadProduct();
   }, [loadProduct, normalizedRouteBarcode, notFoundReason, trackNotFoundRetryTapped]);
 
-  const handleShare = useCallback(async () => {
+  const handleShareSystem = useCallback(async () => {
     if (!displayedProduct || !displayedAnalysis) {
       Alert.alert(tt('error_title', 'Hata'), tt('data_not_ready', 'Veri hazır değil'));
       return;
     }
 
     try {
+      closeShareSheet();
       await Share.share({
-        message:
-          `${displayedProduct.brand || tt('unknown_brand', 'Bilinmeyen Marka')} - ${displayedProduct.name || tt('unnamed_product', 'İsimsiz Ürün')}\n` +
-          `${tt('source', 'Kaynak')}: ${sourceLabel}\n` +
-          `${tt('origin_label', 'Menşei')}: ${actualOriginLabel}\n` +
-          `GS1: ${gs1PrefixLabel}\n` +
-          `${tt('analysis_summary', 'Analiz Özeti')}: ${displayedAnalysis.riskLevel} Risk\n` +
-          `${tt('score_label', 'Skor')}: ${displayScore}/100\n` +
-          `Not: ${displayGrade}\n` +
-          `${tt('barcode_label', 'Barkod')}: ${normalizedRouteBarcode}`,
+        message: `${shareMessage}\n${shareProductUrl}`,
+        url: shareProductUrl,
       });
     } catch (shareError) {
       console.error('Share failed:', shareError);
       Alert.alert(tt('error_title', 'Hata'), tt('share_error', 'Paylaşım başarısız oldu'));
     }
   }, [
-    actualOriginLabel,
-    displayGrade,
-    displayScore,
+    closeShareSheet,
     displayedAnalysis,
     displayedProduct,
-    gs1PrefixLabel,
-    normalizedRouteBarcode,
-    sourceLabel,
+    shareMessage,
+    shareProductUrl,
     tt,
   ]);
+
+  const handleShareTwitter = useCallback(async () => {
+    if (!displayedProduct || !displayedAnalysis) {
+      Alert.alert(tt('error_title', 'Hata'), tt('data_not_ready', 'Veri hazır değil'));
+      return;
+    }
+
+    closeShareSheet();
+
+    const intentUrl =
+      `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareMessage)}` +
+      `&url=${encodeURIComponent(shareProductUrl)}`;
+
+    try {
+      await openLinkOrFallback(intentUrl);
+    } catch (shareError) {
+      console.error('Twitter share failed:', shareError);
+      Alert.alert(tt('error_title', 'Hata'), tt('share_error', 'Paylaşım başarısız oldu'));
+    }
+  }, [
+    closeShareSheet,
+    displayedAnalysis,
+    displayedProduct,
+    openLinkOrFallback,
+    shareMessage,
+    shareProductUrl,
+    tt,
+  ]);
+
+  const handleShareFacebook = useCallback(async () => {
+    if (!displayedProduct || !displayedAnalysis) {
+      Alert.alert(tt('error_title', 'Hata'), tt('data_not_ready', 'Veri hazır değil'));
+      return;
+    }
+
+    closeShareSheet();
+
+    const sharerUrl =
+      `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareProductUrl)}` +
+      `&quote=${encodeURIComponent(shareMessage)}`;
+
+    try {
+      await openLinkOrFallback(sharerUrl);
+    } catch (shareError) {
+      console.error('Facebook share failed:', shareError);
+      Alert.alert(tt('error_title', 'Hata'), tt('share_error', 'Paylaşım başarısız oldu'));
+    }
+  }, [
+    closeShareSheet,
+    displayedAnalysis,
+    displayedProduct,
+    openLinkOrFallback,
+    shareMessage,
+    shareProductUrl,
+    tt,
+  ]);
+
+  const handleShareInstagram = useCallback(async () => {
+    if (!displayedProduct || !displayedAnalysis) {
+      Alert.alert(tt('error_title', 'Hata'), tt('data_not_ready', 'Veri hazır değil'));
+      return;
+    }
+
+    try {
+      closeShareSheet();
+      await Share.share({
+        message: `${shareMessage}\n${shareProductUrl}`,
+        url: shareProductUrl,
+      });
+    } catch (shareError) {
+      console.error('Instagram share failed:', shareError);
+      Alert.alert(tt('error_title', 'Hata'), tt('share_error', 'Paylaşım başarısız oldu'));
+    }
+  }, [
+    closeShareSheet,
+    displayedAnalysis,
+    displayedProduct,
+    shareMessage,
+    shareProductUrl,
+    tt,
+  ]);
+
+  const shareSheetActions = useMemo(
+    () => [
+      {
+        key: 'twitter',
+        icon: 'logo-twitter' as const,
+        title: tt('share_to_x', 'X / Twitter'),
+        subtitle: tt(
+          'share_to_x_desc',
+          'Hazır tweet metniyle paylaşım akışını açar.'
+        ),
+        accentColor: '#1D9BF0',
+        onPress: () => {
+          void handleShareTwitter();
+        },
+      },
+      {
+        key: 'facebook',
+        icon: 'logo-facebook' as const,
+        title: tt('share_to_facebook', 'Facebook'),
+        subtitle: tt(
+          'share_to_facebook_desc',
+          'Ürün bağlantısını ve özetini paylaşım ekranına taşır.'
+        ),
+        accentColor: '#1877F2',
+        onPress: () => {
+          void handleShareFacebook();
+        },
+      },
+      {
+        key: 'instagram',
+        icon: 'logo-instagram' as const,
+        title: tt('share_to_instagram', 'Instagram'),
+        subtitle: tt(
+          'share_to_instagram_desc',
+          'Hazır açıklamayla sistem paylaşımını açar.'
+        ),
+        accentColor: '#E4405F',
+        onPress: () => {
+          void handleShareInstagram();
+        },
+      },
+      {
+        key: 'system',
+        icon: 'share-social-outline' as const,
+        title: tt('share_to_more', 'Diğer Uygulamalar'),
+        subtitle: tt(
+          'share_to_more_desc',
+          'WhatsApp, Mail ve diğer uygulamalarda paylaşın.'
+        ),
+        accentColor: colors.primary,
+        onPress: () => {
+          void handleShareSystem();
+        },
+      },
+    ],
+    [
+      colors.primary,
+      handleShareFacebook,
+      handleShareInstagram,
+      handleShareSystem,
+      handleShareTwitter,
+      tt,
+    ]
+  );
 
   if (loading) {
     return <DetailLoadingState label={tt('analyzing', 'Analiz ediliyor')} colors={colors} />;
@@ -554,8 +1079,8 @@ export const DetailScreen: React.FC = () => {
 
           navigation.navigate('MissingProduct', { barcode: normalizedRouteBarcode });
         }}
-        retryLabel={!error?.includes('Geçersiz') ? tt('retry', 'Tekrar Dene') : undefined}
-        onRetry={!error?.includes('Geçersiz') ? handleRetry : undefined}
+        retryLabel={notFoundReason !== 'invalid_barcode' ? tt('retry', 'Tekrar Dene') : undefined}
+        onRetry={notFoundReason !== 'invalid_barcode' ? handleRetry : undefined}
         colors={colors}
       />
     );
@@ -576,7 +1101,7 @@ export const DetailScreen: React.FC = () => {
           badgeLabel={headerBadgeLabel}
           hasActualOrigin={hasActualOrigin}
           onBack={() => navigation.goBack()}
-          onShare={handleShare}
+          onShare={openShareSheet}
           onImageError={() => setImageError(true)}
           colors={colors}
         />
@@ -594,8 +1119,20 @@ export const DetailScreen: React.FC = () => {
             <NoticeCard
               text={
                 hasActualOrigin
-                  ? `GS1 prefix bilgisi: ${gs1PrefixLabel}. Ürünün menşei alanı ayrıca gösterilir.`
-                  : `Gerçek menşei bilgisi bulunamadı. Gösterilen GS1 alanı barkodun kayıt bölgesidir: ${gs1PrefixLabel}.`
+                  ? applyTemplate(
+                      tt(
+                        'gs1_notice_with_origin',
+                        'GS1 prefix bilgisi: {{gs1}}. Ürünün menşei alanı ayrıca gösterilir.'
+                      ),
+                      { gs1: gs1PrefixLabel }
+                    )
+                  : applyTemplate(
+                      tt(
+                        'gs1_notice_without_origin',
+                        'Gerçek menşei bilgisi bulunamadı. Gösterilen GS1 alanı barkodun kayıt bölgesidir: {{gs1}}.'
+                      ),
+                      { gs1: gs1PrefixLabel }
+                    )
               }
               colors={colors}
             />
@@ -604,7 +1141,9 @@ export const DetailScreen: React.FC = () => {
           <ScoreOverviewCard
             score={displayScore}
             grade={displayGrade}
-            analysis={displayedAnalysis}
+            riskLabel={riskCompoundLabel}
+            recommendationText={recommendationText}
+            analysisColor={analysisColor}
             colors={colors}
           />
 
@@ -638,7 +1177,7 @@ export const DetailScreen: React.FC = () => {
 
           <SummarySection
             title={tt('analysis_summary', 'Analiz Özeti')}
-            text={displayedAnalysis.summary}
+            text={summaryText}
             colors={colors}
           />
 
@@ -648,6 +1187,7 @@ export const DetailScreen: React.FC = () => {
             items={displayedAnalysis.foundECodes ?? []}
             analysisColor={analysisColor}
             unknownLabel={tt('unknown', 'Bilinmiyor')}
+            formatRiskLabel={(risk) => translateRiskLevel(tt, risk)}
             colors={colors}
           />
 
@@ -678,6 +1218,43 @@ export const DetailScreen: React.FC = () => {
       >
         <AdBanner placement="detail_footer" />
       </View>
+
+      <Modal
+        visible={shareSheetVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={closeShareSheet}
+      >
+        <View style={styles.shareOverlay}>
+          <TouchableOpacity
+            style={styles.shareOverlayBackdrop}
+            activeOpacity={1}
+            onPress={closeShareSheet}
+          />
+
+          <View style={styles.shareSheetWrap}>
+            <ShareSheet
+              title={tt('share_sheet_title', 'Paylaş')}
+              subtitle={tt(
+                'share_sheet_subtitle',
+                'Ürün özetini sosyal ağlarda veya diğer uygulamalarda paylaşın.'
+              )}
+              closeLabel={tt('share_sheet_close', 'Kapat')}
+              previewTitle={
+                displayedProduct?.name || tt('unnamed_product', 'İsimsiz Ürün')
+              }
+              previewSubtitle={
+                displayedProduct?.brand || tt('unknown_brand', 'Bilinmeyen Marka')
+              }
+              previewBody={sharePreviewBody}
+              actions={shareSheetActions}
+              onClose={closeShareSheet}
+              colors={colors}
+            />
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -694,5 +1271,20 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: '100%',
     alignItems: 'center',
+  },
+  shareOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    padding: 20,
+    backgroundColor: 'rgba(0,0,0,0.42)',
+  },
+  shareOverlayBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  shareSheetWrap: {
+    width: '100%',
+    maxWidth: 460,
+    alignSelf: 'center',
+    marginBottom: 8,
   },
 });

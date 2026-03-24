@@ -27,23 +27,14 @@ import {
   signInWithEmailAndPassword,
 } from 'firebase/auth';
 
+import { AUTH_RUNTIME } from '../../config/authRuntime';
 import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
+import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { authAnalyticsService } from '../../services/authAnalytics.service';
+import { withAlpha } from '../../utils/color';
 
 WebBrowser.maybeCompleteAuthSession();
-
-const GOOGLE_CLIENT_IDS = {
-  android: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? '',
-  ios: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '',
-  web: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
-};
-
-const isGoogleConfiguredForPlatform = (): boolean => {
-  if (Platform.OS === 'android') return !!GOOGLE_CLIENT_IDS.android;
-  if (Platform.OS === 'ios') return !!GOOGLE_CLIENT_IDS.ios;
-  return !!GOOGLE_CLIENT_IDS.web;
-};
 
 const randomNonce = (length = 32): string => {
   const chars =
@@ -104,16 +95,26 @@ const SocialButton: React.FC<SocialButtonProps> = ({
 
 type GoogleAuthSectionProps = {
   label: string;
+  errorTitle: string;
+  missingCredentialMessage: string;
+  failureFallbackMessage: string;
+  providerDisabledMessage: string;
 };
 
-const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({ label }) => {
+const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
+  label,
+  errorTitle,
+  missingCredentialMessage,
+  failureFallbackMessage,
+  providerDisabledMessage,
+}) => {
   const [loading, setLoading] = useState(false);
 
   const config = useMemo(
     () => ({
-      androidClientId: GOOGLE_CLIENT_IDS.android || undefined,
-      iosClientId: GOOGLE_CLIENT_IDS.ios || undefined,
-      webClientId: GOOGLE_CLIENT_IDS.web || undefined,
+      androidClientId: AUTH_RUNTIME.google.androidClientId || undefined,
+      iosClientId: AUTH_RUNTIME.google.iosClientId || undefined,
+      webClientId: AUTH_RUNTIME.google.webClientId || undefined,
     }),
     []
   );
@@ -144,7 +145,7 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({ label }) => {
             error: 'google_credential_missing',
           });
 
-          Alert.alert('Hata', 'Google kimlik doğrulama bilgisi alınamadı.');
+          Alert.alert(errorTitle, missingCredentialMessage);
           return;
         }
 
@@ -166,14 +167,25 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({ label }) => {
           errorCode: error?.code,
         });
 
-        Alert.alert('Hata', error?.message || 'Google ile giriş başarısız oldu.');
+        const message =
+          error?.code === 'auth/operation-not-allowed'
+            ? providerDisabledMessage
+            : error?.message || failureFallbackMessage;
+
+        Alert.alert(errorTitle, message);
       } finally {
         setLoading(false);
       }
     };
 
     void handleGoogleResponse();
-  }, [response]);
+  }, [
+    errorTitle,
+    failureFallbackMessage,
+    missingCredentialMessage,
+    providerDisabledMessage,
+    response,
+  ]);
 
   return (
     <SocialButton
@@ -208,8 +220,41 @@ export const LoginScreen: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
 
-  const isGoogleEnabled = useMemo(() => isGoogleConfiguredForPlatform(), []);
+  const [appleAvailable, setAppleAvailable] = useState(Platform.OS === 'ios');
+  const isGoogleEnabled = useMemo(
+    () => AUTH_RUNTIME.google.hasActivePlatformClientId,
+    []
+  );
   const isFormValid = email.trim().length > 0 && password.trim().length > 0;
+
+  useEffect(() => {
+    let mounted = true;
+
+    if (Platform.OS !== 'ios') {
+      setAppleAvailable(false);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    void AppleAuthentication.isAvailableAsync()
+      .then((available) => {
+        if (mounted) {
+          setAppleAvailable(available);
+        }
+      })
+      .catch((error) => {
+        console.warn('Apple auth availability check failed:', error);
+
+        if (mounted) {
+          setAppleAvailable(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleEmailLogin = useCallback(async () => {
     if (!isFormValid) {
@@ -293,7 +338,10 @@ export const LoginScreen: React.FC = () => {
           error: 'apple_identity_token_missing',
         });
 
-        Alert.alert('Hata', 'Apple kimlik doğrulama bilgisi alınamadı.');
+        Alert.alert(
+          tt('error_title', 'Hata'),
+          tt('apple_auth_missing', 'Apple kimlik doğrulama bilgisi alınamadı.')
+        );
         return;
       }
 
@@ -324,44 +372,101 @@ export const LoginScreen: React.FC = () => {
         errorCode: error?.code,
       });
 
-      Alert.alert('Hata', error?.message || 'Apple ile giriş başarısız oldu.');
+      const message =
+        error?.code === 'auth/operation-not-allowed'
+          ? tt(
+              'apple_provider_disabled',
+              'Apple ile giriş Firebase üzerinde etkin değil.'
+            )
+          : error?.message || tt('apple_login_failed', 'Apple ile giriş başarısız oldu.');
+
+      Alert.alert(
+        tt('error_title', 'Hata'),
+        message
+      );
     } finally {
       setAppleLoading(false);
     }
-  }, []);
+  }, [tt]);
 
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
-
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+      <AmbientBackdrop colors={colors} variant="auth" />
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={styles.hero}>
-          <View style={[styles.logoWrap, { backgroundColor: `${colors.primary}15` }]}>
-            <Ionicons name="barcode-outline" size={48} color={colors.primary} />
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
+
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View
+            style={[
+              styles.heroCard,
+              {
+                backgroundColor: withAlpha(colors.card, 'F2'),
+                borderColor: withAlpha(colors.border, 'B8'),
+                shadowColor: colors.shadow,
+              },
+            ]}
+          >
+            <View style={styles.heroBadgeRow}>
+              <View
+                style={[
+                  styles.heroBadge,
+                  { backgroundColor: withAlpha(colors.primary, '14') },
+                ]}
+              >
+                <Text style={[styles.heroBadgeText, { color: colors.primary }]}>
+                  {tt('login', 'Giriş Yap')}
+                </Text>
+              </View>
+
+              <View
+                style={[
+                  styles.heroBadge,
+                  { backgroundColor: withAlpha(colors.teal, '14') },
+                ]}
+              >
+                <Text style={[styles.heroBadgeText, { color: colors.teal }]}>
+                  {Platform.OS.toUpperCase()}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.hero}>
+              <View
+                style={[
+                  styles.logoWrap,
+                  { backgroundColor: withAlpha(colors.primary, '14') },
+                ]}
+              >
+                <Ionicons name="barcode-outline" size={48} color={colors.primary} />
+              </View>
+
+              <Text style={[styles.title, { color: colors.primary }]}>
+                {tt('app_name', 'ErEnesAl®')}
+              </Text>
+
+              <Text style={[styles.subtitle, { color: colors.mutedText }]}>
+                {tt('login_subtitle', 'Sağlıklı seçimler için ilk adımınız')}
+              </Text>
+            </View>
           </View>
 
-          <Text style={[styles.title, { color: colors.primary }]}>
-            {tt('app_name', 'ErEnesAl®')}
-          </Text>
-
-          <Text style={[styles.subtitle, { color: colors.text }]}>
-            {tt('login_subtitle', 'Sağlıklı seçimler için ilk adımınız')}
-          </Text>
-        </View>
-
-        <View
-          style={[
-            styles.formCard,
-            { backgroundColor: colors.card, borderColor: colors.border },
-          ]}
-        >
+          <View
+            style={[
+              styles.formCard,
+              {
+                backgroundColor: withAlpha(colors.cardElevated, 'F2'),
+                borderColor: withAlpha(colors.border, 'B8'),
+                shadowColor: colors.shadow,
+              },
+            ]}
+          >
           <Text style={[styles.label, { color: colors.text }]}>
             {tt('email', 'E-posta Adresi')}
           </Text>
@@ -370,8 +475,8 @@ export const LoginScreen: React.FC = () => {
               styles.input,
               {
                 color: colors.text,
-                borderColor: colors.border,
-                backgroundColor: isDark ? '#181818' : '#FAFAFA',
+                borderColor: withAlpha(colors.border, 'CC'),
+                backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
               },
             ]}
             placeholder={tt('email', 'E-posta Adresi')}
@@ -391,8 +496,8 @@ export const LoginScreen: React.FC = () => {
             style={[
               styles.passwordWrap,
               {
-                borderColor: colors.border,
-                backgroundColor: isDark ? '#181818' : '#FAFAFA',
+                borderColor: withAlpha(colors.border, 'CC'),
+                backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
               },
             ]}
           >
@@ -421,6 +526,7 @@ export const LoginScreen: React.FC = () => {
               {
                 backgroundColor: isFormValid ? colors.primary : colors.border,
                 opacity: loading ? 0.7 : 1,
+                shadowColor: colors.shadow,
               },
             ]}
             onPress={handleEmailLogin}
@@ -428,9 +534,9 @@ export const LoginScreen: React.FC = () => {
             activeOpacity={0.9}
           >
             {loading ? (
-              <ActivityIndicator size="small" color="#000" />
+              <ActivityIndicator size="small" color={colors.primaryContrast} />
             ) : (
-              <Text style={styles.primaryButtonText}>
+              <Text style={[styles.primaryButtonText, { color: colors.primaryContrast }]}>
                 {tt('login', 'Giriş Yap')}
               </Text>
             )}
@@ -445,7 +551,22 @@ export const LoginScreen: React.FC = () => {
           </View>
 
           {isGoogleEnabled ? (
-            <GoogleAuthSection label={tt('google_sign_in', 'Google ile Giriş')} />
+            <GoogleAuthSection
+              label={tt('google_sign_in', 'Google ile Giriş')}
+              errorTitle={tt('error_title', 'Hata')}
+              missingCredentialMessage={tt(
+                'google_auth_missing',
+                'Google kimlik doğrulama bilgisi alınamadı.'
+              )}
+              failureFallbackMessage={tt(
+                'google_login_failed',
+                'Google ile giriş başarısız oldu.'
+              )}
+              providerDisabledMessage={tt(
+                'google_provider_disabled',
+                'Google ile giriş Firebase üzerinde etkin değil.'
+              )}
+            />
           ) : (
             <SocialButton
               icon="logo-google"
@@ -457,7 +578,7 @@ export const LoginScreen: React.FC = () => {
             />
           )}
 
-          {Platform.OS === 'ios' ? (
+          {Platform.OS === 'ios' && appleAvailable ? (
             <View style={styles.appleButtonWrap}>
               <AppleAuthentication.AppleAuthenticationButton
                 buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
@@ -480,7 +601,7 @@ export const LoginScreen: React.FC = () => {
         </View>
 
         <View style={styles.footerRow}>
-          <Text style={[styles.footerText, { color: colors.text }]}>
+          <Text style={[styles.footerText, { color: colors.mutedText }]}>
             {tt('no_account', 'Hesabınız yok mu?')}
           </Text>
           <TouchableOpacity onPress={() => navigation.navigate('SignUp')}>
@@ -491,19 +612,31 @@ export const LoginScreen: React.FC = () => {
         </View>
 
         {!isGoogleEnabled ? (
-          <Text style={[styles.helperText, { color: colors.text }]}>
+          <Text style={[styles.helperText, { color: colors.mutedText }]}>
             {tt(
-              'social_login_not_configured',
-              'Sosyal giriş henüz yapılandırılmadı.'
+              'google_sign_in_unavailable',
+              'Google ile giriş bu build için henüz yapılandırılmadı.'
             )}
           </Text>
         ) : null}
-      </ScrollView>
-    </KeyboardAvoidingView>
+        {Platform.OS === 'ios' && !appleAvailable ? (
+          <Text style={[styles.helperText, { color: colors.mutedText }]}>
+            {tt(
+              'apple_sign_in_unavailable',
+              'Apple ile giriş bu cihazda veya test ortamında kullanılamıyor.'
+            )}
+          </Text>
+        ) : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
   container: {
     flex: 1,
   },
@@ -512,14 +645,43 @@ const styles = StyleSheet.create({
     paddingTop: 68,
     paddingBottom: 40,
   },
+  heroCard: {
+    borderWidth: 1,
+    borderRadius: 30,
+    padding: 20,
+    marginBottom: 20,
+    shadowOpacity: 0.16,
+    shadowRadius: 28,
+    shadowOffset: {
+      width: 0,
+      height: 18,
+    },
+  },
+  heroBadgeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+    gap: 10,
+  },
+  heroBadge: {
+    minHeight: 32,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroBadgeText: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.3,
+  },
   hero: {
     alignItems: 'center',
-    marginBottom: 26,
   },
   logoWrap: {
-    width: 96,
-    height: 96,
-    borderRadius: 28,
+    width: 104,
+    height: 104,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
@@ -538,8 +700,14 @@ const styles = StyleSheet.create({
   },
   formCard: {
     borderWidth: 1,
-    borderRadius: 24,
-    padding: 18,
+    borderRadius: 28,
+    padding: 20,
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    shadowOffset: {
+      width: 0,
+      height: 18,
+    },
   },
   label: {
     marginBottom: 8,
@@ -576,9 +744,14 @@ const styles = StyleSheet.create({
     minHeight: 54,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: {
+      width: 0,
+      height: 12,
+    },
   },
   primaryButtonText: {
-    color: '#000',
     fontSize: 15,
     fontWeight: '900',
     letterSpacing: 0.4,

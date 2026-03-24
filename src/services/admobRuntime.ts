@@ -27,7 +27,7 @@ const loadModule = (): AdMobModuleType | null => {
   }
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require('react-native-google-mobile-ads') as AdMobModuleType;
 
     if (!mod) {
@@ -75,20 +75,24 @@ export const getAdMobModule = () => {
   }
 
   const {
+    AppOpenAd,
     BannerAd,
     BannerAdSize,
     InterstitialAd,
     RewardedAd,
+    RewardedAdEventType,
     AdEventType,
     TestIds,
     default: mobileAds,
   } = mod;
 
   return {
+    AppOpenAd,
     BannerAd,
     BannerAdSize,
     InterstitialAd,
     RewardedAd,
+    RewardedAdEventType,
     AdEventType,
     TestIds,
     mobileAds,

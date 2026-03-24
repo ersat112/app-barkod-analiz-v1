@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Dimensions,
   Image,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -11,28 +10,25 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
-import type { AnalysisResult, ECodeMatch, Product } from '../../../utils/analysis';
+import type { ThemeColors } from '../../../context/ThemeContext';
+import type { ECodeMatch } from '../../../utils/analysis';
+import { withAlpha } from '../../../utils/color';
 
 const { width } = Dimensions.get('window');
 const FALLBACK_IMAGE = 'https://via.placeholder.com/400?text=No+Image';
 
-type ThemeColors = {
-  background: string;
-  card: string;
-  text: string;
-  primary: string;
-  border: string;
-};
-
-type DisplayProduct = Product & {
-  sourceName?: string;
-  country?: string;
-  origin?: string;
-};
-
 type MetaChipItem = {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
+};
+
+type ShareAction = {
+  key: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  subtitle: string;
+  accentColor: string;
+  onPress: () => void;
 };
 
 export const DetailLoadingState: React.FC<{
@@ -221,9 +217,11 @@ export const NoticeCard: React.FC<{
 export const ScoreOverviewCard: React.FC<{
   score: number;
   grade: string;
-  analysis: AnalysisResult;
+  riskLabel: string;
+  recommendationText: string;
+  analysisColor: string;
   colors: ThemeColors;
-}> = ({ score, grade, analysis, colors }) => {
+}> = ({ score, grade, riskLabel, recommendationText, analysisColor, colors }) => {
   return (
     <View
       style={[
@@ -238,12 +236,12 @@ export const ScoreOverviewCard: React.FC<{
         style={[
           styles.scoreCircle,
           {
-            borderColor: analysis.color,
-            backgroundColor: `${analysis.color}15`,
+            borderColor: analysisColor,
+            backgroundColor: `${analysisColor}15`,
           },
         ]}
       >
-        <Text style={[styles.scoreNumber, { color: analysis.color }]}>{score}</Text>
+        <Text style={[styles.scoreNumber, { color: analysisColor }]}>{score}</Text>
         <Text style={[styles.scoreOverHundred, { color: colors.text }]}>/100</Text>
       </View>
 
@@ -252,19 +250,19 @@ export const ScoreOverviewCard: React.FC<{
           style={[
             styles.gradeBadge,
             {
-              backgroundColor: analysis.color,
+              backgroundColor: analysisColor,
             },
           ]}
         >
           <Text style={styles.gradeBadgeText}>{grade}</Text>
         </View>
 
-        <Text style={[styles.scoreRiskTitle, { color: analysis.color }]}>
-          {`${analysis.riskLevel.toUpperCase()} RİSK`}
+        <Text style={[styles.scoreRiskTitle, { color: analysisColor }]}>
+          {riskLabel.toUpperCase()}
         </Text>
 
         <Text style={[styles.scoreRecommendation, { color: colors.text }]}>
-          {analysis.recommendation}
+          {recommendationText}
         </Text>
       </View>
     </View>
@@ -290,8 +288,17 @@ export const AdditivesSection: React.FC<{
   items: ECodeMatch[];
   analysisColor: string;
   unknownLabel: string;
+  formatRiskLabel?: (risk?: string | null) => string;
   colors: ThemeColors;
-}> = ({ title, emptyLabel, items, analysisColor, unknownLabel, colors }) => {
+}> = ({
+  title,
+  emptyLabel,
+  items,
+  analysisColor,
+  unknownLabel,
+  formatRiskLabel,
+  colors,
+}) => {
   return (
     <>
       <View style={styles.sectionHeader}>
@@ -304,8 +311,12 @@ export const AdditivesSection: React.FC<{
 
       {items.length ? (
         items.map((item, index) => {
-          const isHighRisk = String(item.risk || '').toLowerCase() === 'yüksek';
-          const riskColor = isHighRisk ? '#FF4444' : '#FFD700';
+          const normalizedRisk = String(item.risk || '')
+            .trim()
+            .toLowerCase();
+          const isHighRisk = normalizedRisk === 'yüksek' || normalizedRisk === 'high';
+          const isLowRisk = normalizedRisk === 'düşük' || normalizedRisk === 'low';
+          const riskColor = isHighRisk ? '#FF4444' : isLowRisk ? '#1ED760' : '#FFD700';
 
           return (
             <View
@@ -327,7 +338,9 @@ export const AdditivesSection: React.FC<{
                 </Text>
 
                 <Text style={[styles.additiveRisk, { color: riskColor }]}>
-                  {item.risk || unknownLabel}
+                  {formatRiskLabel?.(typeof item.risk === 'string' ? item.risk : null) ||
+                    item.risk ||
+                    unknownLabel}
                 </Text>
               </View>
 
@@ -344,6 +357,139 @@ export const AdditivesSection: React.FC<{
         </View>
       )}
     </>
+  );
+};
+
+export const ShareSheet: React.FC<{
+  title: string;
+  subtitle: string;
+  closeLabel: string;
+  previewTitle: string;
+  previewSubtitle: string;
+  previewBody: string;
+  actions: ShareAction[];
+  onClose: () => void;
+  colors: ThemeColors;
+}> = ({
+  title,
+  subtitle,
+  closeLabel,
+  previewTitle,
+  previewSubtitle,
+  previewBody,
+  actions,
+  onClose,
+  colors,
+}) => {
+  return (
+    <View
+      style={[
+        styles.shareSheetCard,
+        {
+          backgroundColor: colors.cardElevated,
+          borderColor: withAlpha(colors.border, 'C8'),
+          shadowColor: colors.shadow,
+        },
+      ]}
+    >
+      <View style={styles.shareSheetHeader}>
+        <View style={styles.shareSheetHeaderTextWrap}>
+          <Text style={[styles.shareSheetTitle, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.shareSheetSubtitle, { color: colors.mutedText }]}>
+            {subtitle}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={[
+            styles.shareSheetCloseButton,
+            {
+              backgroundColor: withAlpha(colors.background, 'CC'),
+              borderColor: withAlpha(colors.border, 'B8'),
+            },
+          ]}
+          onPress={onClose}
+          activeOpacity={0.86}
+        >
+          <Ionicons name="close" size={18} color={colors.text} />
+        </TouchableOpacity>
+      </View>
+
+      <View
+        style={[
+          styles.sharePreviewCard,
+          {
+            backgroundColor: withAlpha(colors.backgroundMuted, 'F2'),
+            borderColor: withAlpha(colors.border, 'B8'),
+          },
+        ]}
+      >
+        <Text style={[styles.sharePreviewTitle, { color: colors.text }]} numberOfLines={2}>
+          {previewTitle}
+        </Text>
+        <Text
+          style={[styles.sharePreviewSubtitle, { color: colors.primary }]}
+          numberOfLines={1}
+        >
+          {previewSubtitle}
+        </Text>
+        <Text
+          style={[styles.sharePreviewBody, { color: colors.mutedText }]}
+          numberOfLines={4}
+        >
+          {previewBody}
+        </Text>
+      </View>
+
+      <View style={styles.shareActionsGrid}>
+        {actions.map((action) => (
+          <TouchableOpacity
+            key={action.key}
+            style={[
+              styles.shareActionCard,
+              {
+                backgroundColor: withAlpha(colors.background, 'E8'),
+                borderColor: withAlpha(colors.border, 'B8'),
+              },
+            ]}
+            onPress={action.onPress}
+            activeOpacity={0.9}
+          >
+            <View
+              style={[
+                styles.shareActionIconWrap,
+                { backgroundColor: withAlpha(action.accentColor, '18') },
+              ]}
+            >
+              <Ionicons name={action.icon} size={22} color={action.accentColor} />
+            </View>
+
+            <Text style={[styles.shareActionTitle, { color: colors.text }]}>
+              {action.title}
+            </Text>
+            <Text style={[styles.shareActionSubtitle, { color: colors.mutedText }]}>
+              {action.subtitle}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <TouchableOpacity
+        style={[
+          styles.shareCloseCta,
+          {
+            backgroundColor: withAlpha(colors.primary, '12'),
+            borderColor: withAlpha(colors.primary, '2C'),
+          },
+        ]}
+        onPress={onClose}
+        activeOpacity={0.88}
+      >
+        <Text style={[styles.shareCloseCtaText, { color: colors.primary }]}>
+          {closeLabel}
+        </Text>
+      </TouchableOpacity>
+    </View>
   );
 };
 
@@ -613,6 +759,110 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 1,
     borderStyle: 'dashed',
+  },
+  shareSheetCard: {
+    width: '100%',
+    borderRadius: 28,
+    borderWidth: 1,
+    padding: 20,
+    shadowOpacity: 0.22,
+    shadowRadius: 24,
+    shadowOffset: {
+      width: 0,
+      height: 18,
+    },
+    elevation: 14,
+  },
+  shareSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  shareSheetHeaderTextWrap: {
+    flex: 1,
+  },
+  shareSheetTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+  },
+  shareSheetSubtitle: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  shareSheetCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sharePreviewCard: {
+    marginTop: 18,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 16,
+  },
+  sharePreviewTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    lineHeight: 24,
+  },
+  sharePreviewSubtitle: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
+  },
+  sharePreviewBody: {
+    marginTop: 10,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  shareActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 18,
+  },
+  shareActionCard: {
+    width: '48%',
+    minHeight: 140,
+    borderRadius: 22,
+    borderWidth: 1,
+    padding: 16,
+  },
+  shareActionIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shareActionTitle: {
+    marginTop: 16,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  shareActionSubtitle: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  shareCloseCta: {
+    marginTop: 18,
+    minHeight: 50,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  shareCloseCtaText: {
+    fontSize: 14,
+    fontWeight: '900',
   },
   textBoxText: {
     fontSize: 14,

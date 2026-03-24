@@ -36,7 +36,7 @@ function normalizeOptionalBoolean(value?: boolean | null): boolean | undefined {
 }
 
 function normalizeProviderIds(
-  values?: Array<string | null | undefined>
+  values?: (string | null | undefined)[]
 ): string[] | undefined {
   if (!Array.isArray(values)) {
     return undefined;

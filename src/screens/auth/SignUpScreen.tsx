@@ -30,24 +30,18 @@ import {
   updateProfile,
 } from 'firebase/auth';
 
+import {
+  AUTH_RUNTIME,
+  getEmailVerificationActionSettings,
+} from '../../config/authRuntime';
 import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
+import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { ensureUserProfileDocument } from '../../services/userProfile.service';
 import { authAnalyticsService } from '../../services/authAnalytics.service';
+import { withAlpha } from '../../utils/color';
 
 WebBrowser.maybeCompleteAuthSession();
-
-const GOOGLE_CLIENT_IDS = {
-  android: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID ?? '',
-  ios: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID ?? '',
-  web: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
-};
-
-const isGoogleConfiguredForPlatform = (): boolean => {
-  if (Platform.OS === 'android') return !!GOOGLE_CLIENT_IDS.android;
-  if (Platform.OS === 'ios') return !!GOOGLE_CLIENT_IDS.ios;
-  return !!GOOGLE_CLIENT_IDS.web;
-};
 
 const randomNonce = (length = 32): string => {
   const chars =
@@ -153,16 +147,26 @@ const SocialButton: React.FC<SocialButtonProps> = ({
 
 type GoogleAuthSectionProps = {
   label: string;
+  errorTitle: string;
+  missingCredentialMessage: string;
+  failureFallbackMessage: string;
+  providerDisabledMessage: string;
 };
 
-const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({ label }) => {
+const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
+  label,
+  errorTitle,
+  missingCredentialMessage,
+  failureFallbackMessage,
+  providerDisabledMessage,
+}) => {
   const [loading, setLoading] = useState(false);
 
   const config = useMemo(
     () => ({
-      androidClientId: GOOGLE_CLIENT_IDS.android || undefined,
-      iosClientId: GOOGLE_CLIENT_IDS.ios || undefined,
-      webClientId: GOOGLE_CLIENT_IDS.web || undefined,
+      androidClientId: AUTH_RUNTIME.google.androidClientId || undefined,
+      iosClientId: AUTH_RUNTIME.google.iosClientId || undefined,
+      webClientId: AUTH_RUNTIME.google.webClientId || undefined,
     }),
     []
   );
@@ -193,7 +197,7 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({ label }) => {
             error: 'google_credential_missing',
           });
 
-          Alert.alert('Hata', 'Google kimlik doğrulama bilgisi alınamadı.');
+          Alert.alert(errorTitle, missingCredentialMessage);
           return;
         }
 
@@ -216,14 +220,25 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({ label }) => {
           errorCode: error?.code,
         });
 
-        Alert.alert('Hata', error?.message || 'Google ile devam etme başarısız oldu.');
+        const message =
+          error?.code === 'auth/operation-not-allowed'
+            ? providerDisabledMessage
+            : error?.message || failureFallbackMessage;
+
+        Alert.alert(errorTitle, message);
       } finally {
         setLoading(false);
       }
     };
 
     void handleGoogleResponse();
-  }, [response]);
+  }, [
+    errorTitle,
+    failureFallbackMessage,
+    missingCredentialMessage,
+    providerDisabledMessage,
+    response,
+  ]);
 
   return (
     <SocialButton
@@ -269,8 +284,12 @@ export const SignUpScreen: React.FC = () => {
   const [kvkkAccepted, setKvkkAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
+  const [appleAvailable, setAppleAvailable] = useState(Platform.OS === 'ios');
 
-  const isGoogleEnabled = useMemo(() => isGoogleConfiguredForPlatform(), []);
+  const isGoogleEnabled = useMemo(
+    () => AUTH_RUNTIME.google.hasActivePlatformClientId,
+    []
+  );
   const passwordStrength = useMemo(() => getPasswordStrength(password, tt), [password, tt]);
 
   const isFormValid = useMemo(() => {
@@ -288,6 +307,35 @@ export const SignUpScreen: React.FC = () => {
     const next = generateStrongPassword();
     setPassword(next);
     setConfirmPassword(next);
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+
+    if (Platform.OS !== 'ios') {
+      setAppleAvailable(false);
+      return () => {
+        mounted = false;
+      };
+    }
+
+    void AppleAuthentication.isAvailableAsync()
+      .then((available) => {
+        if (mounted) {
+          setAppleAvailable(available);
+        }
+      })
+      .catch((error) => {
+        console.warn('Apple auth availability check failed:', error);
+
+        if (mounted) {
+          setAppleAvailable(false);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const handleAppleLogin = useCallback(async () => {
@@ -315,7 +363,10 @@ export const SignUpScreen: React.FC = () => {
           error: 'apple_identity_token_missing',
         });
 
-        Alert.alert('Hata', 'Apple kimlik doğrulama bilgisi alınamadı.');
+        Alert.alert(
+          tt('error_title', 'Hata'),
+          tt('apple_auth_missing', 'Apple kimlik doğrulama bilgisi alınamadı.')
+        );
         return;
       }
 
@@ -347,11 +398,22 @@ export const SignUpScreen: React.FC = () => {
         errorCode: error?.code,
       });
 
-      Alert.alert('Hata', error?.message || 'Apple ile devam etme başarısız oldu.');
+      const message =
+        error?.code === 'auth/operation-not-allowed'
+          ? tt(
+              'apple_provider_disabled',
+              'Apple ile giriş Firebase üzerinde etkin değil.'
+            )
+          : error?.message || tt('apple_continue_failed', 'Apple ile devam etme başarısız oldu.');
+
+      Alert.alert(
+        tt('error_title', 'Hata'),
+        message
+      );
     } finally {
       setAppleLoading(false);
     }
-  }, []);
+  }, [tt]);
 
   const handleSignUp = useCallback(async () => {
     if (!isFormValid) {
@@ -408,7 +470,21 @@ export const SignUpScreen: React.FC = () => {
         },
       });
 
-      await sendEmailVerification(userCredential.user);
+      let verificationEmailSent = false;
+
+      try {
+        const actionSettings = getEmailVerificationActionSettings();
+
+        if (actionSettings) {
+          await sendEmailVerification(userCredential.user, actionSettings);
+        } else {
+          await sendEmailVerification(userCredential.user);
+        }
+
+        verificationEmailSent = true;
+      } catch (verificationError) {
+        console.error('Verification email send failed:', verificationError);
+      }
 
       await authAnalyticsService.trackSignupSucceeded({
         method: 'password',
@@ -419,7 +495,15 @@ export const SignUpScreen: React.FC = () => {
 
       Alert.alert(
         tt('success_title', 'Başarılı'),
-        tt('verification_email_sent', 'Hesabınız oluşturuldu. Doğrulama e-postası gönderildi.')
+        verificationEmailSent
+          ? tt(
+              'verification_email_sent_with_support_hint',
+              'Hesabınız oluşturuldu. Doğrulama e-postası gönderildi. Gelmezse spam klasörünü kontrol edin veya destekerenesal@gmail.com ile iletişime geçin.'
+            )
+          : tt(
+              'verification_email_send_failed_but_account_created',
+              'Hesabınız oluşturuldu ancak doğrulama e-postası şu anda gönderilemedi. Giriş yaptıktan sonra tekrar deneyin veya destekerenesal@gmail.com ile iletişime geçin.'
+            )
       );
     } catch (error: any) {
       console.error('Signup failed:', error);
@@ -463,45 +547,92 @@ export const SignUpScreen: React.FC = () => {
   ]);
 
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
-
-      <ScrollView
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+      <AmbientBackdrop colors={colors} variant="auth" />
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={styles.topRow}>
-          <TouchableOpacity
-            style={[styles.backButton, { borderColor: colors.border }]}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="chevron-back" size={20} color={colors.text} />
-          </TouchableOpacity>
-        </View>
+        <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
-        <View style={styles.hero}>
-          <Text style={[styles.title, { color: colors.primary }]}>
-            {tt('signup', 'Kayıt Ol')}
-          </Text>
-
-          <Text style={[styles.subtitle, { color: colors.text }]}>
-            {tt(
-              'signup_subtitle',
-              'Hesabınızı oluşturun ve barkod analizlerini senkronize şekilde kullanın.'
-            )}
-          </Text>
-        </View>
-
-        <View
-          style={[
-            styles.formCard,
-            { backgroundColor: colors.card, borderColor: colors.border },
-          ]}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
         >
+          <View style={styles.topRow}>
+            <TouchableOpacity
+              style={[
+                styles.backButton,
+                {
+                  borderColor: withAlpha(colors.border, 'B8'),
+                  backgroundColor: withAlpha(colors.cardElevated, 'E8'),
+                },
+              ]}
+              onPress={() => navigation.goBack()}
+            >
+              <Ionicons name="chevron-back" size={20} color={colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          <View
+            style={[
+              styles.heroCard,
+              {
+                backgroundColor: withAlpha(colors.card, 'F2'),
+                borderColor: withAlpha(colors.border, 'B8'),
+                shadowColor: colors.shadow,
+              },
+            ]}
+          >
+            <View style={styles.heroBadgeRow}>
+              <View
+                style={[
+                  styles.heroBadge,
+                  { backgroundColor: withAlpha(colors.primary, '14') },
+                ]}
+              >
+                <Text style={[styles.heroBadgeText, { color: colors.primary }]}>
+                  {tt('signup', 'Kayıt Ol')}
+                </Text>
+              </View>
+
+              <View
+                style={[
+                  styles.heroBadge,
+                  { backgroundColor: withAlpha(colors.teal, '14') },
+                ]}
+              >
+                <Text style={[styles.heroBadgeText, { color: colors.teal }]}>
+                  {Platform.OS.toUpperCase()}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.hero}>
+              <Text style={[styles.title, { color: colors.primary }]}>
+                {tt('signup', 'Kayıt Ol')}
+              </Text>
+
+              <Text style={[styles.subtitle, { color: colors.mutedText }]}>
+                {tt(
+                  'signup_subtitle',
+                  'Hesabınızı oluşturun ve barkod analizlerini senkronize şekilde kullanın.'
+                )}
+              </Text>
+            </View>
+          </View>
+
+          <View
+            style={[
+              styles.formCard,
+              {
+                backgroundColor: withAlpha(colors.cardElevated, 'F2'),
+                borderColor: withAlpha(colors.border, 'B8'),
+                shadowColor: colors.shadow,
+              },
+            ]}
+          >
           <View style={styles.row}>
             <View style={styles.half}>
               <Text style={[styles.label, { color: colors.text }]}>
@@ -512,8 +643,8 @@ export const SignUpScreen: React.FC = () => {
                   styles.input,
                   {
                     color: colors.text,
-                    borderColor: colors.border,
-                    backgroundColor: isDark ? '#181818' : '#FAFAFA',
+                    borderColor: withAlpha(colors.border, 'CC'),
+                    backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
                   },
                 ]}
                 value={firstName}
@@ -528,14 +659,14 @@ export const SignUpScreen: React.FC = () => {
                 {tt('last_name', 'Soyad')}
               </Text>
               <TextInput
-                style={[
-                  styles.input,
-                  {
-                    color: colors.text,
-                    borderColor: colors.border,
-                    backgroundColor: isDark ? '#181818' : '#FAFAFA',
-                  },
-                ]}
+              style={[
+                styles.input,
+                {
+                  color: colors.text,
+                  borderColor: withAlpha(colors.border, 'CC'),
+                  backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
+                },
+              ]}
                 value={lastName}
                 onChangeText={setLastName}
                 placeholder={tt('last_name', 'Soyad')}
@@ -552,8 +683,8 @@ export const SignUpScreen: React.FC = () => {
               styles.input,
               {
                 color: colors.text,
-                borderColor: colors.border,
-                backgroundColor: isDark ? '#181818' : '#FAFAFA',
+                borderColor: withAlpha(colors.border, 'CC'),
+                backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
               },
             ]}
             value={phone}
@@ -573,8 +704,8 @@ export const SignUpScreen: React.FC = () => {
                   styles.input,
                   {
                     color: colors.text,
-                    borderColor: colors.border,
-                    backgroundColor: isDark ? '#181818' : '#FAFAFA',
+                    borderColor: withAlpha(colors.border, 'CC'),
+                    backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
                   },
                 ]}
                 value={city}
@@ -593,8 +724,8 @@ export const SignUpScreen: React.FC = () => {
                   styles.input,
                   {
                     color: colors.text,
-                    borderColor: colors.border,
-                    backgroundColor: isDark ? '#181818' : '#FAFAFA',
+                    borderColor: withAlpha(colors.border, 'CC'),
+                    backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
                   },
                 ]}
                 value={district}
@@ -613,8 +744,8 @@ export const SignUpScreen: React.FC = () => {
               styles.input,
               {
                 color: colors.text,
-                borderColor: colors.border,
-                backgroundColor: isDark ? '#181818' : '#FAFAFA',
+                borderColor: withAlpha(colors.border, 'CC'),
+                backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
               },
             ]}
             value={address}
@@ -631,8 +762,8 @@ export const SignUpScreen: React.FC = () => {
               styles.input,
               {
                 color: colors.text,
-                borderColor: colors.border,
-                backgroundColor: isDark ? '#181818' : '#FAFAFA',
+                borderColor: withAlpha(colors.border, 'CC'),
+                backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
               },
             ]}
             value={email}
@@ -660,8 +791,8 @@ export const SignUpScreen: React.FC = () => {
             style={[
               styles.passwordWrap,
               {
-                borderColor: colors.border,
-                backgroundColor: isDark ? '#181818' : '#FAFAFA',
+                borderColor: withAlpha(colors.border, 'CC'),
+                backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
               },
             ]}
           >
@@ -708,8 +839,8 @@ export const SignUpScreen: React.FC = () => {
             style={[
               styles.passwordWrap,
               {
-                borderColor: colors.border,
-                backgroundColor: isDark ? '#181818' : '#FAFAFA',
+                borderColor: withAlpha(colors.border, 'CC'),
+                backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
               },
             ]}
           >
@@ -736,8 +867,8 @@ export const SignUpScreen: React.FC = () => {
             style={[
               styles.kvkkRow,
               {
-                backgroundColor: isDark ? '#181818' : '#FAFAFA',
-                borderColor: colors.border,
+                backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
+                borderColor: withAlpha(colors.border, 'CC'),
               },
             ]}
           >
@@ -767,6 +898,7 @@ export const SignUpScreen: React.FC = () => {
               {
                 backgroundColor: isFormValid ? colors.primary : colors.border,
                 opacity: loading ? 0.7 : 1,
+                shadowColor: colors.shadow,
               },
             ]}
             onPress={handleSignUp}
@@ -774,9 +906,9 @@ export const SignUpScreen: React.FC = () => {
             activeOpacity={0.9}
           >
             {loading ? (
-              <ActivityIndicator size="small" color="#000" />
+              <ActivityIndicator size="small" color={colors.primaryContrast} />
             ) : (
-              <Text style={styles.primaryButtonText}>
+              <Text style={[styles.primaryButtonText, { color: colors.primaryContrast }]}>
                 {tt('signup', 'Kayıt Ol')}
               </Text>
             )}
@@ -791,7 +923,22 @@ export const SignUpScreen: React.FC = () => {
           </View>
 
           {isGoogleEnabled ? (
-            <GoogleAuthSection label={tt('google_continue', 'Google ile Devam Et')} />
+            <GoogleAuthSection
+              label={tt('google_continue', 'Google ile Devam Et')}
+              errorTitle={tt('error_title', 'Hata')}
+              missingCredentialMessage={tt(
+                'google_auth_missing',
+                'Google kimlik doğrulama bilgisi alınamadı.'
+              )}
+              failureFallbackMessage={tt(
+                'google_continue_failed',
+                'Google ile devam etme başarısız oldu.'
+              )}
+              providerDisabledMessage={tt(
+                'google_provider_disabled',
+                'Google ile giriş Firebase üzerinde etkin değil.'
+              )}
+            />
           ) : (
             <SocialButton
               icon="logo-google"
@@ -803,7 +950,7 @@ export const SignUpScreen: React.FC = () => {
             />
           )}
 
-          {Platform.OS === 'ios' ? (
+          {Platform.OS === 'ios' && appleAvailable ? (
             <View style={styles.appleButtonWrap}>
               <AppleAuthentication.AppleAuthenticationButton
                 buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_UP}
@@ -826,7 +973,7 @@ export const SignUpScreen: React.FC = () => {
         </View>
 
         <View style={styles.footerRow}>
-          <Text style={[styles.footerText, { color: colors.text }]}>
+          <Text style={[styles.footerText, { color: colors.mutedText }]}>
             {tt('already_have_account', 'Zaten hesabınız var mı?')}
           </Text>
           <TouchableOpacity onPress={() => navigation.goBack()}>
@@ -837,19 +984,31 @@ export const SignUpScreen: React.FC = () => {
         </View>
 
         {!isGoogleEnabled ? (
-          <Text style={[styles.helperText, { color: colors.text }]}>
+          <Text style={[styles.helperText, { color: colors.mutedText }]}>
             {tt(
-              'social_login_not_configured',
-              'Sosyal giriş henüz yapılandırılmadı.'
+              'google_sign_in_unavailable',
+              'Google ile giriş bu build için henüz yapılandırılmadı.'
             )}
           </Text>
         ) : null}
-      </ScrollView>
-    </KeyboardAvoidingView>
+        {Platform.OS === 'ios' && !appleAvailable ? (
+          <Text style={[styles.helperText, { color: colors.mutedText }]}>
+            {tt(
+              'apple_sign_in_unavailable',
+              'Apple ile giriş bu cihazda veya test ortamında kullanılamıyor.'
+            )}
+          </Text>
+        ) : null}
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+  },
   container: {
     flex: 1,
   },
@@ -870,8 +1029,38 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignSelf: 'flex-start',
   },
+  heroCard: {
+    borderWidth: 1,
+    borderRadius: 30,
+    padding: 20,
+    marginBottom: 18,
+    shadowOpacity: 0.16,
+    shadowRadius: 28,
+    shadowOffset: {
+      width: 0,
+      height: 18,
+    },
+  },
+  heroBadgeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 18,
+    gap: 10,
+  },
+  heroBadge: {
+    minHeight: 32,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroBadgeText: {
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0.3,
+  },
   hero: {
-    marginBottom: 22,
+    marginBottom: 0,
   },
   title: {
     fontSize: 30,
@@ -886,8 +1075,14 @@ const styles = StyleSheet.create({
   },
   formCard: {
     borderWidth: 1,
-    borderRadius: 24,
-    padding: 18,
+    borderRadius: 28,
+    padding: 20,
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    shadowOffset: {
+      width: 0,
+      height: 18,
+    },
   },
   row: {
     flexDirection: 'row',
@@ -987,9 +1182,14 @@ const styles = StyleSheet.create({
     minHeight: 54,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowOpacity: 0.14,
+    shadowRadius: 18,
+    shadowOffset: {
+      width: 0,
+      height: 12,
+    },
   },
   primaryButtonText: {
-    color: '#000',
     fontSize: 15,
     fontWeight: '900',
     letterSpacing: 0.4,
