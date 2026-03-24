@@ -5,13 +5,17 @@ import {
 } from '../config/firebase';
 import { FEATURES } from '../config/features';
 import type { DiagnosticsTimestamp } from '../types/diagnostics';
+import type { MonetizationDiagnosticsSnapshot } from '../types/monetization';
 import { adService, type AdDiagnosticsSnapshot } from './adService';
 import { getAdMobRuntimeState, initializeAdMob } from './admobRuntime';
+import { entitlementService } from './entitlement.service';
 import {
   getFirebaseAccessSnapshot,
   type FirebaseAccessSnapshot,
 } from './firebaseAccess.service';
 import { resolveFirestoreRuntimeConfig } from './firestoreRuntimeConfig.service';
+import { freeScanPolicyService } from './freeScanPolicy.service';
+import { monetizationPolicyService } from './monetizationPolicy.service';
 
 type OperabilitySection<T> = {
   data: T | null;
@@ -68,6 +72,7 @@ export type OperabilityDiagnosticsSnapshot = {
   summary: OperabilityDiagnosticsSummary;
   bootstrap: OperabilitySection<StartupBootstrapSnapshot>;
   ad: OperabilitySection<AdDiagnosticsSnapshot>;
+  monetization: OperabilitySection<MonetizationDiagnosticsSnapshot>;
   remoteCache: OperabilitySection<RemoteCacheDiagnosticsSnapshot>;
   firebaseAccess: OperabilitySection<FirebaseAccessSnapshot>;
   firebaseServices: OperabilitySection<FirebaseServicesDiagnosticsSnapshot>;
@@ -186,6 +191,46 @@ async function buildRemoteCacheDiagnosticsSnapshot(options?: {
   };
 }
 
+async function buildMonetizationDiagnosticsSnapshot(options?: {
+  forceRefresh?: boolean;
+}): Promise<MonetizationDiagnosticsSnapshot> {
+  const [policy, entitlement, freeScan] = await Promise.all([
+    monetizationPolicyService.getResolvedPolicy({
+      allowStale: !options?.forceRefresh,
+      forceRefresh: Boolean(options?.forceRefresh),
+    }),
+    entitlementService.getSnapshot(),
+    freeScanPolicyService.getSnapshot(),
+  ]);
+
+  return {
+    fetchedAt: new Date().toISOString(),
+    policySource: policy.source,
+    policyVersion: policy.version,
+    annualPlanEnabled: policy.annualPlanEnabled,
+    annualPriceTry: policy.annualPriceTry,
+    annualProductId: policy.annualProductId,
+    purchaseProviderEnabled: policy.purchaseProviderEnabled,
+    restoreEnabled: policy.restoreEnabled,
+    paywallEnabled: policy.paywallEnabled,
+    freeScanLimitEnabled: policy.freeScanLimitEnabled,
+    freeScanLimitActive: freeScan.limitEnabled,
+    freeDailyScanLimit: policy.freeDailyScanLimit,
+    entitlementPlan: entitlement.plan,
+    entitlementSource: entitlement.source,
+    isPremium: entitlement.isPremium,
+    adsSuppressed: entitlement.adsSuppressed,
+    unlimitedScans: entitlement.unlimitedScans,
+    activatedAt: entitlement.activatedAt,
+    expiresAt: entitlement.expiresAt,
+    lastValidatedAt: entitlement.lastValidatedAt,
+    freeScanDateKey: freeScan.dateKey,
+    freeScanUsedCount: freeScan.usedCount,
+    freeScanRemainingCount: freeScan.remainingCount,
+    freeScanHasReachedLimit: freeScan.hasReachedLimit,
+  };
+}
+
 export async function bootstrapOperabilitySurface(options?: {
   forceRefresh?: boolean;
 }): Promise<StartupBootstrapSnapshot> {
@@ -196,7 +241,7 @@ export async function getOperabilityDiagnosticsSnapshot(options?: {
   forceRefresh?: boolean;
   flushAnalytics?: boolean;
 }): Promise<OperabilityDiagnosticsSnapshot> {
-  const [bootstrap, ad, remoteCache, firebaseAccess, firebaseServices] =
+  const [bootstrap, ad, monetization, remoteCache, firebaseAccess, firebaseServices] =
     await Promise.all([
       captureSection(() =>
         buildStartupBootstrapSnapshot({
@@ -207,6 +252,11 @@ export async function getOperabilityDiagnosticsSnapshot(options?: {
         adService.getDiagnosticsSnapshot({
           forcePolicyRefresh: Boolean(options?.forceRefresh),
           flushAnalytics: Boolean(options?.flushAnalytics),
+        })
+      ),
+      captureSection(() =>
+        buildMonetizationDiagnosticsSnapshot({
+          forceRefresh: Boolean(options?.forceRefresh),
         })
       ),
       captureSection(() =>
@@ -243,6 +293,7 @@ export async function getOperabilityDiagnosticsSnapshot(options?: {
     },
     bootstrap,
     ad,
+    monetization,
     remoteCache,
     firebaseAccess,
     firebaseServices,
