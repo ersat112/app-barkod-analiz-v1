@@ -89,3 +89,30 @@ export type FreeScanRegistrationResult = {
   reason: FreeScanRegistrationReason;
   snapshot: FreeScanAccessSnapshot;
 };
+
+export type MonetizationDiagnosticsSnapshot = {
+  fetchedAt: string;
+  policySource: MonetizationPolicySource;
+  policyVersion: number;
+  annualPlanEnabled: boolean;
+  annualPriceTry: number;
+  annualProductId: string;
+  purchaseProviderEnabled: boolean;
+  restoreEnabled: boolean;
+  paywallEnabled: boolean;
+  freeScanLimitEnabled: boolean;
+  freeScanLimitActive: boolean;
+  freeDailyScanLimit: number;
+  entitlementPlan: MonetizationPlan;
+  entitlementSource: EntitlementSource;
+  isPremium: boolean;
+  adsSuppressed: boolean;
+  unlimitedScans: boolean;
+  activatedAt: string | null;
+  expiresAt: string | null;
+  lastValidatedAt: string | null;
+  freeScanDateKey: string;
+  freeScanUsedCount: number;
+  freeScanRemainingCount: number | null;
+  freeScanHasReachedLimit: boolean;
+};
