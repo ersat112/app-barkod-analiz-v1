@@ -15,6 +15,7 @@ import {
   ensureUserProfileDocument,
   refreshCurrentUserProfile,
 } from '../services/userProfile.service';
+import { syncPurchaseProviderIdentity } from '../services/purchaseProvider.service';
 import type { AppUserProfile } from '../types/userProfile';
 
 type AuthContextValue = {
@@ -58,6 +59,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       const syncId = ++syncSequenceRef.current;
 
       try {
+        await syncPurchaseProviderIdentity(nextUser.uid);
+
         const nextProfile = await ensureUserProfileDocument(nextUser, {
           trackLogin: Boolean(options?.trackLogin),
         });
@@ -91,6 +94,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const currentUser = auth.currentUser;
 
     if (!currentUser) {
+      await syncPurchaseProviderIdentity(null);
       setProfile(null);
       setProfileError(null);
       return;
@@ -99,6 +103,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setLoading(true);
 
     try {
+      await syncPurchaseProviderIdentity(currentUser.uid);
       const nextProfile = await refreshCurrentUserProfile();
 
       if (!isMountedRef.current) {
@@ -132,6 +137,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       if (!nextUser) {
         syncSequenceRef.current += 1;
+        void syncPurchaseProviderIdentity(null);
         setProfile(null);
         setProfileError(null);
         setLoading(false);
