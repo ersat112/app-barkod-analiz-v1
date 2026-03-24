@@ -21,7 +21,8 @@
       "buildNumber": "1.0.1",
       "usesAppleSignIn": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "BarkodAnaliz, ürün barkodlarını tarayabilmek için kamera erişimine ihtiyaç duyar."
+        "NSCameraUsageDescription": "BarkodAnaliz, ürün barkodlarını tarayabilmek için kamera erişimine ihtiyaç duyar.",
+        "NSPhotoLibraryUsageDescription": "Eksik ürün bildirimi için ürün görseli seçebilmek adına fotoğraf arşivinize erişim gerekir."
       }
     },
     "android": {
@@ -45,6 +46,13 @@
         "expo-camera",
         {
           "cameraPermission": "Barkod tarama işlemi için kamera erişimi gereklidir."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Eksik ürün bildirimi için galeri görseli seçebilmek adına fotoğraf arşivinize erişim gerekir.",
+          "cameraPermission": "Eksik ürün bildirimi için ürün fotoğrafı çekebilmek adına kamera erişimi gerekir."
         }
       ],
       "expo-apple-authentication",

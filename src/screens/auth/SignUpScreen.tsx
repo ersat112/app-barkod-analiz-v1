@@ -37,8 +37,19 @@ import {
 import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
+import {
+  SearchableSelectSheet,
+  SelectionField,
+} from '../../components/ui/SearchableSelectSheet';
 import { ensureUserProfileDocument } from '../../services/userProfile.service';
 import { authAnalyticsService } from '../../services/authAnalytics.service';
+import {
+  getDistrictsByCity,
+  resolveCanonicalCity,
+  resolveCanonicalDistrict,
+  searchCities,
+} from '../../services/locationData';
+import { locationService } from '../../services/locationService';
 import { withAlpha } from '../../utils/color';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -99,6 +110,15 @@ const getPasswordStrength = (
   }
   return { label: tt('strong', 'Güçlü'), color: '#1ED760', score: 100 };
 };
+
+const mergeLocationOptions = (primary: string[], secondary: string[]): string[] =>
+  Array.from(
+    new Set(
+      [...primary, ...secondary]
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right, 'tr'));
 
 type SocialButtonProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -273,6 +293,12 @@ export const SignUpScreen: React.FC = () => {
   const [city, setCity] = useState('');
   const [district, setDistrict] = useState('');
   const [address, setAddress] = useState('');
+  const [cityPickerVisible, setCityPickerVisible] = useState(false);
+  const [districtPickerVisible, setDistrictPickerVisible] = useState(false);
+  const [cityPickerSearch, setCityPickerSearch] = useState('');
+  const [districtPickerSearch, setDistrictPickerSearch] = useState('');
+  const [districtOptions, setDistrictOptions] = useState<string[]>([]);
+  const [districtOptionsLoading, setDistrictOptionsLoading] = useState(false);
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -290,6 +316,7 @@ export const SignUpScreen: React.FC = () => {
     () => AUTH_RUNTIME.google.hasActivePlatformClientId,
     []
   );
+  const resolvedCity = useMemo(() => resolveCanonicalCity(city), [city]);
   const passwordStrength = useMemo(() => getPasswordStrength(password, tt), [password, tt]);
 
   const isFormValid = useMemo(() => {
@@ -336,6 +363,90 @@ export const SignUpScreen: React.FC = () => {
     return () => {
       mounted = false;
     };
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (!resolvedCity) {
+      setDistrictOptions([]);
+      setDistrictOptionsLoading(false);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    const localDistrictOptions = getDistrictsByCity(resolvedCity);
+    setDistrictOptions(localDistrictOptions);
+    setDistrictOptionsLoading(true);
+
+    void locationService
+      .getDistrictsByCityName(resolvedCity)
+      .then((remoteDistrictOptions) => {
+        if (!isActive) {
+          return;
+        }
+
+        setDistrictOptions(
+          mergeLocationOptions(localDistrictOptions, remoteDistrictOptions)
+        );
+      })
+      .catch((error) => {
+        console.warn('[SignUpScreen] district options load failed:', error);
+      })
+      .finally(() => {
+        if (isActive) {
+          setDistrictOptionsLoading(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [resolvedCity]);
+
+  const cityPickerItems = useMemo(() => {
+    return searchCities(cityPickerSearch).slice(0, 81);
+  }, [cityPickerSearch]);
+
+  const districtPickerItems = useMemo(() => {
+    const query = districtPickerSearch.trim().toLocaleLowerCase('tr');
+
+    if (!query) {
+      return districtOptions;
+    }
+
+    return districtOptions.filter((item) =>
+      item.toLocaleLowerCase('tr').includes(query)
+    );
+  }, [districtOptions, districtPickerSearch]);
+
+  const openCityPicker = useCallback(() => {
+    setCityPickerSearch(city);
+    setCityPickerVisible(true);
+  }, [city]);
+
+  const openDistrictPicker = useCallback(() => {
+    if (!resolvedCity) {
+      return;
+    }
+
+    setDistrictPickerSearch(district);
+    setDistrictPickerVisible(true);
+  }, [district, resolvedCity]);
+
+  const handleCitySelect = useCallback((value: string) => {
+    setCity(value);
+    setDistrict('');
+    setCityPickerSearch(value);
+    setDistrictPickerSearch('');
+    setCityPickerVisible(false);
+  }, []);
+
+  const handleDistrictSelect = useCallback((value: string) => {
+    setDistrict(value);
+    setDistrictPickerSearch(value);
+    setDistrictPickerVisible(false);
   }, []);
 
   const handleAppleLogin = useCallback(async () => {
@@ -443,6 +554,10 @@ export const SignUpScreen: React.FC = () => {
     try {
       setLoading(true);
 
+      const canonicalCity = resolveCanonicalCity(city) ?? city.trim();
+      const canonicalDistrict =
+        resolveCanonicalDistrict(canonicalCity, district) ?? district.trim();
+
       const userCredential = await createUserWithEmailAndPassword(
         auth,
         email.trim(),
@@ -462,8 +577,8 @@ export const SignUpScreen: React.FC = () => {
           lastName: lastName.trim(),
           displayName,
           phone: phone.trim(),
-          city: city.trim(),
-          district: district.trim(),
+          city: canonicalCity,
+          district: canonicalDistrict,
           address: address.trim(),
           email: email.trim(),
           kvkkAccepted: true,
@@ -696,42 +811,44 @@ export const SignUpScreen: React.FC = () => {
 
           <View style={styles.row}>
             <View style={styles.half}>
-              <Text style={[styles.label, { color: colors.text }]}>
-                {tt('city', 'Şehir')}
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    color: colors.text,
-                    borderColor: withAlpha(colors.border, 'CC'),
-                    backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
-                  },
-                ]}
+              <SelectionField
+                label={tt('city', 'Şehir')}
                 value={city}
-                onChangeText={setCity}
-                placeholder={tt('city', 'Şehir')}
-                placeholderTextColor={`${colors.text}55`}
+                placeholder={tt('select_city', 'Şehir seçin')}
+                onPress={openCityPicker}
+                colors={colors}
+                isDark={isDark}
+                helperText={tt(
+                  'city_picker_helper',
+                  'Şehrinizi seçmek için dokunun.'
+                )}
               />
             </View>
 
             <View style={styles.half}>
-              <Text style={[styles.label, { color: colors.text }]}>
-                {tt('district', 'İlçe')}
-              </Text>
-              <TextInput
-                style={[
-                  styles.input,
-                  {
-                    color: colors.text,
-                    borderColor: withAlpha(colors.border, 'CC'),
-                    backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
-                  },
-                ]}
+              <SelectionField
+                label={tt('district', 'İlçe')}
                 value={district}
-                onChangeText={setDistrict}
-                placeholder={tt('district', 'İlçe')}
-                placeholderTextColor={`${colors.text}55`}
+                placeholder={
+                  resolvedCity
+                    ? tt('select_district', 'İlçe seçin')
+                    : tt('select_city_first', 'Önce şehir seçin')
+                }
+                onPress={openDistrictPicker}
+                colors={colors}
+                isDark={isDark}
+                disabled={!resolvedCity}
+                helperText={
+                  resolvedCity
+                    ? tt(
+                        'district_picker_helper',
+                        'İlçenizi seçmek için dokunun.'
+                      )
+                    : tt(
+                        'district_helper_select_city',
+                        'İlçe önerilerini görmek için önce şehir seçin.'
+                      )
+                }
               />
             </View>
           </View>
@@ -1000,6 +1117,41 @@ export const SignUpScreen: React.FC = () => {
           </Text>
         ) : null}
         </ScrollView>
+
+        <SearchableSelectSheet
+          visible={cityPickerVisible}
+          title={tt('city_picker_title', 'Şehir seçin')}
+          searchPlaceholder={tt('city_picker_search', 'Şehir ara')}
+          searchValue={cityPickerSearch}
+          onSearchChange={setCityPickerSearch}
+          items={cityPickerItems}
+          selectedValue={resolvedCity ?? city}
+          emptyText={tt('city_picker_empty', 'Aramanıza uygun şehir bulunamadı.')}
+          onSelect={handleCitySelect}
+          onClose={() => setCityPickerVisible(false)}
+          colors={colors}
+          isDark={isDark}
+        />
+
+        <SearchableSelectSheet
+          visible={districtPickerVisible}
+          title={tt('district_picker_title', 'İlçe seçin')}
+          searchPlaceholder={tt('district_picker_search', 'İlçe ara')}
+          searchValue={districtPickerSearch}
+          onSearchChange={setDistrictPickerSearch}
+          items={districtPickerItems}
+          selectedValue={district}
+          emptyText={tt(
+            'district_picker_empty',
+            'Seçili şehir için aramanıza uygun ilçe bulunamadı.'
+          )}
+          onSelect={handleDistrictSelect}
+          onClose={() => setDistrictPickerVisible(false)}
+          colors={colors}
+          isDark={isDark}
+          loading={districtOptionsLoading}
+          loadingText={tt('district_picker_loading', 'İlçeler yükleniyor...')}
+        />
       </KeyboardAvoidingView>
     </View>
   );

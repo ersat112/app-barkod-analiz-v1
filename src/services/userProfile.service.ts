@@ -2,6 +2,10 @@ import type { User } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 import { auth, db } from '../config/firebase';
+import {
+  resolveCanonicalCity,
+  resolveCanonicalDistrict,
+} from './locationData';
 import { entitlementService } from './entitlement.service';
 import { freeScanPolicyService } from './freeScanPolicy.service';
 import { monetizationPolicyService } from './monetizationPolicy.service';
@@ -21,6 +25,11 @@ function normalizeOptionalString(value?: string | null): string | undefined {
 
   const normalized = value.trim();
   return normalized.length ? normalized : undefined;
+}
+
+function looksLikeEmail(value?: string | null): boolean {
+  const normalized = normalizeOptionalString(value);
+  return Boolean(normalized && normalized.includes('@'));
 }
 
 function normalizeEditableString(value?: string | null): string | undefined {
@@ -88,7 +97,7 @@ function buildDisplayName(params: {
 }): string | undefined {
   const explicitDisplayName = normalizeOptionalString(params.displayName);
 
-  if (explicitDisplayName) {
+  if (explicitDisplayName && !looksLikeEmail(explicitDisplayName)) {
     return explicitDisplayName;
   }
 
@@ -224,6 +233,88 @@ function compactUserMonetizationProjection(
   return Object.keys(output).length ? output : undefined;
 }
 
+function normalizeStoredMonetizationProjection(
+  input: unknown
+): UserMonetizationProjection | undefined {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+
+  const record = input as Record<string, unknown>;
+
+  return compactUserMonetizationProjection({
+    projectionVersion:
+      typeof record.projectionVersion === 'number' ? record.projectionVersion : undefined,
+    syncedAt: normalizeOptionalString(record.syncedAt as string | undefined),
+    plan: normalizeOptionalString(record.plan as string | undefined) as
+      | UserMonetizationProjection['plan']
+      | undefined,
+    isPremium:
+      typeof record.isPremium === 'boolean' ? record.isPremium : undefined,
+    adsSuppressed:
+      typeof record.adsSuppressed === 'boolean' ? record.adsSuppressed : undefined,
+    unlimitedScans:
+      typeof record.unlimitedScans === 'boolean' ? record.unlimitedScans : undefined,
+    entitlementSource: normalizeOptionalString(
+      record.entitlementSource as string | undefined
+    ) as UserMonetizationProjection['entitlementSource'] | undefined,
+    policySource: normalizeOptionalString(
+      record.policySource as string | undefined
+    ) as UserMonetizationProjection['policySource'] | undefined,
+    policyVersion:
+      typeof record.policyVersion === 'number' ? record.policyVersion : undefined,
+    annualPlanEnabled:
+      typeof record.annualPlanEnabled === 'boolean'
+        ? record.annualPlanEnabled
+        : undefined,
+    annualPriceTry:
+      typeof record.annualPriceTry === 'number' ? record.annualPriceTry : undefined,
+    annualProductId: normalizeOptionalString(
+      record.annualProductId as string | undefined
+    ),
+    purchaseProviderEnabled:
+      typeof record.purchaseProviderEnabled === 'boolean'
+        ? record.purchaseProviderEnabled
+        : undefined,
+    restoreEnabled:
+      typeof record.restoreEnabled === 'boolean' ? record.restoreEnabled : undefined,
+    paywallEnabled:
+      typeof record.paywallEnabled === 'boolean' ? record.paywallEnabled : undefined,
+    freeScanLimitEnabled:
+      typeof record.freeScanLimitEnabled === 'boolean'
+        ? record.freeScanLimitEnabled
+        : undefined,
+    freeScanLimitActive:
+      typeof record.freeScanLimitActive === 'boolean'
+        ? record.freeScanLimitActive
+        : undefined,
+    freeDailyScanLimit:
+      typeof record.freeDailyScanLimit === 'number'
+        ? record.freeDailyScanLimit
+        : undefined,
+    freeScanDateKey: normalizeOptionalString(
+      record.freeScanDateKey as string | undefined
+    ),
+    freeScanUsedCount:
+      typeof record.freeScanUsedCount === 'number'
+        ? record.freeScanUsedCount
+        : undefined,
+    freeScanRemainingCount:
+      typeof record.freeScanRemainingCount === 'number' ||
+      record.freeScanRemainingCount === null
+        ? (record.freeScanRemainingCount as number | null)
+        : undefined,
+    freeScanHasReachedLimit:
+      typeof record.freeScanHasReachedLimit === 'boolean'
+        ? record.freeScanHasReachedLimit
+        : undefined,
+    activatedAt: normalizeOptionalString(record.activatedAt as string | undefined) ?? null,
+    expiresAt: normalizeOptionalString(record.expiresAt as string | undefined) ?? null,
+    lastValidatedAt:
+      normalizeOptionalString(record.lastValidatedAt as string | undefined) ?? null,
+  });
+}
+
 function compactUserProfile(input: UserProfileInput): AppUserProfile {
   const output: AppUserProfile = {};
 
@@ -257,6 +348,46 @@ function compactUserProfile(input: UserProfileInput): AppUserProfile {
   assign('monetization', compactUserMonetizationProjection(input.monetization));
 
   return output;
+}
+
+function normalizeStoredUserProfile(input: unknown): AppUserProfile | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const firstName = normalizeOptionalString(record.firstName as string | undefined);
+  const lastName = normalizeOptionalString(record.lastName as string | undefined);
+  const rawCity = normalizeOptionalString(record.city as string | undefined);
+  const rawDistrict = normalizeOptionalString(record.district as string | undefined);
+  const city = resolveCanonicalCity(rawCity) ?? rawCity;
+  const district = resolveCanonicalDistrict(city, rawDistrict) ?? rawDistrict;
+
+  return compactUserProfile({
+    firstName,
+    lastName,
+    displayName: buildDisplayName({
+      displayName: normalizeOptionalString(record.displayName as string | undefined),
+      firstName,
+      lastName,
+    }),
+    phone: normalizeOptionalString(record.phone as string | undefined),
+    city,
+    district,
+    address: normalizeOptionalString(record.address as string | undefined),
+    email: normalizeOptionalString(record.email as string | undefined),
+    photoURL: normalizeOptionalString(record.photoURL as string | undefined),
+    providerIds: normalizeProviderIds(record.providerIds as (string | null | undefined)[]),
+    emailVerified:
+      typeof record.emailVerified === 'boolean' ? record.emailVerified : undefined,
+    kvkkAccepted:
+      typeof record.kvkkAccepted === 'boolean' ? record.kvkkAccepted : undefined,
+    createdAt: normalizeOptionalString(record.createdAt as string | undefined),
+    updatedAt: normalizeOptionalString(record.updatedAt as string | undefined),
+    lastLoginAt: normalizeOptionalString(record.lastLoginAt as string | undefined),
+    lastSeenAt: normalizeOptionalString(record.lastSeenAt as string | undefined),
+    monetization: normalizeStoredMonetizationProjection(record.monetization),
+  });
 }
 
 async function buildMonetizationProjectionForUser(
@@ -320,7 +451,7 @@ export async function getUserProfile(uid: string): Promise<AppUserProfile | null
     return null;
   }
 
-  return snapshot.data() as AppUserProfile;
+  return normalizeStoredUserProfile(snapshot.data());
 }
 
 export async function getCurrentUserProfile(): Promise<AppUserProfile | null> {
@@ -408,6 +539,12 @@ export async function refreshCurrentUserProfile(): Promise<AppUserProfile | null
 
   if (!currentUser) {
     return null;
+  }
+
+  const existingProfile = await getUserProfile(currentUser.uid);
+
+  if (existingProfile) {
+    return existingProfile;
   }
 
   return ensureUserProfileDocument(currentUser, {

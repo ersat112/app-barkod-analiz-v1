@@ -91,9 +91,44 @@ export const TURKEY_CITIES: string[] = Object.keys(TURKEY_DATA).sort((a, b) =>
   a.localeCompare(b, 'tr')
 );
 
+export const normalizeLocationLookup = (value?: string | null): string =>
+  String(value || '').trim().toLocaleLowerCase('tr');
+
+export const resolveCanonicalCity = (value?: string | null): string | null => {
+  const normalized = normalizeLocationLookup(value);
+
+  if (!normalized) {
+    return null;
+  }
+
+  return (
+    TURKEY_CITIES.find(
+      (city) => city.toLocaleLowerCase('tr') === normalized
+    ) ?? null
+  );
+};
+
 export const getDistrictsByCity = (city?: string): string[] => {
   if (!city) return [];
   return [...(TURKEY_DATA[city] || [])].sort((a, b) => a.localeCompare(b, 'tr'));
+};
+
+export const resolveCanonicalDistrict = (
+  city?: string | null,
+  district?: string | null
+): string | null => {
+  const normalizedCity = resolveCanonicalCity(city);
+  const normalizedDistrict = normalizeLocationLookup(district);
+
+  if (!normalizedCity || !normalizedDistrict) {
+    return null;
+  }
+
+  return (
+    getDistrictsByCity(normalizedCity).find(
+      (item) => item.toLocaleLowerCase('tr') === normalizedDistrict
+    ) ?? null
+  );
 };
 
 export const isValidCity = (city?: string): boolean => {

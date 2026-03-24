@@ -41,8 +41,8 @@ export const FEATURES = Object.freeze({
     sqliteCacheEnabled: true,
     sqliteReadEnabled: true,
     sqliteWriteEnabled: true,
-    firestoreReadEnabled: false,
-    firestoreWriteEnabled: false,
+    firestoreReadEnabled: true,
+    firestoreWriteEnabled: true,
     remoteParallelFetchEnabled: true,
   }),
   firebase: Object.freeze({
@@ -54,7 +54,7 @@ export const FEATURES = Object.freeze({
     diagnosticsLoggingEnabled: __DEV__,
   }),
   missingProduct: Object.freeze({
-    firestoreContributionSyncEnabled: false,
+    firestoreContributionSyncEnabled: true,
   }),
   productPresentation: Object.freeze({
     gs1OriginLabelFixEnabled: true,
@@ -86,7 +86,7 @@ export const FEATURES = Object.freeze({
   }),
   history: Object.freeze({
     paginationEnabled: false,
-    firestoreSyncEnabled: false,
+    firestoreSyncEnabled: true,
   }),
   screens: Object.freeze({
     modularizationEnabled: false,

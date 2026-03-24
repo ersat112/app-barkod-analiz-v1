@@ -94,16 +94,12 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const currentUser = auth.currentUser;
 
     if (!currentUser) {
-      await syncPurchaseProviderIdentity(null);
       setProfile(null);
       setProfileError(null);
       return;
     }
 
-    setLoading(true);
-
     try {
-      await syncPurchaseProviderIdentity(currentUser.uid);
       const nextProfile = await refreshCurrentUserProfile();
 
       if (!isMountedRef.current) {
@@ -124,8 +120,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       if (!isMountedRef.current) {
         return;
       }
-
-      setLoading(false);
     }
   }, []);
 

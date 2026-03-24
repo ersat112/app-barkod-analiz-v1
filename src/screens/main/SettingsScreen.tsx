@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -26,11 +26,17 @@ import { useTheme, type ThemeColors } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { AdBanner } from '../../components/AdBanner';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
+import {
+  SearchableSelectSheet,
+  SelectionField,
+} from '../../components/ui/SearchableSelectSheet';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useOperabilityDiagnostics } from '../../hooks/useOperabilityDiagnostics';
 import { useSettingsProfileEditor } from '../../hooks/useSettingsProfileEditor';
 import { useMonetizationStatus } from '../../hooks/useMonetizationStatus';
 import { analyticsService } from '../../services/analytics.service';
+import { getDistrictsByCity, searchCities } from '../../services/locationData';
+import { locationService } from '../../services/locationService';
 import { clearMonetizationFlowLogs } from '../../services/purchaseFlowLog.service';
 import {
   buildAvatarLetter,
@@ -58,6 +64,8 @@ type ProfileFieldProps = {
   colors: ThemeColors;
   isDark: boolean;
   multiline?: boolean;
+  editable?: boolean;
+  helperText?: string;
 };
 
 type PremiumCardProps = {
@@ -132,6 +140,8 @@ const ProfileField: React.FC<ProfileFieldProps> = ({
   colors,
   isDark,
   multiline = false,
+  editable = true,
+  helperText,
 }) => {
   return (
     <View style={styles.profileFieldGroup}>
@@ -142,6 +152,7 @@ const ProfileField: React.FC<ProfileFieldProps> = ({
         placeholder={placeholder}
         placeholderTextColor={`${colors.text}55`}
         multiline={multiline}
+        editable={editable}
         textAlignVertical={multiline ? 'top' : 'center'}
         style={[
           styles.profileInput,
@@ -149,10 +160,17 @@ const ProfileField: React.FC<ProfileFieldProps> = ({
           {
             color: colors.text,
             borderColor: withAlpha(colors.border, 'CC'),
-            backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4'),
+            backgroundColor: editable
+              ? withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4')
+              : withAlpha(colors.backgroundMuted, isDark ? '72' : 'C8'),
           },
         ]}
       />
+      {helperText ? (
+        <Text style={[styles.profileFieldHelper, { color: colors.mutedText }]}>
+          {helperText}
+        </Text>
+      ) : null}
     </View>
   );
 };
@@ -310,6 +328,16 @@ function formatOptionalText(value?: string | null): string {
   }
 
   return '-';
+}
+
+function mergeLocationOptions(primary: string[], secondary: string[]): string[] {
+  return Array.from(
+    new Set(
+      [...primary, ...secondary]
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  ).sort((left, right) => left.localeCompare(right, 'tr'));
 }
 
 function formatTryPrice(value: number): string {
@@ -477,10 +505,13 @@ export const SettingsScreen: React.FC = () => {
     isEditing,
     isSaving,
     hasChanges,
+    resolvedCity,
     saveError,
     startEditing,
     cancelEditing,
     setField,
+    selectCity,
+    selectDistrict,
     save,
   } = useSettingsProfileEditor();
 
@@ -493,8 +524,63 @@ export const SettingsScreen: React.FC = () => {
   );
 
   const [refreshing, setRefreshing] = useState(false);
+  const [cityPickerVisible, setCityPickerVisible] = useState(false);
+  const [districtPickerVisible, setDistrictPickerVisible] = useState(false);
+  const [cityPickerSearch, setCityPickerSearch] = useState('');
+  const [districtPickerSearch, setDistrictPickerSearch] = useState('');
+  const [districtOptions, setDistrictOptions] = useState<string[]>([]);
+  const [districtOptionsLoading, setDistrictOptionsLoading] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [flowLogResetting, setFlowLogResetting] = useState(false);
+
+  useEffect(() => {
+    if (!isEditing) {
+      setCityPickerVisible(false);
+      setDistrictPickerVisible(false);
+      setCityPickerSearch('');
+      setDistrictPickerSearch('');
+    }
+  }, [isEditing]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (!resolvedCity) {
+      setDistrictOptions([]);
+      setDistrictOptionsLoading(false);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    const localDistrictOptions = getDistrictsByCity(resolvedCity);
+    setDistrictOptions(localDistrictOptions);
+    setDistrictOptionsLoading(true);
+
+    void locationService
+      .getDistrictsByCityName(resolvedCity)
+      .then((remoteDistrictOptions) => {
+        if (!isActive) {
+          return;
+        }
+
+        setDistrictOptions(
+          mergeLocationOptions(localDistrictOptions, remoteDistrictOptions)
+        );
+      })
+      .catch((error) => {
+        console.warn('[SettingsScreen] district options load failed:', error);
+      })
+      .finally(() => {
+        if (isActive) {
+          setDistrictOptionsLoading(false);
+        }
+      });
+
+    return () => {
+      isActive = false;
+    };
+  }, [resolvedCity]);
 
   const handleOpenPaywall = useCallback(() => {
     void analyticsService.track(
@@ -713,6 +799,55 @@ export const SettingsScreen: React.FC = () => {
 
     return city || district || tt('location_not_set', 'Konum bilgisi eklenmemiş');
   }, [profile?.city, profile?.district, tt]);
+
+  const cityPickerItems = useMemo(() => {
+    return searchCities(cityPickerSearch).slice(0, 81);
+  }, [cityPickerSearch]);
+
+  const districtPickerItems = useMemo(() => {
+    const query = districtPickerSearch.trim().toLocaleLowerCase('tr');
+
+    if (!query) {
+      return districtOptions;
+    }
+
+    return districtOptions.filter((item) =>
+      item.toLocaleLowerCase('tr').includes(query)
+    );
+  }, [districtOptions, districtPickerSearch]);
+
+  const openCityPicker = useCallback(() => {
+    setCityPickerSearch(draft.city);
+    setCityPickerVisible(true);
+  }, [draft.city]);
+
+  const openDistrictPicker = useCallback(() => {
+    if (!resolvedCity) {
+      return;
+    }
+
+    setDistrictPickerSearch(draft.district);
+    setDistrictPickerVisible(true);
+  }, [draft.district, resolvedCity]);
+
+  const handleCitySelect = useCallback(
+    (value: string) => {
+      selectCity(value);
+      setCityPickerSearch(value);
+      setDistrictPickerSearch('');
+      setCityPickerVisible(false);
+    },
+    [selectCity]
+  );
+
+  const handleDistrictSelect = useCallback(
+    (value: string) => {
+      selectDistrict(value);
+      setDistrictPickerSearch(value);
+      setDistrictPickerVisible(false);
+    },
+    [selectDistrict]
+  );
 
   const premiumTitle = monetization.entitlement?.isPremium
     ? tt('premium_active', 'Premium aktif')
@@ -1009,24 +1144,44 @@ export const SettingsScreen: React.FC = () => {
 
             <View style={styles.profileFieldRow}>
               <View style={styles.profileFieldHalf}>
-                <ProfileField
+                <SelectionField
                   label={tt('city', 'Şehir')}
                   value={draft.city}
-                  placeholder={tt('city', 'Şehir')}
-                  onChangeText={(value) => setField('city', value)}
+                  placeholder={tt('select_city', 'Şehir seçin')}
+                  onPress={openCityPicker}
                   colors={colors}
                   isDark={isDark}
+                  helperText={tt(
+                    'city_picker_helper',
+                    'Şehrinizi seçmek için dokunun.'
+                  )}
                 />
               </View>
 
               <View style={styles.profileFieldHalf}>
-                <ProfileField
+                <SelectionField
                   label={tt('district', 'İlçe')}
                   value={draft.district}
-                  placeholder={tt('district', 'İlçe')}
-                  onChangeText={(value) => setField('district', value)}
+                  placeholder={
+                    resolvedCity
+                      ? tt('select_district', 'İlçe seçin')
+                      : tt('select_city_first', 'Önce şehir seçin')
+                  }
+                  onPress={openDistrictPicker}
                   colors={colors}
                   isDark={isDark}
+                  disabled={!resolvedCity}
+                  helperText={
+                    resolvedCity
+                      ? tt(
+                          'district_picker_helper',
+                          'İlçenizi seçmek için dokunun.'
+                        )
+                      : tt(
+                          'district_helper_select_city',
+                          'İlçe önerilerini görmek için önce şehir seçin.'
+                        )
+                  }
                 />
               </View>
             </View>
@@ -2663,6 +2818,41 @@ export const SettingsScreen: React.FC = () => {
         </Text>
       </View>
       </ScrollView>
+
+      <SearchableSelectSheet
+        visible={cityPickerVisible}
+        title={tt('city_picker_title', 'Şehir seçin')}
+        searchPlaceholder={tt('city_picker_search', 'Şehir ara')}
+        searchValue={cityPickerSearch}
+        onSearchChange={setCityPickerSearch}
+        items={cityPickerItems}
+        selectedValue={resolvedCity ?? draft.city}
+        emptyText={tt('city_picker_empty', 'Aramanıza uygun şehir bulunamadı.')}
+        onSelect={handleCitySelect}
+        onClose={() => setCityPickerVisible(false)}
+        colors={colors}
+        isDark={isDark}
+      />
+
+      <SearchableSelectSheet
+        visible={districtPickerVisible}
+        title={tt('district_picker_title', 'İlçe seçin')}
+        searchPlaceholder={tt('district_picker_search', 'İlçe ara')}
+        searchValue={districtPickerSearch}
+        onSearchChange={setDistrictPickerSearch}
+        items={districtPickerItems}
+        selectedValue={draft.district}
+        emptyText={tt(
+          'district_picker_empty',
+          'Seçili şehir için aramanıza uygun ilçe bulunamadı.'
+        )}
+        onSelect={handleDistrictSelect}
+        onClose={() => setDistrictPickerVisible(false)}
+        colors={colors}
+        isDark={isDark}
+        loading={districtOptionsLoading}
+        loadingText={tt('district_picker_loading', 'İlçeler yükleniyor...')}
+      />
     </View>
   );
 };
@@ -2957,6 +3147,12 @@ const styles = StyleSheet.create({
   profileFieldGroup: {
     marginTop: 16,
   },
+  profileFieldHelper: {
+    marginTop: 8,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '600',
+  },
   profileFieldLabel: {
     fontSize: 12,
     fontWeight: '800',
@@ -2974,6 +3170,22 @@ const styles = StyleSheet.create({
   },
   profileInputMultiline: {
     minHeight: 92,
+  },
+  profileSuggestionList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  profileSuggestionChip: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  profileSuggestionChipText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   profileSaveErrorText: {
     marginTop: 12,

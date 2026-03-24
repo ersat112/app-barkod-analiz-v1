@@ -3,6 +3,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MISSING_PRODUCT_DRAFTS_STORAGE_KEY } from '../config/features';
 
 export type MissingProductType = 'food' | 'beauty' | 'unknown';
+export type MissingProductImageStatus =
+  | 'none'
+  | 'pending_upload'
+  | 'uploaded'
+  | 'upload_failed';
 export type MissingProductDraftStatus =
   | 'draft'
   | 'queued'
@@ -29,6 +34,10 @@ export type MissingProductDraft = {
   ingredients_text: string;
   notes: string;
   type: MissingProductType;
+  image_local_uri?: string;
+  image_url?: string;
+  image_status: MissingProductImageStatus;
+  image_upload_error?: string;
   created_at: string;
   updated_at: string;
   status: MissingProductDraftStatus;
@@ -51,6 +60,7 @@ export type CreateMissingProductDraftInput = {
   ingredients_text: string;
   notes: string;
   type: MissingProductType;
+  image_local_uri?: string;
   entry_point?: MissingProductEntryPoint;
   source_screen?: string;
 };
@@ -124,6 +134,13 @@ const normalizeDraft = (value: unknown): MissingProductDraft | null => {
       ? raw.review_queue_status
       : 'local_draft';
 
+  const imageStatus: MissingProductImageStatus =
+    raw.image_status === 'pending_upload' ||
+    raw.image_status === 'uploaded' ||
+    raw.image_status === 'upload_failed'
+      ? raw.image_status
+      : 'none';
+
   return {
     localId:
       typeof raw.localId === 'string' && raw.localId.trim()
@@ -137,6 +154,10 @@ const normalizeDraft = (value: unknown): MissingProductDraft | null => {
     ingredients_text: safeText(raw.ingredients_text),
     notes: safeText(raw.notes),
     type: typeValue,
+    image_local_uri: safeText(raw.image_local_uri) || undefined,
+    image_url: safeText(raw.image_url) || undefined,
+    image_status: imageStatus,
+    image_upload_error: safeText(raw.image_upload_error) || undefined,
     created_at: createdAt,
     updated_at: updatedAt,
     status,
@@ -200,6 +221,8 @@ export const saveMissingProductDraft = async (
     ingredients_text: safeText(input.ingredients_text),
     notes: safeText(input.notes),
     type: input.type,
+    image_local_uri: safeText(input.image_local_uri) || undefined,
+    image_status: safeText(input.image_local_uri) ? 'pending_upload' : 'none',
     created_at: now,
     updated_at: now,
     status: 'draft',
@@ -251,6 +274,25 @@ export const updateMissingProductDraft = async (
       patch.review_queue_status === 'local_draft'
         ? patch.review_queue_status
         : current.review_queue_status,
+    image_local_uri:
+      typeof patch.image_local_uri === 'string'
+        ? safeText(patch.image_local_uri) || undefined
+        : current.image_local_uri,
+    image_url:
+      typeof patch.image_url === 'string'
+        ? safeText(patch.image_url) || undefined
+        : current.image_url,
+    image_status:
+      patch.image_status === 'none' ||
+      patch.image_status === 'pending_upload' ||
+      patch.image_status === 'uploaded' ||
+      patch.image_status === 'upload_failed'
+        ? patch.image_status
+        : current.image_status,
+    image_upload_error:
+      typeof patch.image_upload_error === 'string'
+        ? safeText(patch.image_upload_error) || undefined
+        : current.image_upload_error,
     updated_at: new Date().toISOString(),
   };
 

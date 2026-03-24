@@ -22,20 +22,14 @@ const normalizeText = (value?: string | null): string => {
   return value.trim();
 };
 
-const formatEmailLocalPart = (value?: string | null): string => {
+const looksLikeEmail = (value?: string | null): boolean => {
   const normalized = normalizeText(value);
 
   if (!normalized) {
-    return '';
+    return false;
   }
 
-  return normalized
-    .replace(/[._-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .split(' ')
-    .filter((word) => word.length > 0)
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
-    .join(' ');
+  return normalized.includes('@');
 };
 
 export const buildUserDisplayName = ({
@@ -53,16 +47,8 @@ export const buildUserDisplayName = ({
   const explicitDisplayName =
     normalizeText(profile?.displayName) || normalizeText(user?.displayName);
 
-  if (explicitDisplayName) {
+  if (explicitDisplayName && !looksLikeEmail(explicitDisplayName)) {
     return explicitDisplayName;
-  }
-
-  const emailLocalPart = formatEmailLocalPart(
-    profile?.email || user?.email || undefined
-  );
-
-  if (emailLocalPart) {
-    return emailLocalPart;
   }
 
   return fallback;

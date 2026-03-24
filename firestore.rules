@@ -29,13 +29,23 @@ service cloud.firestore {
         || get(firestoreRolloutPath()).data.allowClientAnalyticsWrites == true;
     }
 
+    function allowUserScanHistoryWrites() {
+      return firestoreRolloutExists()
+        && get(firestoreRolloutPath()).data.allowUserScanHistoryWrites == true;
+    }
+
     function allowMissingProductContributionWrites() {
       return firestoreRolloutExists()
         && get(firestoreRolloutPath()).data.allowMissingProductContributionWrites == true;
     }
 
     function allowRuntimeConfigRead(docId) {
-      return isSignedIn() && (docId == 'ad_policy' || docId == 'firestore_rollout');
+      return isSignedIn()
+        && (
+          docId == 'ad_policy'
+          || docId == 'firestore_rollout'
+          || docId == 'monetization_policy'
+        );
     }
 
     function isValidBarcodeId(barcode) {
@@ -68,6 +78,10 @@ service cloud.firestore {
       return value == null || value is bool;
     }
 
+    function isOptionalMap(value) {
+      return value == null || value is map;
+    }
+
     function isOptionalStringList(value) {
       return value == null || value is list;
     }
@@ -81,26 +95,12 @@ service cloud.firestore {
     }
 
     function isValidSharedCachePayload(data, barcode) {
-      return data.keys().hasOnly([
-          'barcode',
-          'cacheStatus',
-          'sourceName',
-          'productType',
-          'productPayload',
-          'schemaVersion',
-          'fetchedAt',
-          'expiresAt',
-          'createdAt',
-          'updatedAt',
-          'writerUid',
-          'writerPlatform'
-        ])
-        && data.barcode == barcode
+      return data.barcode == barcode
         && isValidBarcodeId(data.barcode)
         && isValidSharedCacheStatus(data.cacheStatus)
         && isOptionalString(data.sourceName)
         && isOptionalString(data.productType)
-        && (data.productPayload == null || data.productPayload is map)
+        && isOptionalMap(data.productPayload)
         && (data.schemaVersion is int || data.schemaVersion is float)
         && (data.fetchedAt is int || data.fetchedAt is float)
         && (data.expiresAt is int || data.expiresAt is float)
@@ -143,26 +143,118 @@ service cloud.firestore {
 
     function isValidMissingProductContribution(data) {
       return data.keys().hasOnly([
+          'localId',
           'barcode',
-          'status',
           'name',
           'brand',
-          'category',
+          'country',
+          'origin',
+          'ingredients_text',
           'notes',
-          'createdAt',
-          'updatedAt',
+          'type',
+          'image_url',
+          'image_status',
+          'source',
+          'source_screen',
+          'entry_point',
+          'review_status',
+          'review_queue_status',
+          'moderation_state',
+          'moderation_version',
+          'contribution_version',
+          'platform',
+          'client_created_at',
+          'client_updated_at',
+          'client_last_sync_attempt_at',
+          'local_status',
+          'submitted_at',
+          'updated_at',
           'authorUid'
         ])
         && isValidBarcodeId(data.barcode)
-        && data.status is string
+        && isOptionalString(data.localId)
         && isOptionalString(data.name)
         && isOptionalString(data.brand)
-        && isOptionalString(data.category)
+        && isOptionalString(data.country)
+        && isOptionalString(data.origin)
+        && isOptionalString(data.ingredients_text)
         && isOptionalString(data.notes)
-        && isOptionalTimestamp(data.createdAt)
-        && isOptionalTimestamp(data.updatedAt)
+        && isOptionalString(data.image_url)
+        && data.type is string
+        && (data.type == 'food' || data.type == 'beauty' || data.type == 'unknown')
+        && data.image_status is string
+        && (
+          data.image_status == 'none'
+          || data.image_status == 'pending_upload'
+          || data.image_status == 'uploaded'
+        )
+        && data.source is string
+        && data.source_screen is string
+        && data.entry_point is string
+        && (data.entry_point == 'detail_not_found' || data.entry_point == 'manual')
+        && data.review_status is string
+        && (
+          data.review_status == 'pending'
+          || data.review_status == 'approved'
+          || data.review_status == 'rejected'
+        )
+        && data.review_queue_status is string
+        && (
+          data.review_queue_status == 'local_draft'
+          || data.review_queue_status == 'queued_remote'
+          || data.review_queue_status == 'synced_remote'
+        )
+        && data.moderation_state is string
+        && (data.moderation_version is int || data.moderation_version is float)
+        && (data.contribution_version is int || data.contribution_version is float)
+        && isAllowedPlatform(data.platform)
+        && isOptionalStringOrTimestamp(data.client_created_at)
+        && isOptionalStringOrTimestamp(data.client_updated_at)
+        && isOptionalStringOrTimestamp(data.client_last_sync_attempt_at)
+        && isOptionalString(data.local_status)
+        && isOptionalTimestamp(data.submitted_at)
+        && isOptionalTimestamp(data.updated_at)
         && data.authorUid is string
         && data.authorUid == request.auth.uid;
+    }
+
+    function isValidScanHistoryEntry(data) {
+      return data.keys().hasOnly([
+          'barcode',
+          'name',
+          'brand',
+          'image_url',
+          'type',
+          'source_name',
+          'score',
+          'grade',
+          'risk_level',
+          'country',
+          'origin',
+          'scanned_at',
+          'synced_at',
+          'client_enqueued_at'
+        ])
+        && isValidBarcodeId(data.barcode)
+        && isOptionalString(data.name)
+        && isOptionalString(data.brand)
+        && isOptionalString(data.image_url)
+        && data.type is string
+        && (data.type == 'food' || data.type == 'beauty')
+        && isOptionalString(data.source_name)
+        && (data.score is int || data.score is float)
+        && isOptionalString(data.grade)
+        && data.risk_level is string
+        && (
+          data.risk_level == 'low'
+          || data.risk_level == 'medium'
+          || data.risk_level == 'high'
+        )
+        && isOptionalString(data.country)
+        && isOptionalString(data.origin)
+        && isOptionalStringOrTimestamp(data.scanned_at)
+        && isOptionalTimestamp(data.synced_at)
+        && isOptionalStringOrTimestamp(data.client_enqueued_at);
     }
 
     match /users/{userId} {
@@ -170,24 +262,6 @@ service cloud.firestore {
 
       allow create, update: if isSignedIn()
         && request.auth.uid == userId
-        && request.resource.data.keys().hasOnly([
-          'firstName',
-          'lastName',
-          'displayName',
-          'phone',
-          'city',
-          'district',
-          'address',
-          'email',
-          'photoURL',
-          'providerIds',
-          'emailVerified',
-          'kvkkAccepted',
-          'createdAt',
-          'updatedAt',
-          'lastLoginAt',
-          'lastSeenAt'
-        ])
         && isOptionalString(request.resource.data.firstName)
         && isOptionalString(request.resource.data.lastName)
         && isOptionalString(request.resource.data.displayName)
@@ -200,12 +274,24 @@ service cloud.firestore {
         && isOptionalStringList(request.resource.data.providerIds)
         && isOptionalBoolean(request.resource.data.emailVerified)
         && isOptionalBoolean(request.resource.data.kvkkAccepted)
+        && isOptionalMap(request.resource.data.monetization)
         && isOptionalStringOrTimestamp(request.resource.data.createdAt)
         && isOptionalStringOrTimestamp(request.resource.data.updatedAt)
         && isOptionalStringOrTimestamp(request.resource.data.lastLoginAt)
         && isOptionalStringOrTimestamp(request.resource.data.lastSeenAt);
 
       allow delete: if false;
+
+      match /scan_history/{scanId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+
+        allow create, update: if isSignedIn()
+          && request.auth.uid == userId
+          && allowUserScanHistoryWrites()
+          && isValidScanHistoryEntry(request.resource.data);
+
+        allow delete: if false;
+      }
     }
 
     match /runtime_config/{docId} {
@@ -220,8 +306,7 @@ service cloud.firestore {
 
       allow create, update: if isSignedIn()
         && isValidBarcodeId(barcode)
-        && allowClientSharedCacheWrites()
-        && isValidSharedCachePayload(request.resource.data, barcode);
+        && allowClientSharedCacheWrites();
 
       allow delete: if false;
     }
@@ -237,7 +322,7 @@ service cloud.firestore {
     }
 
     match /missing_product_contributions/{docId} {
-      allow create: if isSignedIn()
+      allow create, update: if isSignedIn()
         && allowMissingProductContributionWrites()
         && isValidMissingProductContribution(request.resource.data);
 

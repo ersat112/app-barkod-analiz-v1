@@ -4,6 +4,10 @@ import { useAuth } from '../context/AuthContext';
 import { updateCurrentUserProfile } from '../services/userProfile.service';
 import { authAnalyticsService } from '../services/authAnalytics.service';
 import { calculateProfileCompletion } from '../services/profileCompletion.service';
+import {
+  resolveCanonicalCity,
+  resolveCanonicalDistrict,
+} from '../services/locationData';
 
 export type SettingsProfileDraft = {
   firstName: string;
@@ -104,6 +108,10 @@ export const useSettingsProfileEditor = () => {
     return !areDraftsEqual(draft, sourceDraft);
   }, [draft, sourceDraft]);
 
+  const resolvedCity = useMemo(() => {
+    return resolveCanonicalCity(draft.city);
+  }, [draft.city]);
+
   const startEditing = useCallback(() => {
     setDraft(sourceDraft);
     setSaveError(null);
@@ -118,13 +126,46 @@ export const useSettingsProfileEditor = () => {
 
   const setField = useCallback(
     (field: keyof SettingsProfileDraft, value: string) => {
-      setDraft((current) => ({
-        ...current,
-        [field]: value,
-      }));
+      setDraft((current) => {
+        if (field === 'city') {
+          const nextCity = value;
+          const nextResolvedCity = resolveCanonicalCity(nextCity);
+          const nextDistrict = nextResolvedCity
+            ? resolveCanonicalDistrict(nextResolvedCity, current.district) ??
+              (current.district.trim() ? '' : current.district)
+            : current.district;
+
+          return {
+            ...current,
+            city: nextCity,
+            district: nextDistrict,
+          };
+        }
+
+        return {
+          ...current,
+          [field]: value,
+        };
+      });
     },
     []
   );
+
+  const selectCity = useCallback((value: string) => {
+    setDraft((current) => ({
+      ...current,
+      city: value,
+      district:
+        resolveCanonicalDistrict(value, current.district) ?? '',
+    }));
+  }, []);
+
+  const selectDistrict = useCallback((value: string) => {
+    setDraft((current) => ({
+      ...current,
+      district: value,
+    }));
+  }, []);
 
   const save = useCallback(async (): Promise<boolean> => {
     if (!user) {
@@ -139,31 +180,41 @@ export const useSettingsProfileEditor = () => {
     }
 
     const changedFields = getChangedFields(sourceDraft, draft);
+    const nextDraft: SettingsProfileDraft = {
+      firstName: draft.firstName.trim(),
+      lastName: draft.lastName.trim(),
+      phone: draft.phone.trim(),
+      city: resolveCanonicalCity(draft.city) ?? draft.city.trim(),
+      district:
+        resolveCanonicalDistrict(draft.city, draft.district) ?? draft.district.trim(),
+      address: draft.address.trim(),
+    };
 
     try {
       setIsSaving(true);
       setSaveError(null);
 
-      await updateCurrentUserProfile({
-        firstName: draft.firstName,
-        lastName: draft.lastName,
-        phone: draft.phone,
-        city: draft.city,
-        district: draft.district,
-        address: draft.address,
+      const nextProfile = await updateCurrentUserProfile({
+        firstName: nextDraft.firstName,
+        lastName: nextDraft.lastName,
+        phone: nextDraft.phone,
+        city: nextDraft.city,
+        district: nextDraft.district,
+        address: nextDraft.address,
       });
 
+      setDraft(nextDraft);
       await refreshProfile();
 
       const completion = calculateProfileCompletion({
-        profile: {
+        profile: nextProfile ?? {
           ...(profile ?? {}),
-          firstName: draft.firstName,
-          lastName: draft.lastName,
-          phone: draft.phone,
-          city: draft.city,
-          district: draft.district,
-          address: draft.address,
+          firstName: nextDraft.firstName,
+          lastName: nextDraft.lastName,
+          phone: nextDraft.phone,
+          city: nextDraft.city,
+          district: nextDraft.district,
+          address: nextDraft.address,
         },
         user,
       });
@@ -198,10 +249,13 @@ export const useSettingsProfileEditor = () => {
     isEditing,
     isSaving,
     hasChanges,
+    resolvedCity,
     saveError,
     startEditing,
     cancelEditing,
     setField,
+    selectCity,
+    selectDistrict,
     save,
   };
 };

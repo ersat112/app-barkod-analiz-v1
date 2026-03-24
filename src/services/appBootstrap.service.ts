@@ -10,6 +10,10 @@ import {
   initializeHistoryRemoteSyncQueue,
 } from './historyRemoteSync.service';
 import {
+  flushPendingMissingProductDrafts,
+  initializeMissingProductDraftSync,
+} from './missingProductSync.service';
+import {
   flushRemoteProductCacheWriteQueue,
   initializeRemoteProductCacheWriteQueue,
 } from './productRemoteWriteQueue.service';
@@ -83,6 +87,7 @@ export const ensureAppBootstrap = async (): Promise<AppBootstrapSnapshot> => {
       initDatabase();
       initializeRemoteProductCacheWriteQueue();
       initializeHistoryRemoteSyncQueue();
+      initializeMissingProductDraftSync();
       const admobInitialized = await initializeAdMob();
 
       localBootstrapCompleted = true;
@@ -160,6 +165,12 @@ export const runAuthenticatedAppBootstrap = async (options?: {
 
       if (accessSnapshot.historyWriteAllowed) {
         await flushHistoryRemoteSyncQueue({
+          reason: 'app_boot',
+        });
+      }
+
+      if (accessSnapshot.missingProductContributionWriteAllowed) {
+        await flushPendingMissingProductDrafts({
           reason: 'app_boot',
         });
       }

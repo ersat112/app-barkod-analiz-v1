@@ -19,6 +19,7 @@ type MissingProductDraftEventPayload = {
   hasOrigin: boolean;
   hasIngredients: boolean;
   hasNotes: boolean;
+  hasImage: boolean;
   entryPoint: MissingProductEntryPoint;
   localId?: string;
   queueStatus?: string;
@@ -163,6 +164,7 @@ export const useMissingProductFlow = () => {
           hasOrigin: payload.hasOrigin,
           hasIngredients: payload.hasIngredients,
           hasNotes: payload.hasNotes,
+          hasImage: payload.hasImage,
           entryPoint: payload.entryPoint,
           localId: payload.localId,
           queueStatus: payload.queueStatus ?? 'local_draft',

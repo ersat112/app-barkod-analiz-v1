@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, getDoc } from 'firebase/firestore';
 
+import { getEnvBoolean } from '../config/appRuntime';
 import { auth, db } from '../config/firebase';
 import {
   FEATURES,
@@ -44,6 +45,7 @@ type RemoteFirestoreRolloutDocument = Partial<{
 
 const SCHEMA_VERSION = 1;
 const RUNTIME_CONFIG_TTL_MS = 1000 * 60 * 10;
+const ENV = process.env as Record<string, string | undefined>;
 
 let inMemoryConfig: FirestoreRuntimeConfigSnapshot | null = null;
 let refreshPromise: Promise<FirestoreRuntimeConfigSnapshot> | null = null;
@@ -75,6 +77,58 @@ function clampInteger(
   }
 
   return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function hasRuntimeOverride(key: string): boolean {
+  return typeof ENV[key] === 'string' && ENV[key]!.trim().length > 0;
+}
+
+function applyRuntimeOverrides(
+  config: FirestoreRuntimeConfigSnapshot
+): FirestoreRuntimeConfigSnapshot {
+  let nextConfig = config;
+
+  if (hasRuntimeOverride('EXPO_PUBLIC_FIRESTORE_SHARED_CACHE_READS_ENABLED')) {
+    nextConfig = {
+      ...nextConfig,
+      allowSharedCacheReads: getEnvBoolean(
+        'EXPO_PUBLIC_FIRESTORE_SHARED_CACHE_READS_ENABLED',
+        nextConfig.allowSharedCacheReads
+      ),
+    };
+  }
+
+  if (hasRuntimeOverride('EXPO_PUBLIC_FIRESTORE_SHARED_CACHE_WRITES_ENABLED')) {
+    nextConfig = {
+      ...nextConfig,
+      allowClientSharedCacheWrites: getEnvBoolean(
+        'EXPO_PUBLIC_FIRESTORE_SHARED_CACHE_WRITES_ENABLED',
+        nextConfig.allowClientSharedCacheWrites
+      ),
+    };
+  }
+
+  if (hasRuntimeOverride('EXPO_PUBLIC_FIRESTORE_SCAN_HISTORY_WRITES_ENABLED')) {
+    nextConfig = {
+      ...nextConfig,
+      allowUserScanHistoryWrites: getEnvBoolean(
+        'EXPO_PUBLIC_FIRESTORE_SCAN_HISTORY_WRITES_ENABLED',
+        nextConfig.allowUserScanHistoryWrites
+      ),
+    };
+  }
+
+  if (hasRuntimeOverride('EXPO_PUBLIC_FIRESTORE_MISSING_PRODUCT_WRITES_ENABLED')) {
+    nextConfig = {
+      ...nextConfig,
+      allowMissingProductContributionWrites: getEnvBoolean(
+        'EXPO_PUBLIC_FIRESTORE_MISSING_PRODUCT_WRITES_ENABLED',
+        nextConfig.allowMissingProductContributionWrites
+      ),
+    };
+  }
+
+  return nextConfig;
 }
 
 function createDefaultRuntimeConfig(
@@ -290,31 +344,31 @@ export const resolveFirestoreRuntimeConfig = async (options?: {
   allowStale?: boolean;
 }): Promise<FirestoreRuntimeConfigSnapshot> => {
   if (!FEATURES.firebase.runtimeConfigRolloutEnabled) {
-    return createDefaultRuntimeConfig();
+    return applyRuntimeOverrides(createDefaultRuntimeConfig());
   }
 
   if (options?.forceRefresh) {
-    return refreshInternal();
+    return applyRuntimeOverrides(await refreshInternal());
   }
 
   if (inMemoryConfig && isConfigFresh(inMemoryConfig)) {
-    return inMemoryConfig;
+    return applyRuntimeOverrides(inMemoryConfig);
   }
 
   const storedConfig = inMemoryConfig ?? (await readStoredConfig());
 
   if (storedConfig && isConfigFresh(storedConfig)) {
     inMemoryConfig = storedConfig;
-    return storedConfig;
+    return applyRuntimeOverrides(storedConfig);
   }
 
   if (storedConfig && options?.allowStale) {
     inMemoryConfig = storedConfig;
     void refreshInternal().catch(() => undefined);
-    return storedConfig;
+    return applyRuntimeOverrides(storedConfig);
   }
 
-  return refreshInternal();
+  return applyRuntimeOverrides(await refreshInternal());
 };
 
 export const clearFirestoreRuntimeConfigCache = async (): Promise<void> => {

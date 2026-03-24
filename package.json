@@ -35,6 +35,7 @@
     "expo-auth-session": "~55.0.7",
     "expo-camera": "~55.0.9",
     "expo-crypto": "~55.0.9",
+    "expo-image-picker": "~55.0.11",
     "expo-localization": "~55.0.8",
     "expo-location": "~55.1.2",
     "expo-sqlite": "~55.0.10",

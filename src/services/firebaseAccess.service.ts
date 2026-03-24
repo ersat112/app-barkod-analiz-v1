@@ -131,6 +131,11 @@ export const canWriteUserScanHistory = async (): Promise<boolean> => {
   return snapshot.historyWriteAllowed;
 };
 
+export const canWriteMissingProductContributions = async (): Promise<boolean> => {
+  const snapshot = await getFirebaseAccessSnapshot();
+  return snapshot.missingProductContributionWriteAllowed;
+};
+
 export const canReadAdRuntimeConfig = async (): Promise<boolean> => {
   const snapshot = await getFirebaseAccessSnapshot();
   return snapshot.adPolicyReadAllowed;
