@@ -17,6 +17,9 @@ export type PurchaseProviderName =
   | 'revenuecat'
   | 'native_iap';
 
+export type PurchaseProviderRuntimeSource = 'env_override' | 'fallback';
+export type PurchaseProviderRuntimePlatform = 'ios' | 'android' | 'web';
+
 export type MonetizationPolicySnapshot = {
   source: MonetizationPolicySource;
   version: number;
@@ -129,6 +132,23 @@ export type PurchaseProviderAdapter = {
   ) => Promise<PurchaseProviderRestoreResult>;
 };
 
+export type PurchaseProviderDiagnosticsSnapshot = {
+  fetchedAt: string;
+  providerName: PurchaseProviderName;
+  runtimeSource: PurchaseProviderRuntimeSource;
+  platform: PurchaseProviderRuntimePlatform;
+  isExpoGo: boolean;
+  supportsNativePurchases: boolean;
+  runtimeReady: boolean;
+  isConfigured: boolean;
+  iosApiKeyPresent: boolean;
+  androidApiKeyPresent: boolean;
+  activePlatformApiKeyPresent: boolean;
+  entitlementIdentifier: string;
+  offeringIdentifier: string;
+  missingKeys: string[];
+};
+
 export type FreeScanPolicyState = {
   schemaVersion: number;
   dateKey: string;
@@ -184,4 +204,5 @@ export type MonetizationDiagnosticsSnapshot = {
   freeScanUsedCount: number;
   freeScanRemainingCount: number | null;
   freeScanHasReachedLimit: boolean;
+  providerDiagnostics: PurchaseProviderDiagnosticsSnapshot;
 };
