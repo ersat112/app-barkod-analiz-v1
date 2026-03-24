@@ -1,7 +1,8 @@
-import { APP_RUNTIME, getEnvString } from '../config/appRuntime';
+import { REVENUECAT_RUNTIME, getRevenueCatRuntimeDiagnosticsSnapshot } from '../config/revenueCatRuntime';
 import type {
   PurchaseProviderAdapter,
   PurchaseProviderDiagnosticsSnapshot,
+  PurchaseProviderIdentityMode,
   PurchaseProviderPurchaseParams,
   PurchaseProviderPurchaseResult,
   PurchaseProviderRestoreParams,
@@ -21,9 +22,7 @@ type RevenueCatPurchasesApi = {
   logIn?: (appUserId: string) => Promise<unknown>;
   logOut?: () => Promise<unknown>;
   getOfferings?: () => Promise<RevenueCatOfferings>;
-  purchasePackage?: (
-    pkg: unknown
-  ) => Promise<RevenueCatPurchaseResponse>;
+  purchasePackage?: (pkg: unknown) => Promise<RevenueCatPurchaseResponse>;
   restorePurchases?: () => Promise<RevenueCatCustomerInfo>;
 };
 
@@ -65,106 +64,9 @@ type RevenueCatOfferings = {
   all?: Record<string, RevenueCatOffering | undefined>;
 };
 
-type RevenueCatRuntimeConfig = {
-  source: 'env_override' | 'fallback';
-  platform: 'ios' | 'android' | 'web';
-  isExpoGo: boolean;
-  supportsNativePurchases: boolean;
-  iosApiKey: string;
-  androidApiKey: string;
-  activePlatformApiKey: string;
-  entitlementIdentifier: string;
-  offeringIdentifier: string;
-  isReady: boolean;
-  missingKeys: string[];
-};
-
-const FALLBACK_REVENUECAT_CONFIG = Object.freeze({
-  iosApiKey: '',
-  androidApiKey: '',
-  entitlementIdentifier: 'premium',
-  offeringIdentifier: 'default',
-});
-
-const hasRuntimeOverrides = [
-  'EXPO_PUBLIC_REVENUECAT_IOS_API_KEY',
-  'EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY',
-  'EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID',
-  'EXPO_PUBLIC_REVENUECAT_OFFERING_ID',
-].some((key) => Boolean(process.env[key]?.trim()));
-
-const runtimePlatform: 'ios' | 'android' | 'web' =
-  APP_RUNTIME.platform === 'ios' || APP_RUNTIME.platform === 'android'
-    ? APP_RUNTIME.platform
-    : 'web';
-
-const runtimeConfig: RevenueCatRuntimeConfig = (() => {
-  const iosApiKey = getEnvString(
-    'EXPO_PUBLIC_REVENUECAT_IOS_API_KEY',
-    FALLBACK_REVENUECAT_CONFIG.iosApiKey
-  ).trim();
-
-  const androidApiKey = getEnvString(
-    'EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY',
-    FALLBACK_REVENUECAT_CONFIG.androidApiKey
-  ).trim();
-
-  const entitlementIdentifier = getEnvString(
-    'EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID',
-    FALLBACK_REVENUECAT_CONFIG.entitlementIdentifier
-  ).trim();
-
-  const offeringIdentifier = getEnvString(
-    'EXPO_PUBLIC_REVENUECAT_OFFERING_ID',
-    FALLBACK_REVENUECAT_CONFIG.offeringIdentifier
-  ).trim();
-
-  const activePlatformApiKey =
-    runtimePlatform === 'ios'
-      ? iosApiKey
-      : runtimePlatform === 'android'
-        ? androidApiKey
-        : '';
-
-  const missingKeys: string[] = [];
-
-  if (runtimePlatform === 'ios' && !iosApiKey) {
-    missingKeys.push('EXPO_PUBLIC_REVENUECAT_IOS_API_KEY');
-  }
-
-  if (runtimePlatform === 'android' && !androidApiKey) {
-    missingKeys.push('EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY');
-  }
-
-  if (!entitlementIdentifier) {
-    missingKeys.push('EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID');
-  }
-
-  if (!offeringIdentifier) {
-    missingKeys.push('EXPO_PUBLIC_REVENUECAT_OFFERING_ID');
-  }
-
-  return {
-    source: hasRuntimeOverrides ? 'env_override' : 'fallback',
-    platform: runtimePlatform,
-    isExpoGo: APP_RUNTIME.isExpoGo,
-    supportsNativePurchases: APP_RUNTIME.isNativeBuild && runtimePlatform !== 'web',
-    iosApiKey,
-    androidApiKey,
-    activePlatformApiKey,
-    entitlementIdentifier,
-    offeringIdentifier,
-    isReady:
-      runtimePlatform !== 'web' &&
-      Boolean(activePlatformApiKey) &&
-      Boolean(entitlementIdentifier) &&
-      Boolean(offeringIdentifier),
-    missingKeys,
-  };
-})();
-
 let providerConfigured = false;
 let configuredAppUserId: string | null = null;
+let lastKnownAuthUid: string | null = null;
 let registeredAdapter: PurchaseProviderAdapter | null = null;
 
 function toErrorMessage(error: unknown): string {
@@ -282,7 +184,7 @@ function resolveActiveEntitlement(
   customerInfo: RevenueCatCustomerInfo | null | undefined
 ): RevenueCatEntitlementInfo | null {
   const activeEntitlements = customerInfo?.entitlements?.active ?? {};
-  const preferred = activeEntitlements[runtimeConfig.entitlementIdentifier];
+  const preferred = activeEntitlements[REVENUECAT_RUNTIME.entitlementIdentifier];
 
   if (preferred) {
     return preferred;
@@ -299,13 +201,24 @@ function selectOffering(
     return null;
   }
 
-  const configured = offerings.all?.[runtimeConfig.offeringIdentifier];
+  const configured = offerings.all?.[REVENUECAT_RUNTIME.offeringIdentifier];
 
   if (configured) {
     return configured;
   }
 
   return offerings.current ?? null;
+}
+
+function matchesAnnualProductId(
+  pkg: RevenueCatPackage,
+  annualProductId: string
+): boolean {
+  return (
+    pkg.productIdentifier === annualProductId ||
+    pkg.storeProduct?.identifier === annualProductId ||
+    pkg.storeProduct?.productIdentifier === annualProductId
+  );
 }
 
 function selectPackage(
@@ -320,29 +233,29 @@ function selectPackage(
     ? offering.availablePackages
     : [];
 
-  const matchesAnnualProductId = (pkg: RevenueCatPackage): boolean => {
-    return (
-      pkg.productIdentifier === annualProductId ||
-      pkg.storeProduct?.identifier === annualProductId ||
-      pkg.storeProduct?.productIdentifier === annualProductId
-    );
-  };
-
-  if (offering.annual && matchesAnnualProductId(offering.annual)) {
+  if (offering.annual && matchesAnnualProductId(offering.annual, annualProductId)) {
     return offering.annual;
   }
 
-  const matchedPackage = availablePackages.find(matchesAnnualProductId);
+  const exactMatch = availablePackages.find((pkg) =>
+    matchesAnnualProductId(pkg, annualProductId)
+  );
 
-  if (matchedPackage) {
-    return matchedPackage;
+  if (exactMatch) {
+    return exactMatch;
   }
 
-  return offering.annual ?? availablePackages[0] ?? null;
+  if (offering.annual) {
+    return offering.annual;
+  }
+
+  return availablePackages[0] ?? null;
 }
 
 async function ensureConfigured(authUid: string | null): Promise<boolean> {
-  if (!runtimeConfig.isReady) {
+  lastKnownAuthUid = authUid;
+
+  if (!REVENUECAT_RUNTIME.isReady) {
     return false;
   }
 
@@ -358,32 +271,46 @@ async function ensureConfigured(authUid: string | null): Promise<boolean> {
     }
 
     api.configure({
-      apiKey: runtimeConfig.activePlatformApiKey,
+      apiKey: REVENUECAT_RUNTIME.activePlatformApiKey,
     });
 
     providerConfigured = true;
   }
 
-  if (!runtimeConfig.supportsNativePurchases) {
+  if (!REVENUECAT_RUNTIME.supportsNativePurchases) {
     configuredAppUserId = authUid;
     return true;
   }
 
-  if (authUid && configuredAppUserId !== authUid && api.logIn) {
+  if (authUid && configuredAppUserId !== authUid) {
+    if (!api.logIn) {
+      return false;
+    }
+
     try {
       await api.logIn(authUid);
       configuredAppUserId = authUid;
     } catch {
-      configuredAppUserId = authUid;
+      return false;
     }
-  } else if (!authUid && configuredAppUserId && api.logOut) {
+
+    return true;
+  }
+
+  if (!authUid && configuredAppUserId) {
+    if (!api.logOut) {
+      configuredAppUserId = null;
+      return true;
+    }
+
     try {
       await api.logOut();
     } catch {
-      // ignore logout error
-    } finally {
-      configuredAppUserId = null;
+      return false;
     }
+
+    configuredAppUserId = null;
+    return true;
   }
 
   return true;
@@ -430,18 +357,30 @@ function buildRestoreResult(
   };
 }
 
+function resolveIdentityMode(): PurchaseProviderIdentityMode {
+  if (lastKnownAuthUid) {
+    return 'authenticated';
+  }
+
+  if (configuredAppUserId === null) {
+    return 'anonymous';
+  }
+
+  return 'unknown';
+}
+
 function createRevenueCatAdapter(): PurchaseProviderAdapter {
   return {
     name: 'revenuecat',
 
     async isConfigured(): Promise<boolean> {
-      return ensureConfigured(configuredAppUserId);
+      return ensureConfigured(lastKnownAuthUid);
     },
 
     async purchaseAnnualPlan(
       params: PurchaseProviderPurchaseParams
     ): Promise<PurchaseProviderPurchaseResult> {
-      if (!runtimeConfig.isReady) {
+      if (!REVENUECAT_RUNTIME.isReady) {
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
@@ -454,7 +393,7 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
         };
       }
 
-      if (!runtimeConfig.supportsNativePurchases) {
+      if (!REVENUECAT_RUNTIME.supportsNativePurchases) {
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
@@ -473,7 +412,7 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
-          message: 'RevenueCat SDK kurulu değil veya runtime yüklenemedi.',
+          message: 'RevenueCat SDK kurulu değil veya provider identity senkronu hazır değil.',
           activatedAt: null,
           expiresAt: null,
           lastValidatedAt: null,
@@ -551,7 +490,7 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
     async restorePurchases(
       params: PurchaseProviderRestoreParams
     ): Promise<PurchaseProviderRestoreResult> {
-      if (!runtimeConfig.isReady) {
+      if (!REVENUECAT_RUNTIME.isReady) {
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
@@ -570,7 +509,7 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
-          message: 'RevenueCat SDK kurulu değil veya runtime yüklenemedi.',
+          message: 'RevenueCat SDK kurulu değil veya provider identity senkronu hazır değil.',
           activatedAt: null,
           expiresAt: null,
           lastValidatedAt: null,
@@ -621,6 +560,10 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
   };
 }
 
+export async function syncPurchaseProviderIdentity(authUid: string | null): Promise<void> {
+  await ensureConfigured(authUid);
+}
+
 export function registerPurchaseProviderAdapter(
   adapter: PurchaseProviderAdapter
 ): void {
@@ -629,6 +572,9 @@ export function registerPurchaseProviderAdapter(
 
 export function resetPurchaseProviderAdapter(): void {
   registeredAdapter = null;
+  providerConfigured = false;
+  configuredAppUserId = null;
+  lastKnownAuthUid = null;
 }
 
 export function getPurchaseProviderAdapter(): PurchaseProviderAdapter {
@@ -636,24 +582,34 @@ export function getPurchaseProviderAdapter(): PurchaseProviderAdapter {
 }
 
 export async function getPurchaseProviderDiagnosticsSnapshot(): Promise<PurchaseProviderDiagnosticsSnapshot> {
+  const runtimeDiagnostics = getRevenueCatRuntimeDiagnosticsSnapshot();
+  const { api } = getRevenueCatApi();
   const adapter = getPurchaseProviderAdapter();
-  const configured = await adapter.isConfigured();
-  const sdkPresent = Boolean(getRevenueCatApi().api);
+  const isConfigured = await adapter.isConfigured();
+  const authUidPresent = Boolean(lastKnownAuthUid);
+  const configuredForCurrentUser = authUidPresent
+    ? configuredAppUserId === lastKnownAuthUid
+    : configuredAppUserId === null;
 
   return {
     fetchedAt: new Date().toISOString(),
-    providerName: sdkPresent ? adapter.name : 'adapter_unbound',
-    runtimeSource: runtimeConfig.source,
-    platform: runtimeConfig.platform,
-    isExpoGo: runtimeConfig.isExpoGo,
-    supportsNativePurchases: runtimeConfig.supportsNativePurchases,
-    runtimeReady: runtimeConfig.isReady,
-    isConfigured: configured,
-    iosApiKeyPresent: Boolean(runtimeConfig.iosApiKey),
-    androidApiKeyPresent: Boolean(runtimeConfig.androidApiKey),
-    activePlatformApiKeyPresent: Boolean(runtimeConfig.activePlatformApiKey),
-    entitlementIdentifier: runtimeConfig.entitlementIdentifier,
-    offeringIdentifier: runtimeConfig.offeringIdentifier,
-    missingKeys: [...runtimeConfig.missingKeys],
+    providerName: api ? adapter.name : 'adapter_unbound',
+    runtimeSource: runtimeDiagnostics.source,
+    platform: runtimeDiagnostics.platform,
+    isExpoGo: runtimeDiagnostics.isExpoGo,
+    supportsNativePurchases: runtimeDiagnostics.supportsNativePurchases,
+    runtimeReady: runtimeDiagnostics.isReady,
+    sdkModulePresent: Boolean(api),
+    isConfigured,
+    authUidPresent,
+    configuredAppUserId,
+    identityMode: resolveIdentityMode(),
+    identitySynced: configuredForCurrentUser,
+    iosApiKeyPresent: runtimeDiagnostics.iosApiKeyPresent,
+    androidApiKeyPresent: runtimeDiagnostics.androidApiKeyPresent,
+    activePlatformApiKeyPresent: runtimeDiagnostics.activePlatformApiKeyPresent,
+    entitlementIdentifier: runtimeDiagnostics.entitlementIdentifier,
+    offeringIdentifier: runtimeDiagnostics.offeringIdentifier,
+    missingKeys: [...runtimeDiagnostics.missingKeys],
   };
 }
