@@ -2,9 +2,17 @@ import type { User } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 import { auth, db } from '../config/firebase';
-import type { AppUserProfile, UserProfileInput } from '../types/userProfile';
+import { entitlementService } from './entitlement.service';
+import { freeScanPolicyService } from './freeScanPolicy.service';
+import { monetizationPolicyService } from './monetizationPolicy.service';
+import type {
+  AppUserProfile,
+  UserMonetizationProjection,
+  UserProfileInput,
+} from '../types/userProfile';
 
 const USERS_COLLECTION = 'users';
+const USER_MONETIZATION_PROJECTION_VERSION = 1;
 
 function normalizeOptionalString(value?: string | null): string | undefined {
   if (typeof value !== 'string') {
@@ -84,12 +92,14 @@ function buildDisplayName(params: {
     return explicitDisplayName;
   }
 
-  const firstName = typeof params.firstName === 'string'
-    ? params.firstName.trim()
-    : normalizeOptionalString(params.firstName);
-  const lastName = typeof params.lastName === 'string'
-    ? params.lastName.trim()
-    : normalizeOptionalString(params.lastName);
+  const firstName =
+    typeof params.firstName === 'string'
+      ? params.firstName.trim()
+      : normalizeOptionalString(params.firstName);
+  const lastName =
+    typeof params.lastName === 'string'
+      ? params.lastName.trim()
+      : normalizeOptionalString(params.lastName);
 
   if (firstName && lastName) {
     return `${firstName} ${lastName}`;
@@ -165,6 +175,55 @@ function deriveUserProfileFromAuthUser(user: User): UserProfileInput {
   };
 }
 
+function compactUserMonetizationProjection(
+  input?: UserMonetizationProjection
+): UserMonetizationProjection | undefined {
+  if (!input) {
+    return undefined;
+  }
+
+  const output: UserMonetizationProjection = {};
+
+  const assign = <K extends keyof UserMonetizationProjection>(
+    key: K,
+    value: UserMonetizationProjection[K] | undefined
+  ) => {
+    if (value === undefined) {
+      return;
+    }
+
+    output[key] = value;
+  };
+
+  assign('projectionVersion', input.projectionVersion);
+  assign('syncedAt', input.syncedAt);
+  assign('plan', input.plan);
+  assign('isPremium', input.isPremium);
+  assign('adsSuppressed', input.adsSuppressed);
+  assign('unlimitedScans', input.unlimitedScans);
+  assign('entitlementSource', input.entitlementSource);
+  assign('policySource', input.policySource);
+  assign('policyVersion', input.policyVersion);
+  assign('annualPlanEnabled', input.annualPlanEnabled);
+  assign('annualPriceTry', input.annualPriceTry);
+  assign('annualProductId', input.annualProductId);
+  assign('purchaseProviderEnabled', input.purchaseProviderEnabled);
+  assign('restoreEnabled', input.restoreEnabled);
+  assign('paywallEnabled', input.paywallEnabled);
+  assign('freeScanLimitEnabled', input.freeScanLimitEnabled);
+  assign('freeScanLimitActive', input.freeScanLimitActive);
+  assign('freeDailyScanLimit', input.freeDailyScanLimit);
+  assign('freeScanDateKey', input.freeScanDateKey);
+  assign('freeScanUsedCount', input.freeScanUsedCount);
+  assign('freeScanRemainingCount', input.freeScanRemainingCount);
+  assign('freeScanHasReachedLimit', input.freeScanHasReachedLimit);
+  assign('activatedAt', input.activatedAt);
+  assign('expiresAt', input.expiresAt);
+  assign('lastValidatedAt', input.lastValidatedAt);
+
+  return Object.keys(output).length ? output : undefined;
+}
+
 function compactUserProfile(input: UserProfileInput): AppUserProfile {
   const output: AppUserProfile = {};
 
@@ -195,8 +254,56 @@ function compactUserProfile(input: UserProfileInput): AppUserProfile {
   assign('updatedAt', input.updatedAt);
   assign('lastLoginAt', input.lastLoginAt);
   assign('lastSeenAt', input.lastSeenAt);
+  assign('monetization', compactUserMonetizationProjection(input.monetization));
 
   return output;
+}
+
+async function buildMonetizationProjectionForUser(
+  user: User
+): Promise<UserMonetizationProjection | undefined> {
+  if (!user.uid) {
+    return undefined;
+  }
+
+  try {
+    const [policy, entitlement, freeScan] = await Promise.all([
+      monetizationPolicyService.getResolvedPolicy({ allowStale: true }),
+      entitlementService.getSnapshot(),
+      freeScanPolicyService.getSnapshot(),
+    ]);
+
+    return compactUserMonetizationProjection({
+      projectionVersion: USER_MONETIZATION_PROJECTION_VERSION,
+      syncedAt: new Date().toISOString(),
+      plan: entitlement.plan,
+      isPremium: entitlement.isPremium,
+      adsSuppressed: entitlement.adsSuppressed,
+      unlimitedScans: entitlement.unlimitedScans,
+      entitlementSource: entitlement.source,
+      policySource: policy.source,
+      policyVersion: policy.version,
+      annualPlanEnabled: policy.annualPlanEnabled,
+      annualPriceTry: policy.annualPriceTry,
+      annualProductId: policy.annualProductId,
+      purchaseProviderEnabled: policy.purchaseProviderEnabled,
+      restoreEnabled: policy.restoreEnabled,
+      paywallEnabled: policy.paywallEnabled,
+      freeScanLimitEnabled: policy.freeScanLimitEnabled,
+      freeScanLimitActive: freeScan.limitEnabled,
+      freeDailyScanLimit: policy.freeDailyScanLimit,
+      freeScanDateKey: freeScan.dateKey,
+      freeScanUsedCount: freeScan.usedCount,
+      freeScanRemainingCount: freeScan.remainingCount,
+      freeScanHasReachedLimit: freeScan.hasReachedLimit,
+      activatedAt: entitlement.activatedAt,
+      expiresAt: entitlement.expiresAt,
+      lastValidatedAt: entitlement.lastValidatedAt,
+    });
+  } catch (error) {
+    console.warn('[UserProfile] monetization projection build failed:', error);
+    return undefined;
+  }
 }
 
 export async function getUserProfile(uid: string): Promise<AppUserProfile | null> {
@@ -233,7 +340,11 @@ export async function ensureUserProfileDocument(
     trackLogin?: boolean;
   }
 ): Promise<AppUserProfile> {
-  const existingProfile = await getUserProfile(user.uid);
+  const [existingProfile, monetizationProjection] = await Promise.all([
+    getUserProfile(user.uid),
+    buildMonetizationProjectionForUser(user),
+  ]);
+
   const authProfile = deriveUserProfileFromAuthUser(user);
   const overrideProfile = sanitizeUserProfileInput(options?.profile);
   const now = new Date().toISOString();
@@ -281,9 +392,8 @@ export async function ensureUserProfileDocument(
     createdAt: existingProfile?.createdAt ?? now,
     updatedAt: now,
     lastSeenAt: now,
-    lastLoginAt: options?.trackLogin
-      ? now
-      : existingProfile?.lastLoginAt,
+    lastLoginAt: options?.trackLogin ? now : existingProfile?.lastLoginAt,
+    monetization: monetizationProjection ?? existingProfile?.monetization,
   });
 
   const ref = doc(db, USERS_COLLECTION, user.uid);
@@ -294,6 +404,18 @@ export async function ensureUserProfileDocument(
 }
 
 export async function refreshCurrentUserProfile(): Promise<AppUserProfile | null> {
+  const currentUser = auth.currentUser;
+
+  if (!currentUser) {
+    return null;
+  }
+
+  return ensureUserProfileDocument(currentUser, {
+    trackLogin: false,
+  });
+}
+
+export async function syncCurrentUserMonetizationProjection(): Promise<AppUserProfile | null> {
   const currentUser = auth.currentUser;
 
   if (!currentUser) {
@@ -319,7 +441,11 @@ export async function updateCurrentUserProfile(input: {
     return null;
   }
 
-  const existingProfile = await getUserProfile(currentUser.uid);
+  const [existingProfile, monetizationProjection] = await Promise.all([
+    getUserProfile(currentUser.uid),
+    buildMonetizationProjectionForUser(currentUser),
+  ]);
+
   const authProfile = deriveUserProfileFromAuthUser(currentUser);
   const editableProfile = sanitizeEditableUserProfileInput(input);
   const now = new Date().toISOString();
@@ -360,6 +486,7 @@ export async function updateCurrentUserProfile(input: {
     updatedAt: now,
     lastLoginAt: existingProfile?.lastLoginAt,
     lastSeenAt: now,
+    monetization: monetizationProjection ?? existingProfile?.monetization,
   });
 
   const ref = doc(db, USERS_COLLECTION, currentUser.uid);
