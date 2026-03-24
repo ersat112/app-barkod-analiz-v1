@@ -314,11 +314,8 @@ export const SettingsScreen: React.FC = () => {
 
   const adDiagnosticsEnabled = FEATURES.ads.diagnosticsLoggingEnabled;
   const firebaseDiagnosticsEnabled = FEATURES.firebase.diagnosticsLoggingEnabled;
-  const monetizationDiagnosticsEnabled = FEATURES.monetization.diagnosticsLoggingEnabled;
   const operabilityDiagnosticsEnabled =
-    adDiagnosticsEnabled ||
-    firebaseDiagnosticsEnabled ||
-    monetizationDiagnosticsEnabled;
+    adDiagnosticsEnabled || firebaseDiagnosticsEnabled;
 
   const {
     snapshot: operabilityDiagnostics,
@@ -489,10 +486,6 @@ export const SettingsScreen: React.FC = () => {
   const adDiagnosticsError =
     operabilityDiagnostics?.ad.error ?? operabilityError;
 
-  const monetizationDiagnostics = operabilityDiagnostics?.monetization.data ?? null;
-  const monetizationDiagnosticsError =
-    operabilityDiagnostics?.monetization.error ?? operabilityError;
-
   const firebaseDiagnostics = operabilityDiagnostics?.remoteCache.data ?? null;
   const firebaseAccessDiagnostics =
     operabilityDiagnostics?.firebaseAccess.data ?? null;
@@ -513,10 +506,6 @@ export const SettingsScreen: React.FC = () => {
     return formatTimeValue(adDiagnostics?.fetchedAt);
   }, [adDiagnostics?.fetchedAt]);
 
-  const monetizationDiagnosticsFetchedAtText = useMemo(() => {
-    return formatTimeValue(monetizationDiagnostics?.fetchedAt);
-  }, [monetizationDiagnostics?.fetchedAt]);
-
   const firebaseDiagnosticsFetchedAtText = useMemo(() => {
     return formatTimeValue(firebaseDiagnostics?.fetchedAt);
   }, [firebaseDiagnostics?.fetchedAt]);
@@ -531,6 +520,21 @@ export const SettingsScreen: React.FC = () => {
 
     return city || district || tt('location_not_set', 'Konum bilgisi eklenmemiş');
   }, [profile?.city, profile?.district, tt]);
+
+  const remoteProjection = profile?.monetization ?? null;
+
+  const remoteProjectionMismatch = useMemo(() => {
+    if (!remoteProjection || !monetization.entitlement || !remoteProjection.plan) {
+      return false;
+    }
+
+    const planMismatch = remoteProjection.plan !== monetization.entitlement.plan;
+    const premiumMismatch =
+      typeof remoteProjection.isPremium === 'boolean' &&
+      remoteProjection.isPremium !== monetization.entitlement.isPremium;
+
+    return planMismatch || premiumMismatch;
+  }, [monetization.entitlement, remoteProjection]);
 
   const premiumTitle = monetization.entitlement?.isPremium
     ? tt('premium_active', 'Premium aktif')
@@ -661,6 +665,95 @@ export const SettingsScreen: React.FC = () => {
             colors={colors}
           />
         )}
+
+        {remoteProjection ? (
+          <View
+            style={[
+              styles.projectionCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.projectionHeader}>
+              <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
+                <Ionicons name="cloud-done-outline" size={18} color={colors.primary} />
+              </View>
+
+              <View style={styles.projectionHeaderTextWrap}>
+                <Text style={[styles.projectionTitle, { color: colors.text }]}>
+                  {tt('account_premium_snapshot', 'Hesap premium snapshot')}
+                </Text>
+                <Text style={[styles.projectionSubtitle, { color: colors.text }]}>
+                  {tt('account_premium_snapshot_subtitle', 'users dokümanına yazılan remote görünüm')}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.projectionGrid}>
+              <View style={styles.projectionRow}>
+                <Text style={[styles.projectionLabel, { color: colors.text }]}>
+                  {tt('remote_plan', 'Remote plan')}
+                </Text>
+                <Text style={[styles.projectionValue, { color: colors.text }]}>
+                  {remoteProjection.plan ? remoteProjection.plan.toUpperCase() : '-'}
+                </Text>
+              </View>
+
+              <View style={styles.projectionRow}>
+                <Text style={[styles.projectionLabel, { color: colors.text }]}>
+                  {tt('remote_is_premium', 'Remote premium')}
+                </Text>
+                <Text style={[styles.projectionValue, { color: colors.text }]}>
+                  {typeof remoteProjection.isPremium === 'boolean'
+                    ? boolStateText(remoteProjection.isPremium)
+                    : '-'}
+                </Text>
+              </View>
+
+              <View style={styles.projectionRow}>
+                <Text style={[styles.projectionLabel, { color: colors.text }]}>
+                  {tt('remote_ads_suppressed', 'Remote ads')}
+                </Text>
+                <Text style={[styles.projectionValue, { color: colors.text }]}>
+                  {typeof remoteProjection.adsSuppressed === 'boolean'
+                    ? boolStateText(remoteProjection.adsSuppressed)
+                    : '-'}
+                </Text>
+              </View>
+
+              <View style={styles.projectionRow}>
+                <Text style={[styles.projectionLabel, { color: colors.text }]}>
+                  {tt('remote_scan_cap', 'Remote scan cap')}
+                </Text>
+                <Text style={[styles.projectionValue, { color: colors.text }]}>
+                  {typeof remoteProjection.freeScanLimitActive === 'boolean'
+                    ? boolStateText(remoteProjection.freeScanLimitActive)
+                    : '-'}
+                </Text>
+              </View>
+
+              <View style={styles.projectionRow}>
+                <Text style={[styles.projectionLabel, { color: colors.text }]}>
+                  {tt('remote_sync_time', 'Senkron zamanı')}
+                </Text>
+                <Text style={[styles.projectionValue, { color: colors.text }]}>
+                  {formatDateTimeValue(remoteProjection.syncedAt)}
+                </Text>
+              </View>
+            </View>
+
+            {remoteProjectionMismatch ? (
+              <Text style={styles.projectionWarningText}>
+                {tt(
+                  'premium_snapshot_mismatch',
+                  'Yerel entitlement ile hesap snapshot arasında fark var. Sonraki senkronizasyon bunu hizalayacak.'
+                )}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
 
         {monetization.error ? (
           <Text style={styles.monetizationErrorText}>{monetization.error}</Text>
@@ -1473,337 +1566,6 @@ export const SettingsScreen: React.FC = () => {
         </>
       ) : null}
 
-      {monetizationDiagnosticsEnabled ? (
-        <>
-          <Text
-            style={[
-              styles.sectionTitle,
-              { color: colors.text, marginHorizontal: layout.horizontalPadding, marginTop: 10 },
-            ]}
-          >
-            {tt('monetization_diagnostics', 'Premium / Monetization Tanılama')}
-          </Text>
-
-          <View
-            style={[
-              styles.diagnosticsCard,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-                marginHorizontal: layout.horizontalPadding,
-              },
-            ]}
-          >
-            <View style={styles.diagnosticsHeader}>
-              <View style={styles.diagnosticsHeaderLeft}>
-                <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
-                  <Ionicons name="diamond-outline" size={20} color={colors.primary} />
-                </View>
-
-                <View style={styles.diagnosticsHeaderTextWrap}>
-                  <Text style={[styles.diagnosticsTitle, { color: colors.text }]}>
-                    {tt('monetization_runtime_state', 'Policy + entitlement + free scan')}
-                  </Text>
-                  <Text style={[styles.diagnosticsSubtitle, { color: colors.text }]}>
-                    {tt('last_refresh', 'Son yenileme')}: {monetizationDiagnosticsFetchedAtText}
-                  </Text>
-                </View>
-              </View>
-
-              <TouchableOpacity
-                style={[
-                  styles.diagnosticsRefreshButton,
-                  operabilityRefreshing && styles.diagnosticsRefreshButtonDisabled,
-                  {
-                    borderColor: colors.border,
-                    backgroundColor: `${colors.primary}10`,
-                  },
-                ]}
-                onPress={() => {
-                  void refreshOperabilityDiagnostics();
-                }}
-                disabled={operabilityRefreshing}
-                activeOpacity={0.85}
-              >
-                {operabilityRefreshing ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <Ionicons name="refresh" size={18} color={colors.primary} />
-                )}
-              </TouchableOpacity>
-            </View>
-
-            {operabilityLoading ? (
-              <View style={styles.diagnosticsLoadingWrap}>
-                <ActivityIndicator size="small" color={colors.primary} />
-              </View>
-            ) : null}
-
-            {monetizationDiagnosticsError ? (
-              <Text style={styles.diagnosticsErrorText}>{monetizationDiagnosticsError}</Text>
-            ) : null}
-
-            {monetizationDiagnostics ? (
-              <>
-                <View style={styles.diagnosticsPillsRow}>
-                  <View
-                    style={[
-                      styles.diagnosticsPill,
-                      {
-                        backgroundColor: monetizationDiagnostics.isPremium
-                          ? `${colors.primary}14`
-                          : `${colors.border}55`,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.diagnosticsPillText,
-                        {
-                          color: monetizationDiagnostics.isPremium
-                            ? colors.primary
-                            : colors.text,
-                        },
-                      ]}
-                    >
-                      Plan: {monetizationDiagnostics.entitlementPlan.toUpperCase()}
-                    </Text>
-                  </View>
-
-                  <View
-                    style={[
-                      styles.diagnosticsPill,
-                      {
-                        backgroundColor: monetizationDiagnostics.adsSuppressed
-                          ? `${colors.primary}14`
-                          : `${colors.border}55`,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.diagnosticsPillText,
-                        {
-                          color: monetizationDiagnostics.adsSuppressed
-                            ? colors.primary
-                            : colors.text,
-                        },
-                      ]}
-                    >
-                      Ads: {boolStateText(monetizationDiagnostics.adsSuppressed)}
-                    </Text>
-                  </View>
-
-                  <View
-                    style={[
-                      styles.diagnosticsPill,
-                      {
-                        backgroundColor: monetizationDiagnostics.freeScanLimitActive
-                          ? `${colors.border}55`
-                          : `${colors.primary}14`,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.diagnosticsPillText,
-                        {
-                          color: monetizationDiagnostics.freeScanLimitActive
-                            ? colors.text
-                            : colors.primary,
-                        },
-                      ]}
-                    >
-                      Scan cap: {boolStateText(monetizationDiagnostics.freeScanLimitActive)}
-                    </Text>
-                  </View>
-
-                  <View
-                    style={[
-                      styles.diagnosticsPill,
-                      {
-                        backgroundColor: monetizationDiagnostics.purchaseProviderEnabled
-                          ? `${colors.primary}14`
-                          : `${colors.border}55`,
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.diagnosticsPillText,
-                        {
-                          color: monetizationDiagnostics.purchaseProviderEnabled
-                            ? colors.primary
-                            : colors.text,
-                        },
-                      ]}
-                    >
-                      Provider: {boolStateText(monetizationDiagnostics.purchaseProviderEnabled)}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.diagnosticsGrid}>
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Policy source / version
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {monetizationDiagnostics.policySource} / v{monetizationDiagnostics.policyVersion}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Annual plan enabled
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(monetizationDiagnostics.annualPlanEnabled)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Annual price
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatTryPrice(monetizationDiagnostics.annualPriceTry)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Annual product id
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatOptionalText(monetizationDiagnostics.annualProductId)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Purchase provider enabled
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(monetizationDiagnostics.purchaseProviderEnabled)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Restore enabled
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(monetizationDiagnostics.restoreEnabled)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Paywall enabled
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(monetizationDiagnostics.paywallEnabled)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Free scan limit enabled
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(monetizationDiagnostics.freeScanLimitEnabled)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Entitlement source
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {monetizationDiagnostics.entitlementSource}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Unlimited scans
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(monetizationDiagnostics.unlimitedScans)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Activated at
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatDateTimeValue(monetizationDiagnostics.activatedAt)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Expires at
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatDateTimeValue(monetizationDiagnostics.expiresAt)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Last validated at
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {formatDateTimeValue(monetizationDiagnostics.lastValidatedAt)}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Free scan date key
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {monetizationDiagnostics.freeScanDateKey}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Free daily scan limit
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {monetizationDiagnostics.freeDailyScanLimit}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Used / remaining
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {monetizationDiagnostics.freeScanUsedCount} /{' '}
-                      {monetizationDiagnostics.freeScanRemainingCount ?? '-'}
-                    </Text>
-                  </View>
-
-                  <View style={styles.diagnosticsRow}>
-                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
-                      Free scan limit reached
-                    </Text>
-                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
-                      {boolStateText(monetizationDiagnostics.freeScanHasReachedLimit)}
-                    </Text>
-                  </View>
-                </View>
-              </>
-            ) : null}
-          </View>
-        </>
-      ) : null}
-
       {firebaseDiagnosticsEnabled ? (
         <>
           <Text
@@ -2336,6 +2098,57 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 12,
     fontWeight: '900',
+  },
+  projectionCard: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+  },
+  projectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  projectionHeaderTextWrap: {
+    flex: 1,
+  },
+  projectionTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  projectionSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+    opacity: 0.68,
+  },
+  projectionGrid: {
+    marginTop: 14,
+    gap: 10,
+  },
+  projectionRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 14,
+  },
+  projectionLabel: {
+    flex: 1,
+    fontSize: 12,
+    opacity: 0.72,
+  },
+  projectionValue: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  projectionWarningText: {
+    marginTop: 12,
+    color: '#FF9F0A',
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
   },
   monetizationErrorText: {
     marginTop: 10,
