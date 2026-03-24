@@ -40,6 +40,7 @@ function normalizeSource(value: unknown): EntitlementSource {
   switch (value) {
     case 'local_cache':
     case 'provider_restore':
+    case 'provider_purchase':
     case 'manual_override':
       return value;
     default:
@@ -106,6 +107,14 @@ async function readStoredState(): Promise<StoredEntitlementState> {
   }
 }
 
+async function writeStoredState(state: StoredEntitlementState): Promise<void> {
+  try {
+    await AsyncStorage.setItem(getScopedStorageKey(), JSON.stringify(state));
+  } catch (error) {
+    warn('writeStoredState failed:', error);
+  }
+}
+
 function isExpired(expiresAt: string | null): boolean {
   if (!expiresAt) {
     return false;
@@ -144,19 +153,46 @@ function buildSnapshot(
   };
 }
 
+async function resolveSnapshotFromState(
+  state: StoredEntitlementState
+): Promise<EntitlementSnapshot> {
+  const policy = await monetizationPolicyService.getResolvedPolicy({ allowStale: true });
+
+  return buildSnapshot(
+    state,
+    policy.annualProductId,
+    policy.purchaseProviderEnabled,
+    policy.restoreEnabled
+  );
+}
+
 export const entitlementService = {
   async getSnapshot(): Promise<EntitlementSnapshot> {
-    const [policy, state] = await Promise.all([
-      monetizationPolicyService.getResolvedPolicy({ allowStale: true }),
-      readStoredState(),
-    ]);
+    const state = await readStoredState();
+    return resolveSnapshotFromState(state);
+  },
 
-    return buildSnapshot(
-      state,
-      policy.annualProductId,
-      policy.purchaseProviderEnabled,
-      policy.restoreEnabled
-    );
+  async applyProviderEntitlement(input: {
+    source: Extract<EntitlementSource, 'provider_restore' | 'provider_purchase'>;
+    activatedAt?: string | null;
+    expiresAt?: string | null;
+    lastValidatedAt?: string | null;
+  }): Promise<EntitlementSnapshot> {
+    const now = new Date().toISOString();
+
+    const nextState: StoredEntitlementState = {
+      schemaVersion: SCHEMA_VERSION,
+      plan: 'premium',
+      source: input.source,
+      activatedAt: normalizeNullableDate(input.activatedAt) ?? now,
+      expiresAt: normalizeNullableDate(input.expiresAt),
+      lastValidatedAt: normalizeNullableDate(input.lastValidatedAt) ?? now,
+    };
+
+    await writeStoredState(nextState);
+    log('applyProviderEntitlement succeeded:', nextState);
+
+    return resolveSnapshotFromState(nextState);
   },
 
   async restorePurchases(): Promise<RestorePurchasesResult> {
@@ -169,7 +205,10 @@ export const entitlementService = {
       return {
         status: 'not_supported',
         snapshot,
+        providerName: 'none',
         message: 'Geri yükleme akışı bu rollout içinde kapalı.',
+        transactionId: null,
+        customerId: null,
       };
     }
 
@@ -179,14 +218,20 @@ export const entitlementService = {
       return {
         status: 'not_supported',
         snapshot,
+        providerName: 'none',
         message: 'Mağaza satın alma entegrasyonu bu build içinde aktif değil.',
+        transactionId: null,
+        customerId: null,
       };
     }
 
     return {
       status: 'no_active_purchase',
       snapshot,
+      providerName: 'none',
       message: 'Geri yüklenecek aktif premium satın alma bulunamadı.',
+      transactionId: null,
+      customerId: null,
     };
   },
 
