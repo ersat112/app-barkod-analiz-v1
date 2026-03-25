@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -66,6 +65,7 @@ type LastProductCardProps = {
   subtitle: string;
   barcodeLabel: string;
   scoreLabel: string;
+  medicineLabel: string;
   fallbackBrand: string;
   fallbackName: string;
   onPress: () => void;
@@ -88,9 +88,11 @@ type RecentProductsCarouselProps = {
   title: string;
   subtitle: string;
   items: HistoryEntry[];
+  scoreLabel: string;
+  medicineLabel: string;
   fallbackBrand: string;
   fallbackName: string;
-  onItemPress: (barcode: string) => void;
+  onItemPress: (item: HistoryEntry) => void;
   colors: ThemeColors;
 };
 
@@ -112,7 +114,7 @@ type LiveInsightCardProps = {
     onPress?: () => void;
   }[];
   badgeLabel: string;
-  helperText: string;
+  helperText?: string;
   colors: ThemeColors;
 };
 
@@ -465,6 +467,7 @@ export const LastProductCard: React.FC<LastProductCardProps> = ({
   subtitle,
   barcodeLabel,
   scoreLabel,
+  medicineLabel,
   fallbackBrand,
   fallbackName,
   onPress,
@@ -480,12 +483,19 @@ export const LastProductCard: React.FC<LastProductCardProps> = ({
       onPress={onPress}
     >
       <View style={styles.lastProductHeader}>
-        <View style={[styles.challengeIconBox, { backgroundColor: `${colors.primary}15` }]}>
+        <View
+          style={[
+            styles.lastProductHeaderIcon,
+            { backgroundColor: `${colors.primary}15` },
+          ]}
+        >
           <Ionicons name="time-outline" size={20} color={colors.primary} />
         </View>
-        <View style={styles.challengeTextBox}>
-          <Text style={[styles.challengeTitle, { color: colors.text }]}>{title}</Text>
-          <Text style={[styles.challengeSubtitle, { color: colors.text }]}>{subtitle}</Text>
+        <View style={styles.lastProductHeaderTextWrap}>
+          <Text style={[styles.lastProductEyebrow, { color: colors.primary }]}>{title}</Text>
+          <Text style={[styles.lastProductSubtitle, { color: colors.mutedText }]}>
+            {subtitle}
+          </Text>
         </View>
         <Ionicons name="chevron-forward" size={20} color={colors.border} />
       </View>
@@ -509,7 +519,9 @@ export const LastProductCard: React.FC<LastProductCardProps> = ({
 
             <View style={[styles.inlineBadge, { backgroundColor: `${colors.primary}12` }]}>
               <Text style={[styles.inlineBadgeText, { color: colors.primary }]} numberOfLines={1}>
-                {scoreLabel}: {item.score ?? '-'}
+                {item.type === 'medicine'
+                  ? medicineLabel
+                  : `${scoreLabel}: ${item.score ?? '-'}`}
               </Text>
             </View>
           </View>
@@ -523,6 +535,8 @@ export const RecentProductsCarousel: React.FC<RecentProductsCarouselProps> = ({
   title,
   subtitle,
   items,
+  scoreLabel,
+  medicineLabel,
   fallbackBrand,
   fallbackName,
   onItemPress,
@@ -540,51 +554,59 @@ export const RecentProductsCarousel: React.FC<RecentProductsCarouselProps> = ({
       ]}
     >
       <View style={styles.carouselHeader}>
-        <View style={[styles.challengeIconBox, { backgroundColor: `${colors.primary}15` }]}>
+        <View
+          style={[
+            styles.lastProductHeaderIcon,
+            { backgroundColor: `${colors.primary}15` },
+          ]}
+        >
           <Ionicons name="albums-outline" size={20} color={colors.primary} />
         </View>
-        <View style={styles.challengeTextBox}>
-          <Text style={[styles.challengeTitle, { color: colors.text }]}>{title}</Text>
-          <Text style={[styles.challengeSubtitle, { color: colors.text }]}>{subtitle}</Text>
+        <View style={styles.lastProductHeaderTextWrap}>
+          <Text style={[styles.lastProductEyebrow, { color: colors.primary }]}>{title}</Text>
+          <Text style={[styles.lastProductSubtitle, { color: colors.mutedText }]}>
+            {subtitle}
+          </Text>
         </View>
       </View>
 
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.carouselContent}
-      >
-        {items.map((item) => (
+      <View style={styles.recentList}>
+        {items.slice(0, 4).map((item) => (
           <TouchableOpacity
             key={item.id}
             style={[
-              styles.carouselItem,
+              styles.recentListItem,
               { backgroundColor: colors.background, borderColor: colors.border },
             ]}
             activeOpacity={0.88}
-            onPress={() => onItemPress(item.barcode)}
+            onPress={() => onItemPress(item)}
           >
             <LastProductImage uri={item.image_url} />
-            <Text
-              style={[styles.carouselBrand, { color: colors.primary }]}
-              numberOfLines={1}
-            >
-              {item.brand || fallbackBrand}
-            </Text>
-            <Text
-              style={[styles.carouselName, { color: colors.text }]}
-              numberOfLines={2}
-            >
-              {item.name || fallbackName}
-            </Text>
-            <View style={[styles.inlineBadge, { backgroundColor: `${colors.primary}12` }]}>
-              <Text style={[styles.inlineBadgeText, { color: colors.primary }]}>
-                {item.score ?? '-'} / 100
+            <View style={styles.recentListTextWrap}>
+              <Text
+                style={[styles.carouselBrand, { color: colors.primary }]}
+                numberOfLines={1}
+              >
+                {item.brand || fallbackBrand}
+              </Text>
+              <Text
+                style={[styles.carouselName, { color: colors.text }]}
+                numberOfLines={2}
+              >
+                {item.name || fallbackName}
               </Text>
             </View>
+            <View style={[styles.inlineBadge, { backgroundColor: `${colors.primary}12` }]}>
+              <Text style={[styles.inlineBadgeText, { color: colors.primary }]}>
+                {item.type === 'medicine'
+                  ? medicineLabel
+                  : `${scoreLabel}: ${item.score ?? '-'}`}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={colors.border} />
           </TouchableOpacity>
         ))}
-      </ScrollView>
+      </View>
     </View>
   );
 };
@@ -725,9 +747,11 @@ export const LiveInsightCard: React.FC<LiveInsightCardProps> = ({
       </View>
 
       <View style={styles.liveInsightFooter}>
-        <Text style={[styles.liveInsightHelper, { color: colors.mutedText }]}>
-          {helperText}
-        </Text>
+        {helperText ? (
+          <Text style={[styles.liveInsightHelper, { color: colors.mutedText }]}>
+            {helperText}
+          </Text>
+        ) : <View />}
 
         <View style={styles.liveInsightDots}>
           {items.map((item, index) => (
@@ -1044,46 +1068,68 @@ const styles = StyleSheet.create({
   },
   lastProductCard: {
     borderWidth: 1,
-    borderRadius: 22,
-    padding: 18,
+    borderRadius: 20,
+    padding: 16,
     marginBottom: 18,
   },
   lastProductHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
+  },
+  lastProductHeaderIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lastProductHeaderTextWrap: {
+    flex: 1,
+  },
+  lastProductEyebrow: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.9,
+    textTransform: 'uppercase',
+  },
+  lastProductSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
   },
   lastProductContent: {
-    marginTop: 14,
+    marginTop: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
   },
   lastProductImage: {
-    width: 76,
-    height: 76,
-    borderRadius: 18,
+    width: 60,
+    height: 60,
+    borderRadius: 16,
     resizeMode: 'cover',
   },
   lastProductBody: {
     flex: 1,
-    marginLeft: 14,
   },
   lastProductBrand: {
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: 10,
+    fontWeight: '900',
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   lastProductName: {
     marginTop: 4,
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '800',
-    lineHeight: 24,
+    lineHeight: 21,
   },
   lastProductMetaRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 12,
+    gap: 6,
+    marginTop: 8,
   },
   inlineBadge: {
     borderRadius: 10,
@@ -1099,39 +1145,44 @@ const styles = StyleSheet.create({
   },
   carouselSection: {
     borderWidth: 1,
-    borderRadius: 22,
-    paddingVertical: 18,
+    borderRadius: 20,
+    paddingVertical: 16,
     marginBottom: 18,
   },
   carouselHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 18,
-    marginBottom: 14,
+    marginBottom: 12,
   },
-  carouselContent: {
+  recentList: {
     paddingHorizontal: 18,
-    gap: 12,
+    gap: 10,
   },
-  carouselItem: {
-    width: 156,
-    borderRadius: 18,
+  recentListItem: {
+    minHeight: 78,
+    borderRadius: 16,
     borderWidth: 1,
-    padding: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  recentListTextWrap: {
+    flex: 1,
   },
   carouselBrand: {
-    marginTop: 10,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '900',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
   },
   carouselName: {
     marginTop: 4,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
     lineHeight: 19,
-    minHeight: 38,
   },
   quickInsightsRow: {
     flexDirection: 'row',

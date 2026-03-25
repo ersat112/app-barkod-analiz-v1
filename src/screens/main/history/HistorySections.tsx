@@ -27,6 +27,7 @@ type HistoryListItemProps = {
   timeLabel: string;
   beautyLabel: string;
   foodLabel: string;
+  medicineLabel: string;
   favoriteLabel: string;
   unfavoriteLabel: string;
   rescanLabel: string;
@@ -72,11 +73,83 @@ type HistoryFilterBarProps = {
   allLabel: string;
   foodLabel: string;
   beautyLabel: string;
+  medicineLabel: string;
   clearLabel: string;
   colors: ThemeColors;
 };
 
 const FALLBACK_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
+
+const getScoreBubblePalette = (
+  item: HistoryEntry,
+  colors: ThemeColors
+): {
+  backgroundColor: string;
+  borderColor: string;
+  textColor: string;
+  value: string;
+  label: string;
+} => {
+  if (item.type === 'medicine') {
+    return {
+      backgroundColor: `${colors.primary}14`,
+      borderColor: `${colors.primary}38`,
+      textColor: colors.primary,
+      value: 'MED',
+      label: 'TITCK',
+    };
+  }
+
+  const score = typeof item.score === 'number' ? item.score : 0;
+
+  if (score >= 85) {
+    return {
+      backgroundColor: '#1ED76018',
+      borderColor: '#1ED76045',
+      textColor: '#148A48',
+      value: String(score),
+      label: '/100',
+    };
+  }
+
+  if (score >= 70) {
+    return {
+      backgroundColor: '#7ED95718',
+      borderColor: '#7ED95745',
+      textColor: '#4F9E2D',
+      value: String(score),
+      label: '/100',
+    };
+  }
+
+  if (score >= 55) {
+    return {
+      backgroundColor: '#F5B70018',
+      borderColor: '#F5B70045',
+      textColor: '#A06B00',
+      value: String(score),
+      label: '/100',
+    };
+  }
+
+  if (score >= 35) {
+    return {
+      backgroundColor: '#FF8A0018',
+      borderColor: '#FF8A0045',
+      textColor: '#B85B00',
+      value: String(score),
+      label: '/100',
+    };
+  }
+
+  return {
+    backgroundColor: '#FF4D4F18',
+    borderColor: '#FF4D4F45',
+    textColor: '#C73436',
+    value: String(score),
+    label: '/100',
+  };
+};
 
 export const HistoryListHeader: React.FC<HistoryHeaderProps> = ({
   title,
@@ -103,6 +176,7 @@ export const HistoryFilterBar: React.FC<HistoryFilterBarProps> = ({
   allLabel,
   foodLabel,
   beautyLabel,
+  medicineLabel,
   clearLabel,
   colors,
 }) => {
@@ -110,6 +184,7 @@ export const HistoryFilterBar: React.FC<HistoryFilterBarProps> = ({
     { key: 'all', label: allLabel },
     { key: 'food', label: foodLabel },
     { key: 'beauty', label: beautyLabel },
+    { key: 'medicine', label: medicineLabel },
   ];
 
   return (
@@ -208,6 +283,7 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
   timeLabel,
   beautyLabel,
   foodLabel,
+  medicineLabel,
   favoriteLabel,
   unfavoriteLabel,
   rescanLabel,
@@ -220,6 +296,8 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
   onRescan,
   colors,
 }) => {
+  const scoreBubble = getScoreBubblePalette(item, colors);
+
   return (
     <Swipeable
       overshootRight={false}
@@ -256,8 +334,26 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
             </View>
 
             <View style={styles.itemRightArea}>
-              <Text style={[styles.itemTime, { color: colors.text }]}>{timeLabel}</Text>
-              <Ionicons name="chevron-forward" size={18} color={colors.border} />
+              <View
+                style={[
+                  styles.scoreBubble,
+                  {
+                    backgroundColor: scoreBubble.backgroundColor,
+                    borderColor: scoreBubble.borderColor,
+                  },
+                ]}
+              >
+                <Text style={[styles.scoreBubbleValue, { color: scoreBubble.textColor }]}>
+                  {scoreBubble.value}
+                </Text>
+                <Text style={[styles.scoreBubbleLabel, { color: scoreBubble.textColor }]}>
+                  {scoreBubble.label}
+                </Text>
+              </View>
+              <View style={styles.itemTimeRow}>
+                <Text style={[styles.itemTime, { color: colors.text }]}>{timeLabel}</Text>
+                <Ionicons name="chevron-forward" size={16} color={colors.border} />
+              </View>
             </View>
           </View>
 
@@ -267,16 +363,11 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
                 style={[styles.inlineBadgeText, { color: colors.primary }]}
                 numberOfLines={1}
               >
-                {item.score ?? '-'} / 100
-              </Text>
-            </View>
-
-            <View style={[styles.inlineBadge, { backgroundColor: `${colors.primary}12` }]}>
-              <Text
-                style={[styles.inlineBadgeText, { color: colors.primary }]}
-                numberOfLines={1}
-              >
-                {item.type === 'beauty' ? beautyLabel : foodLabel}
+                {item.type === 'beauty'
+                  ? beautyLabel
+                  : item.type === 'medicine'
+                    ? medicineLabel
+                    : foodLabel}
               </Text>
             </View>
           </View>
@@ -476,111 +567,134 @@ const styles = StyleSheet.create({
   },
   itemCard: {
     marginHorizontal: 16,
-    marginBottom: 12,
-    borderRadius: 20,
+    marginBottom: 8,
+    borderRadius: 16,
     borderWidth: 1,
-    padding: 14,
+    padding: 12,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   itemImage: {
-    width: 72,
-    height: 72,
-    borderRadius: 18,
+    width: 58,
+    height: 58,
+    borderRadius: 14,
     resizeMode: 'cover',
   },
   itemDetails: {
     flex: 1,
-    marginLeft: 14,
+    marginLeft: 12,
   },
   itemHeaderRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 10,
+    gap: 8,
   },
   itemHeaderTextWrap: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 40,
   },
   itemBrand: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '900',
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.8,
   },
   itemName: {
-    marginTop: 5,
-    fontSize: 15,
+    marginTop: 4,
+    fontSize: 14,
     fontWeight: '800',
-    lineHeight: 21,
+    lineHeight: 19,
   },
   itemMetaRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 10,
+    gap: 6,
+    marginTop: 8,
   },
   inlineBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 9,
     maxWidth: '100%',
   },
   inlineBadgeText: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
   },
   itemRightArea: {
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    minHeight: 42,
+    minHeight: 58,
+  },
+  itemTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   itemTime: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     opacity: 0.7,
-    marginBottom: 8,
+  },
+  scoreBubble: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scoreBubbleValue: {
+    fontSize: 15,
+    fontWeight: '900',
+    lineHeight: 18,
+  },
+  scoreBubbleLabel: {
+    marginTop: 1,
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
   itemActionsRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 12,
+    gap: 8,
+    marginTop: 10,
   },
   secondaryActionButton: {
     flex: 1,
-    minHeight: 40,
+    minHeight: 34,
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 12,
+    borderRadius: 12,
+    paddingHorizontal: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
   },
   secondaryActionText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
   },
   primaryActionButton: {
     flex: 1.1,
-    minHeight: 40,
-    borderRadius: 14,
-    paddingHorizontal: 12,
+    minHeight: 34,
+    borderRadius: 12,
+    paddingHorizontal: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 6,
   },
   primaryActionText: {
     color: '#000',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '900',
   },
   deleteAction: {
     marginRight: 16,
-    marginBottom: 12,
-    width: 88,
-    borderRadius: 20,
+    marginBottom: 8,
+    width: 78,
+    borderRadius: 16,
     backgroundColor: '#FF4D4F',
     alignItems: 'center',
     justifyContent: 'center',

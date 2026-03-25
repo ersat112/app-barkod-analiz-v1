@@ -4,7 +4,8 @@ export type ProductRepositorySource =
   | 'local_cache'
   | 'shared_cache'
   | 'food'
-  | 'beauty';
+  | 'beauty'
+  | 'medicine';
 
 export type ProductRepositoryCacheTier = 'local' | 'remote' | 'network';
 
@@ -42,7 +43,7 @@ export type ProductRepositoryRemoteFetchResult =
       found: true;
       barcode: string;
       product: Product;
-      source: 'food' | 'beauty';
+      source: 'food' | 'beauty' | 'medicine';
     }
   | {
       found: false;
@@ -55,7 +56,7 @@ export type ProductRepositoryLookupResult =
       found: true;
       barcode: string;
       product: Product;
-      source: 'food' | 'beauty' | 'cache';
+      source: 'food' | 'beauty' | 'medicine' | 'cache';
       lookupMeta?: ProductRepositoryLookupMeta;
     }
   | {

@@ -72,6 +72,7 @@ export const MissingProductScreen: React.FC = () => {
     () => [
       { value: 'food', label: tt('food_label', 'Gıda') },
       { value: 'beauty', label: tt('beauty_label', 'Kozmetik') },
+      { value: 'medicine', label: tt('medicine_label', 'İlaç') },
       { value: 'unknown', label: tt('unknown', 'Bilinmiyor') },
     ],
     [tt]

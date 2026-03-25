@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -9,7 +9,6 @@ import {
   StyleSheet,
   StatusBar,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
   Switch,
@@ -26,18 +25,18 @@ import { useTheme, type ThemeColors } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { AdBanner } from '../../components/AdBanner';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
-import {
-  SearchableSelectSheet,
-  SelectionField,
-} from '../../components/ui/SearchableSelectSheet';
+import { SearchableSelectSheet } from '../../components/ui/SearchableSelectSheet';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useOperabilityDiagnostics } from '../../hooks/useOperabilityDiagnostics';
-import { useSettingsProfileEditor } from '../../hooks/useSettingsProfileEditor';
 import { useMonetizationStatus } from '../../hooks/useMonetizationStatus';
+import { ALL_E_CODES } from '../../services/eCodesData';
+import {
+  disableEngagementNotifications,
+  syncEngagementNotifications,
+} from '../../services/engagementNotifications.service';
 import { analyticsService } from '../../services/analytics.service';
-import { getDistrictsByCity, searchCities } from '../../services/locationData';
-import { locationService } from '../../services/locationService';
 import { clearMonetizationFlowLogs } from '../../services/purchaseFlowLog.service';
+import { usePreferenceStore } from '../../store/usePreferenceStore';
 import {
   buildAvatarLetter,
   buildUserDisplayName,
@@ -45,7 +44,7 @@ import {
 } from '../../services/userPresentation.service';
 import { withAlpha } from '../../utils/color';
 
-const APP_VERSION = 'v1.0.4';
+const APP_VERSION = 'v1.0.1';
 
 type SettingsItemProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -56,24 +55,11 @@ type SettingsItemProps = {
   colors: ThemeColors;
 };
 
-type ProfileFieldProps = {
-  label: string;
-  value: string;
-  placeholder: string;
-  onChangeText: (value: string) => void;
-  colors: ThemeColors;
-  isDark: boolean;
-  multiline?: boolean;
-  editable?: boolean;
-  helperText?: string;
-};
-
-type PremiumCardProps = {
+type SettingsActionCardProps = {
+  icon: keyof typeof Ionicons.glyphMap;
   title: string;
   subtitle: string;
-  statusLabel: string;
-  ctaLabel: string;
-  metaLabel: string;
+  badgeLabel?: string;
   onPress: () => void;
   colors: ThemeColors;
 };
@@ -132,120 +118,58 @@ const SettingsItem: React.FC<SettingsItemProps> = ({
   </TouchableOpacity>
 );
 
-const ProfileField: React.FC<ProfileFieldProps> = ({
-  label,
-  value,
-  placeholder,
-  onChangeText,
-  colors,
-  isDark,
-  multiline = false,
-  editable = true,
-  helperText,
-}) => {
-  return (
-    <View style={styles.profileFieldGroup}>
-      <Text style={[styles.profileFieldLabel, { color: colors.text }]}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={`${colors.text}55`}
-        multiline={multiline}
-        editable={editable}
-        textAlignVertical={multiline ? 'top' : 'center'}
-        style={[
-          styles.profileInput,
-          multiline && styles.profileInputMultiline,
-          {
-            color: colors.text,
-            borderColor: withAlpha(colors.border, 'CC'),
-            backgroundColor: editable
-              ? withAlpha(colors.backgroundMuted, isDark ? 'D6' : 'F4')
-              : withAlpha(colors.backgroundMuted, isDark ? '72' : 'C8'),
-          },
-        ]}
-      />
-      {helperText ? (
-        <Text style={[styles.profileFieldHelper, { color: colors.mutedText }]}>
-          {helperText}
-        </Text>
-      ) : null}
-    </View>
-  );
-};
-
-const PremiumCard: React.FC<PremiumCardProps> = ({
+const SettingsActionCard: React.FC<SettingsActionCardProps> = ({
+  icon,
   title,
   subtitle,
-  statusLabel,
-  ctaLabel,
-  metaLabel,
+  badgeLabel,
   onPress,
   colors,
 }) => {
-  const { t } = useTranslation();
-  const tt = useCallback(
-    (key: string, fallback: string) => {
-      const value = t(key, { defaultValue: fallback });
-      return value === key ? fallback : value;
-    },
-    [t]
-  );
-
   return (
     <TouchableOpacity
       style={[
-        styles.premiumCard,
+        styles.actionCard,
         {
-          backgroundColor: withAlpha(colors.cardElevated, 'F1'),
+          backgroundColor: withAlpha(colors.cardElevated, 'EE'),
           borderColor: withAlpha(colors.border, 'B8'),
           shadowColor: colors.shadow,
         },
       ]}
       onPress={onPress}
-      activeOpacity={0.9}
+      activeOpacity={0.88}
     >
-      <View style={styles.premiumHeader}>
-        <View style={[styles.premiumIconWrap, { backgroundColor: `${colors.primary}14` }]}>
-          <Ionicons name="diamond-outline" size={22} color={colors.primary} />
-        </View>
-
-        <View style={styles.premiumHeaderTextWrap}>
-          <Text style={[styles.premiumTitle, { color: colors.text }]}>{title}</Text>
-          <Text style={[styles.premiumSubtitle, { color: colors.text }]}>{subtitle}</Text>
-        </View>
-
-        <View style={[styles.premiumStatusBadge, { backgroundColor: `${colors.primary}12` }]}>
-          <Text style={[styles.premiumStatusText, { color: colors.primary }]}>
-            {statusLabel}
-          </Text>
-        </View>
+      <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
+        <Ionicons name={icon} size={20} color={colors.primary} />
       </View>
 
-      <View style={styles.premiumFeatureRow}>
-        <View style={styles.premiumFeatureItem}>
-          <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
-          <Text style={[styles.premiumFeatureText, { color: colors.text }]}>
-            {tt('value_chip_adfree', 'Reklamsız')}
-          </Text>
-        </View>
-
-        <View style={styles.premiumFeatureItem}>
-          <Ionicons name="checkmark-circle" size={16} color={colors.primary} />
-          <Text style={[styles.premiumFeatureText, { color: colors.text }]}>
-            {tt('value_chip_unlimited', 'Limitsiz tarama')}
-          </Text>
-        </View>
+      <View style={styles.actionCardTextWrap}>
+        <Text style={[styles.actionCardTitle, { color: colors.text }]}>{title}</Text>
+        <Text style={[styles.actionCardSubtitle, { color: colors.mutedText }]}>
+          {subtitle}
+        </Text>
       </View>
 
-      <View style={styles.premiumFooter}>
-        <Text style={[styles.premiumMetaText, { color: colors.text }]}>{metaLabel}</Text>
-
-        <View style={[styles.premiumCtaButton, { backgroundColor: colors.primary }]}>
-          <Text style={[styles.premiumCtaText, { color: colors.primaryContrast }]}>
-            {ctaLabel}
-          </Text>
+      <View style={styles.actionCardRight}>
+        {badgeLabel ? (
+          <View
+            style={[
+              styles.actionCardBadge,
+              { backgroundColor: withAlpha(colors.primary, '10') },
+            ]}
+          >
+            <Text style={[styles.actionCardBadgeText, { color: colors.primary }]}>
+              {badgeLabel}
+            </Text>
+          </View>
+        ) : null}
+        <View
+          style={[
+            styles.itemChevronWrap,
+            { backgroundColor: withAlpha(colors.primary, '10') },
+          ]}
+        >
+          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
         </View>
       </View>
     </TouchableOpacity>
@@ -328,16 +252,6 @@ function formatOptionalText(value?: string | null): string {
   }
 
   return '-';
-}
-
-function mergeLocationOptions(primary: string[], secondary: string[]): string[] {
-  return Array.from(
-    new Set(
-      [...primary, ...secondary]
-        .map((item) => item.trim())
-        .filter(Boolean)
-    )
-  ).sort((left, right) => left.localeCompare(right, 'tr'));
 }
 
 function formatTryPrice(value: number): string {
@@ -467,6 +381,10 @@ export const SettingsScreen: React.FC = () => {
   const { user, profile, loading: authLoading, profileError, refreshProfile } = useAuth();
   const { colors, isDark, setIsDark, toggleTheme } = useTheme();
   const { locale, changeLanguage, supportedLanguages, ready: languageReady } = useLanguage();
+  const notificationsEnabled = usePreferenceStore((state) => state.notificationsEnabled);
+  const setNotificationsEnabled = usePreferenceStore(
+    (state) => state.setNotificationsEnabled
+  );
 
   const layout = useAppScreenLayout({
     topInsetExtra: 16,
@@ -500,21 +418,6 @@ export const SettingsScreen: React.FC = () => {
 
   const monetization = useMonetizationStatus();
 
-  const {
-    draft,
-    isEditing,
-    isSaving,
-    hasChanges,
-    resolvedCity,
-    saveError,
-    startEditing,
-    cancelEditing,
-    setField,
-    selectCity,
-    selectDistrict,
-    save,
-  } = useSettingsProfileEditor();
-
   const tt = useCallback(
     (key: string, fallback: string) => {
       const value = t(key, { defaultValue: fallback });
@@ -524,63 +427,11 @@ export const SettingsScreen: React.FC = () => {
   );
 
   const [refreshing, setRefreshing] = useState(false);
-  const [cityPickerVisible, setCityPickerVisible] = useState(false);
-  const [districtPickerVisible, setDistrictPickerVisible] = useState(false);
-  const [cityPickerSearch, setCityPickerSearch] = useState('');
-  const [districtPickerSearch, setDistrictPickerSearch] = useState('');
-  const [districtOptions, setDistrictOptions] = useState<string[]>([]);
-  const [districtOptionsLoading, setDistrictOptionsLoading] = useState(false);
+  const [languagePickerVisible, setLanguagePickerVisible] = useState(false);
+  const [languagePickerSearch, setLanguagePickerSearch] = useState('');
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [flowLogResetting, setFlowLogResetting] = useState(false);
-
-  useEffect(() => {
-    if (!isEditing) {
-      setCityPickerVisible(false);
-      setDistrictPickerVisible(false);
-      setCityPickerSearch('');
-      setDistrictPickerSearch('');
-    }
-  }, [isEditing]);
-
-  useEffect(() => {
-    let isActive = true;
-
-    if (!resolvedCity) {
-      setDistrictOptions([]);
-      setDistrictOptionsLoading(false);
-      return () => {
-        isActive = false;
-      };
-    }
-
-    const localDistrictOptions = getDistrictsByCity(resolvedCity);
-    setDistrictOptions(localDistrictOptions);
-    setDistrictOptionsLoading(true);
-
-    void locationService
-      .getDistrictsByCityName(resolvedCity)
-      .then((remoteDistrictOptions) => {
-        if (!isActive) {
-          return;
-        }
-
-        setDistrictOptions(
-          mergeLocationOptions(localDistrictOptions, remoteDistrictOptions)
-        );
-      })
-      .catch((error) => {
-        console.warn('[SettingsScreen] district options load failed:', error);
-      })
-      .finally(() => {
-        if (isActive) {
-          setDistrictOptionsLoading(false);
-        }
-      });
-
-    return () => {
-      isActive = false;
-    };
-  }, [resolvedCity]);
+  const [notificationSyncing, setNotificationSyncing] = useState(false);
 
   const handleOpenPaywall = useCallback(() => {
     void analyticsService.track(
@@ -706,22 +557,9 @@ export const SettingsScreen: React.FC = () => {
     );
   }, [tt]);
 
-  const handleProfileSave = useCallback(async () => {
-    const success = await save();
-
-    if (!success) {
-      Alert.alert(
-        tt('error_title', 'Hata'),
-        tt('profile_save_error', 'Profil bilgileri kaydedilemedi.')
-      );
-      return;
-    }
-
-    Alert.alert(
-      tt('success_title', 'Başarılı'),
-      tt('profile_saved', 'Profil bilgileriniz güncellendi.')
-    );
-  }, [save, tt]);
+  const handleOpenProfileSettings = useCallback(() => {
+    navigation.navigate('ProfileSettings');
+  }, [navigation]);
 
   const displayName = useMemo(() => {
     return buildUserDisplayName({
@@ -789,64 +627,89 @@ export const SettingsScreen: React.FC = () => {
     return formatTimeValue(firebaseDiagnostics?.fetchedAt);
   }, [firebaseDiagnostics?.fetchedAt]);
 
-  const readonlyLocation = useMemo(() => {
-    const city = profile?.city?.trim();
-    const district = profile?.district?.trim();
+  const languageOptions = useMemo(() => {
+    return supportedLanguages.map((code) => ({
+      code,
+      label:
+        code === 'tr'
+          ? tt('language_option_tr', 'Türkçe')
+          : code === 'en'
+            ? tt('language_option_en', 'English')
+            : code === 'de'
+              ? tt('language_option_de', 'Deutsch')
+              : tt('language_option_fr', 'Français'),
+    }));
+  }, [supportedLanguages, tt]);
 
-    if (city && district) {
-      return `${city} / ${district}`;
-    }
-
-    return city || district || tt('location_not_set', 'Konum bilgisi eklenmemiş');
-  }, [profile?.city, profile?.district, tt]);
-
-  const cityPickerItems = useMemo(() => {
-    return searchCities(cityPickerSearch).slice(0, 81);
-  }, [cityPickerSearch]);
-
-  const districtPickerItems = useMemo(() => {
-    const query = districtPickerSearch.trim().toLocaleLowerCase('tr');
-
-    if (!query) {
-      return districtOptions;
-    }
-
-    return districtOptions.filter((item) =>
-      item.toLocaleLowerCase('tr').includes(query)
+  const selectedLanguageLabel = useMemo(() => {
+    return (
+      languageOptions.find((option) => option.code === locale)?.label ??
+      locale.toUpperCase()
     );
-  }, [districtOptions, districtPickerSearch]);
+  }, [languageOptions, locale]);
 
-  const openCityPicker = useCallback(() => {
-    setCityPickerSearch(draft.city);
-    setCityPickerVisible(true);
-  }, [draft.city]);
+  const languagePickerItems = useMemo(() => {
+    const query = languagePickerSearch.trim().toLocaleLowerCase('tr');
 
-  const openDistrictPicker = useCallback(() => {
-    if (!resolvedCity) {
-      return;
-    }
+    return languageOptions
+      .filter((option) => {
+        if (!query) {
+          return true;
+        }
 
-    setDistrictPickerSearch(draft.district);
-    setDistrictPickerVisible(true);
-  }, [draft.district, resolvedCity]);
+        return (
+          option.label.toLocaleLowerCase('tr').includes(query) ||
+          option.code.toLocaleLowerCase('tr').includes(query)
+        );
+      })
+      .map((option) => option.label);
+  }, [languageOptions, languagePickerSearch]);
 
-  const handleCitySelect = useCallback(
-    (value: string) => {
-      selectCity(value);
-      setCityPickerSearch(value);
-      setDistrictPickerSearch('');
-      setCityPickerVisible(false);
+  const handleLanguageSelect = useCallback(
+    (label: string) => {
+      const selectedLanguage = languageOptions.find((item) => item.label === label);
+
+      setLanguagePickerVisible(false);
+
+      if (!selectedLanguage) {
+        return;
+      }
+
+      void (async () => {
+        await changeLanguage(selectedLanguage.code);
+        await syncEngagementNotifications();
+      })();
     },
-    [selectCity]
+    [changeLanguage, languageOptions]
   );
 
-  const handleDistrictSelect = useCallback(
-    (value: string) => {
-      selectDistrict(value);
-      setDistrictPickerSearch(value);
-      setDistrictPickerVisible(false);
+  const handleNotificationToggle = useCallback(
+    (value: boolean) => {
+      setNotificationsEnabled(value);
+      setNotificationSyncing(true);
+
+      void (async () => {
+        try {
+          if (value) {
+            await syncEngagementNotifications();
+          } else {
+            await disableEngagementNotifications();
+          }
+        } catch (error) {
+          console.error('[SettingsScreen] notification toggle failed:', error);
+          Alert.alert(
+            tt('error_title', 'Hata'),
+            tt(
+              'smart_notifications_error',
+              'Bildirim tercihleri güncellenemedi. Lütfen tekrar deneyin.'
+            )
+          );
+        } finally {
+          setNotificationSyncing(false);
+        }
+      })();
     },
-    [selectDistrict]
+    [setNotificationsEnabled, tt]
   );
 
   const premiumTitle = monetization.entitlement?.isPremium
@@ -866,15 +729,6 @@ export const SettingsScreen: React.FC = () => {
   const premiumStatusLabel = monetization.entitlement?.isPremium
     ? tt('premium_badge_active', 'Aktif')
     : tt('premium_badge_yearly', 'Yıllık');
-
-  const premiumCtaLabel = monetization.entitlement?.isPremium
-    ? tt('manage_premium', 'Premium Durumunu Gör')
-    : tt('open_premium_offer', 'Premium Teklifini Aç');
-
-  const premiumMetaLabel =
-    monetization.policy?.annualPriceTry != null
-      ? `${formatTryPrice(monetization.policy.annualPriceTry)} / yıl`
-      : '39,99 TL / yıl';
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -1025,10 +879,31 @@ export const SettingsScreen: React.FC = () => {
           { color: colors.text, marginHorizontal: layout.horizontalPadding },
         ]}
       >
-        {tt('premium', 'Premium')}
+        {tt('account_and_plan', 'Hesap ve Plan')}
       </Text>
 
-      <View style={{ marginHorizontal: layout.horizontalPadding, marginBottom: 22 }}>
+      <View style={{ marginHorizontal: layout.horizontalPadding, marginBottom: 22, gap: 12 }}>
+        <SettingsActionCard
+          icon="person-circle-outline"
+          title={tt('profile_information', 'Profil Bilgileri')}
+          subtitle={tt(
+            'settings_profile_entry_subtitle',
+            'Ad, soyad, iletişim ve konum bilgilerinizi ayrı ekranda düzenleyin.'
+          )}
+          badgeLabel={displayName}
+          onPress={handleOpenProfileSettings}
+          colors={colors}
+        />
+
+        <SettingsActionCard
+          icon="diamond-outline"
+          title={premiumTitle}
+          subtitle={premiumSubtitle}
+          badgeLabel={premiumStatusLabel}
+          onPress={handleOpenPaywall}
+          colors={colors}
+        />
+
         {monetization.loading ? (
           <View
             style={[
@@ -1041,255 +916,11 @@ export const SettingsScreen: React.FC = () => {
           >
             <ActivityIndicator size="small" color={colors.primary} />
           </View>
-        ) : (
-          <PremiumCard
-            title={premiumTitle}
-            subtitle={premiumSubtitle}
-            statusLabel={premiumStatusLabel}
-            ctaLabel={premiumCtaLabel}
-            metaLabel={premiumMetaLabel}
-            onPress={handleOpenPaywall}
-            colors={colors}
-          />
-        )}
+        ) : null}
 
         {monetization.error ? (
           <Text style={styles.monetizationErrorText}>{monetization.error}</Text>
         ) : null}
-      </View>
-
-      <Text
-        style={[
-          styles.sectionTitle,
-          { color: colors.text, marginHorizontal: layout.horizontalPadding },
-        ]}
-      >
-        {tt('profile', 'Profil')}
-      </Text>
-
-      <View
-        style={[
-          styles.profileEditorCard,
-          {
-            backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-            borderColor: withAlpha(colors.border, 'B8'),
-            marginHorizontal: layout.horizontalPadding,
-          },
-        ]}
-      >
-        <View style={styles.profileEditorHeader}>
-          <View style={styles.profileEditorHeaderTextWrap}>
-            <Text style={[styles.profileEditorTitle, { color: colors.text }]}>
-              {tt('profile_information', 'Profil Bilgileri')}
-            </Text>
-            <Text style={[styles.profileEditorSubtitle, { color: colors.text }]}>
-              {tt(
-                'profile_information_subtitle',
-                'Ad, soyad, telefon ve adres bilgilerinizi buradan güncelleyebilirsiniz.'
-              )}
-            </Text>
-          </View>
-
-          {!isEditing ? (
-            <TouchableOpacity
-              style={[
-                styles.profileEditIconButton,
-                {
-                  backgroundColor: `${colors.primary}12`,
-                  borderColor: colors.border,
-                },
-              ]}
-              onPress={startEditing}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="create-outline" size={18} color={colors.primary} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-        {isEditing ? (
-          <>
-            <View style={styles.profileFieldRow}>
-              <View style={styles.profileFieldHalf}>
-                <ProfileField
-                  label={tt('first_name', 'Ad')}
-                  value={draft.firstName}
-                  placeholder={tt('first_name', 'Ad')}
-                  onChangeText={(value) => setField('firstName', value)}
-                  colors={colors}
-                  isDark={isDark}
-                />
-              </View>
-
-              <View style={styles.profileFieldHalf}>
-                <ProfileField
-                  label={tt('last_name', 'Soyad')}
-                  value={draft.lastName}
-                  placeholder={tt('last_name', 'Soyad')}
-                  onChangeText={(value) => setField('lastName', value)}
-                  colors={colors}
-                  isDark={isDark}
-                />
-              </View>
-            </View>
-
-            <ProfileField
-              label={tt('phone', 'Telefon')}
-              value={draft.phone}
-              placeholder={tt('phone', 'Telefon')}
-              onChangeText={(value) => setField('phone', value)}
-              colors={colors}
-              isDark={isDark}
-            />
-
-            <View style={styles.profileFieldRow}>
-              <View style={styles.profileFieldHalf}>
-                <SelectionField
-                  label={tt('city', 'Şehir')}
-                  value={draft.city}
-                  placeholder={tt('select_city', 'Şehir seçin')}
-                  onPress={openCityPicker}
-                  colors={colors}
-                  isDark={isDark}
-                  helperText={tt(
-                    'city_picker_helper',
-                    'Şehrinizi seçmek için dokunun.'
-                  )}
-                />
-              </View>
-
-              <View style={styles.profileFieldHalf}>
-                <SelectionField
-                  label={tt('district', 'İlçe')}
-                  value={draft.district}
-                  placeholder={
-                    resolvedCity
-                      ? tt('select_district', 'İlçe seçin')
-                      : tt('select_city_first', 'Önce şehir seçin')
-                  }
-                  onPress={openDistrictPicker}
-                  colors={colors}
-                  isDark={isDark}
-                  disabled={!resolvedCity}
-                  helperText={
-                    resolvedCity
-                      ? tt(
-                          'district_picker_helper',
-                          'İlçenizi seçmek için dokunun.'
-                        )
-                      : tt(
-                          'district_helper_select_city',
-                          'İlçe önerilerini görmek için önce şehir seçin.'
-                        )
-                  }
-                />
-              </View>
-            </View>
-
-            <ProfileField
-              label={tt('address', 'Adres')}
-              value={draft.address}
-              placeholder={tt('address', 'Adres')}
-              onChangeText={(value) => setField('address', value)}
-              colors={colors}
-              isDark={isDark}
-              multiline
-            />
-
-            {saveError ? (
-              <Text style={styles.profileSaveErrorText}>
-                {tt('profile_save_error', 'Profil bilgileri kaydedilemedi.')}
-              </Text>
-            ) : null}
-
-            <View style={styles.profileActionsRow}>
-              <TouchableOpacity
-                style={[
-                  styles.secondaryProfileButton,
-                  {
-                    borderColor: colors.border,
-                  },
-                ]}
-                onPress={cancelEditing}
-                disabled={isSaving}
-                activeOpacity={0.85}
-              >
-                <Text style={[styles.secondaryProfileButtonText, { color: colors.text }]}>
-                  {tt('cancel', 'İptal')}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.primaryProfileButton,
-                  {
-                    backgroundColor: hasChanges ? colors.primary : colors.border,
-                    opacity: isSaving ? 0.7 : 1,
-                  },
-                ]}
-                onPress={handleProfileSave}
-                disabled={!hasChanges || isSaving}
-                activeOpacity={0.9}
-              >
-                {isSaving ? (
-                  <ActivityIndicator size="small" color="#000" />
-                ) : (
-                  <Text style={styles.primaryProfileButtonText}>
-                    {tt('save', 'Kaydet')}
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </>
-        ) : (
-          <View style={styles.readonlyProfileList}>
-            <View style={styles.readonlyProfileRow}>
-              <Text style={[styles.readonlyProfileLabel, { color: colors.text }]}>
-                {tt('email', 'E-posta')}
-              </Text>
-              <Text style={[styles.readonlyProfileValue, { color: colors.text }]}>
-                {formatOptionalText(profile?.email || user?.email)}
-              </Text>
-            </View>
-
-            <View style={styles.readonlyProfileRow}>
-              <Text style={[styles.readonlyProfileLabel, { color: colors.text }]}>
-                {tt('phone', 'Telefon')}
-              </Text>
-              <Text style={[styles.readonlyProfileValue, { color: colors.text }]}>
-                {formatOptionalText(profile?.phone)}
-              </Text>
-            </View>
-
-            <View style={styles.readonlyProfileRow}>
-              <Text style={[styles.readonlyProfileLabel, { color: colors.text }]}>
-                {tt('location', 'Konum')}
-              </Text>
-              <Text style={[styles.readonlyProfileValue, { color: colors.text }]}>
-                {readonlyLocation}
-              </Text>
-            </View>
-
-            <View style={styles.readonlyProfileRow}>
-              <Text style={[styles.readonlyProfileLabel, { color: colors.text }]}>
-                {tt('address', 'Adres')}
-              </Text>
-              <Text style={[styles.readonlyProfileValue, { color: colors.text }]}>
-                {formatOptionalText(profile?.address)}
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.primaryProfileButton, { backgroundColor: colors.primary, marginTop: 16 }]}
-              onPress={startEditing}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.primaryProfileButtonText}>
-                {tt('edit_profile', 'Profili Düzenle')}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </View>
 
       <Text
@@ -1320,58 +951,41 @@ export const SettingsScreen: React.FC = () => {
         />
       </SettingsItem>
 
-      <View
-        style={[
-          styles.languageBox,
-          {
-            backgroundColor: withAlpha(colors.cardElevated, 'EE'),
-            borderColor: withAlpha(colors.border, 'B8'),
-            marginHorizontal: layout.horizontalPadding,
-          },
-        ]}
-      >
-        <View style={styles.itemLeft}>
-          <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
-            <Ionicons name="globe-outline" size={20} color={colors.primary} />
-          </View>
-          <Text style={[styles.itemLabel, { color: colors.text }]}>
-            {tt('language', 'Dil')}
-          </Text>
-        </View>
+      <SettingsItem
+        icon="language-outline"
+        label={tt('language_options', 'Dil Seçenekleri')}
+        colors={colors}
+        value={languageReady ? selectedLanguageLabel : tt('loading', 'Yükleniyor')}
+        onPress={() => {
+          setLanguagePickerSearch('');
+          setLanguagePickerVisible(true);
+        }}
+      />
 
-        <View style={styles.langOptions}>
-          {!languageReady ? (
+      <SettingsItem
+        icon="notifications-outline"
+        label={tt('smart_notifications', 'Akıllı Bildirimler')}
+        colors={colors}
+      >
+        <View style={styles.itemRight}>
+          {notificationSyncing ? (
             <ActivityIndicator size="small" color={colors.primary} />
           ) : (
-            supportedLanguages.map((lang) => {
-              const isSelected = locale === lang;
-
-              return (
-                <TouchableOpacity
-                  key={lang}
-                  style={[
-                    styles.langBtn,
-                    {
-                      borderColor: isSelected ? colors.primary : colors.border,
-                      backgroundColor: isSelected ? `${colors.primary}10` : 'transparent',
-                    },
-                  ]}
-                  onPress={() => changeLanguage(lang)}
-                >
-                  <Text
-                    style={[
-                      styles.langText,
-                      { color: isSelected ? colors.primary : colors.text },
-                    ]}
-                  >
-                    {lang.toUpperCase()}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })
+            <Text style={[styles.itemValue, { color: colors.text }]} numberOfLines={1}>
+              {notificationsEnabled
+                ? tt('smart_notifications_enabled', 'Açık')
+                : tt('smart_notifications_disabled', 'Kapalı')}
+            </Text>
           )}
+          <Switch
+            value={notificationsEnabled}
+            onValueChange={handleNotificationToggle}
+            trackColor={{ false: '#767577', true: colors.primary }}
+            thumbColor={Platform.OS === 'ios' ? '#FFF' : notificationsEnabled ? colors.primary : '#f4f3f4'}
+            disabled={notificationSyncing}
+          />
         </View>
-      </View>
+      </SettingsItem>
 
       <Text
         style={[
@@ -1381,6 +995,14 @@ export const SettingsScreen: React.FC = () => {
       >
         {tt('support_info', 'Destek ve Bilgi')}
       </Text>
+
+      <SettingsItem
+        icon="flask-outline"
+        label={tt('ecode_catalog', 'Katkı Kataloğu')}
+        colors={colors}
+        value={tt('ecode_catalog_value', `${ALL_E_CODES.length} kayıt`)}
+        onPress={() => navigation.navigate('ECodeCatalog')}
+      />
 
       <SettingsItem
         icon="shield-checkmark-outline"
@@ -1394,12 +1016,77 @@ export const SettingsScreen: React.FC = () => {
         }
       />
 
-      <SettingsItem
-        icon="information-circle-outline"
-        label={tt('about_app', 'Uygulama Hakkında')}
-        colors={colors}
-        value={APP_VERSION}
-      />
+      <View
+        style={[
+          styles.aboutCard,
+          {
+            backgroundColor: withAlpha(colors.cardElevated, 'EE'),
+            borderColor: withAlpha(colors.border, 'B8'),
+            marginHorizontal: layout.horizontalPadding,
+            shadowColor: colors.shadow,
+          },
+        ]}
+      >
+        <View style={styles.aboutHeader}>
+          <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
+            <Ionicons name="information-circle-outline" size={20} color={colors.primary} />
+          </View>
+          <View style={styles.aboutHeaderTextWrap}>
+            <Text style={[styles.aboutTitle, { color: colors.text }]}>
+              {tt('about_app', 'Uygulama Hakkında')}
+            </Text>
+            <Text style={[styles.aboutVersion, { color: colors.primary }]}>
+              {APP_VERSION}
+            </Text>
+          </View>
+        </View>
+
+        <Text style={[styles.aboutText, { color: colors.text }]}>
+          {tt(
+            'about_app_summary',
+            'BarkodAnaliz; gıda, kozmetik ve ilaç barkodlarını hızlıca çözümleyip skor, içerik sinyalleri ve resmi kaynak bağlantılarını tek yerde sunar.'
+          )}
+        </Text>
+
+        <View style={styles.aboutBadgeRow}>
+          {['OpenFoodFacts', 'OpenBeautyFacts', 'TITCK', 'E-Code'].map((item) => (
+            <View
+              key={item}
+              style={[
+                styles.aboutBadge,
+                { backgroundColor: withAlpha(colors.primary, '10') },
+              ]}
+            >
+              <Text style={[styles.aboutBadgeText, { color: colors.primary }]}>{item}</Text>
+            </View>
+          ))}
+        </View>
+
+        <Text style={[styles.aboutDetailLine, { color: colors.mutedText }]}>
+          {tt(
+            'about_app_source_line',
+            'Veri kaynakları arasında OpenFoodFacts, OpenBeautyFacts ve resmi TITCK katalogları yer alır.'
+          )}
+        </Text>
+        <Text style={[styles.aboutDetailLine, { color: colors.mutedText }]}>
+          {tt(
+            'about_app_catalog_line',
+            'Yerel E-kod kataloğu ile katkı maddeleri daha okunur ve karşılaştırılabilir hale getirilir.'
+          )}
+        </Text>
+        <Text style={[styles.aboutDetailLine, { color: colors.mutedText }]}>
+          {tt(
+            'about_app_privacy_line',
+            'Tarama geçmişi cihaz içinde tutulur; izin verilen senaryolarda Firebase önbelleği ile hız kazanılır.'
+          )}
+        </Text>
+        <Text style={[styles.aboutDetailLine, { color: colors.mutedText }]}>
+          {tt(
+            'about_app_support_line',
+            'Destek ve geri bildirim için uygulama içinden bize ulaşabilir, sürüm güncellemelerini bu ekrandan takip edebilirsiniz.'
+          )}
+        </Text>
+      </View>
 
       <SettingsItem
         icon="mail-outline"
@@ -2820,38 +2507,18 @@ export const SettingsScreen: React.FC = () => {
       </ScrollView>
 
       <SearchableSelectSheet
-        visible={cityPickerVisible}
-        title={tt('city_picker_title', 'Şehir seçin')}
-        searchPlaceholder={tt('city_picker_search', 'Şehir ara')}
-        searchValue={cityPickerSearch}
-        onSearchChange={setCityPickerSearch}
-        items={cityPickerItems}
-        selectedValue={resolvedCity ?? draft.city}
-        emptyText={tt('city_picker_empty', 'Aramanıza uygun şehir bulunamadı.')}
-        onSelect={handleCitySelect}
-        onClose={() => setCityPickerVisible(false)}
+        visible={languagePickerVisible}
+        title={tt('language_picker_title', 'Dil seçin')}
+        searchPlaceholder={tt('language_picker_search', 'Dil ara')}
+        searchValue={languagePickerSearch}
+        onSearchChange={setLanguagePickerSearch}
+        items={languagePickerItems}
+        selectedValue={selectedLanguageLabel}
+        emptyText={tt('language_picker_empty', 'Aramanıza uygun dil bulunamadı.')}
+        onSelect={handleLanguageSelect}
+        onClose={() => setLanguagePickerVisible(false)}
         colors={colors}
         isDark={isDark}
-      />
-
-      <SearchableSelectSheet
-        visible={districtPickerVisible}
-        title={tt('district_picker_title', 'İlçe seçin')}
-        searchPlaceholder={tt('district_picker_search', 'İlçe ara')}
-        searchValue={districtPickerSearch}
-        onSearchChange={setDistrictPickerSearch}
-        items={districtPickerItems}
-        selectedValue={draft.district}
-        emptyText={tt(
-          'district_picker_empty',
-          'Seçili şehir için aramanıza uygun ilçe bulunamadı.'
-        )}
-        onSelect={handleDistrictSelect}
-        onClose={() => setDistrictPickerVisible(false)}
-        colors={colors}
-        isDark={isDark}
-        loading={districtOptionsLoading}
-        loadingText={tt('district_picker_loading', 'İlçeler yükleniyor...')}
       />
     </View>
   );
@@ -3084,6 +2751,48 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  actionCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+  },
+  actionCardTextWrap: {
+    flex: 1,
+  },
+  actionCardTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  actionCardSubtitle: {
+    marginTop: 5,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  actionCardRight: {
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  actionCardBadge: {
+    minHeight: 28,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    maxWidth: 112,
+  },
+  actionCardBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+  },
   profileEditorCard: {
     borderWidth: 1,
     borderRadius: 20,
@@ -3278,6 +2987,64 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  aboutCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 10,
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+  },
+  aboutHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  aboutHeaderTextWrap: {
+    flex: 1,
+  },
+  aboutTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  aboutVersion: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  aboutText: {
+    marginTop: 14,
+    fontSize: 14,
+    lineHeight: 21,
+    fontWeight: '600',
+  },
+  aboutBadgeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 14,
+    marginBottom: 4,
+  },
+  aboutBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  aboutBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  aboutDetailLine: {
+    marginTop: 10,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   languageBox: {
     padding: 16,

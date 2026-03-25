@@ -28,7 +28,6 @@ import {
   QuickInsightsStrip,
   RecentProductsCarousel,
   StatCard,
-  SummaryCard,
 } from './home/HomeSections';
 
 const FALLBACK_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
@@ -49,24 +48,19 @@ export const HomeScreen: React.FC = () => {
     snapshot,
     loading,
     refreshing,
-    loadError,
     rescanSnapshot,
     rescanLoading,
     rescanRefreshing,
     rescanLoadError,
     handleRefresh,
     openBarcodeDetail,
-    openScanner,
-    openSettingsFromProfileGate,
+    openMedicineScanner,
     toggleFavorite,
     displayName,
     greeting,
     streakText,
     quickInsights,
     liveInsightItems,
-    profileCompletion,
-    shouldShowProfileCompletionGate,
-    profileCompletionSummaryText,
   } = useHomeScreenController();
   const {
     snapshot: whoNewsSnapshot,
@@ -146,24 +140,6 @@ export const HomeScreen: React.FC = () => {
     ? tt('who_news_badge', 'WHO Haberleri')
     : tt('live_updates_label', 'Canlı Bilgi');
 
-  const liveCardHelperText = useMemo(() => {
-    if (!whoNewsSnapshot?.items?.length) {
-      return tt('tap_for_next_insight', 'Dokunarak bir sonraki bilgi kartına geçin');
-    }
-
-    if (whoNewsSnapshot.isFallback) {
-      return tt(
-        'who_news_fallback_notice',
-        'WHO bu uygulama dili için resmi newsroom sunmadığı için başlıklar İngilizce kaynaktan gösteriliyor.'
-      );
-    }
-
-    return tt(
-      'who_news_tap_helper',
-      'Habere gitmek için karta dokunun, sağ üstten sonraki başlığa geçin.'
-    );
-  }, [tt, whoNewsSnapshot]);
-
   if (loading) {
     return <HomeLoadingState label={tt('home', 'Ana Sayfa')} colors={colors} />;
   }
@@ -232,9 +208,7 @@ export const HomeScreen: React.FC = () => {
             >
               <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
               <Text style={[styles.heroStatusPillText, { color: colors.primary }]}>
-                {shouldShowProfileCompletionGate
-                  ? `%${profileCompletion.score}`
-                  : tt('ready_label', 'Hazir')}
+                {tt('ready_label', 'Hazir')}
               </Text>
             </View>
           </View>
@@ -283,79 +257,29 @@ export const HomeScreen: React.FC = () => {
 
           <View style={styles.dashboardActionRow}>
             <TouchableOpacity
-              style={[styles.heroPrimaryAction, { backgroundColor: colors.primary }]}
-              onPress={openScanner}
+              style={[
+                styles.heroSecondaryAction,
+                {
+                  backgroundColor: withAlpha(colors.teal, '12'),
+                  borderColor: withAlpha(colors.teal, '55'),
+                },
+              ]}
+              onPress={openMedicineScanner}
               activeOpacity={0.92}
             >
-              <Ionicons name="scan-outline" size={20} color={colors.primaryContrast} />
-              <Text style={[styles.heroPrimaryActionText, { color: colors.primaryContrast }]}>
-                {tt('scan_now', 'Simdi Tara')}
+              <Ionicons name="medkit-outline" size={20} color={colors.teal} />
+              <Text style={[styles.heroSecondaryActionText, { color: colors.teal }]}>
+                {tt('scan_medicine', 'İlaç Tara')}
               </Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        {shouldShowProfileCompletionGate ? (
-          <View
-            style={[
-              styles.profileGateCard,
-              {
-                backgroundColor: withAlpha(colors.cardElevated, isDark ? 'F2' : 'FC'),
-                borderColor: withAlpha(colors.border, 'B6'),
-              },
-            ]}
-          >
-          <View style={styles.profileGateHeader}>
-            <View style={styles.profileGateHeaderTextWrap}>
-              <Text style={[styles.profileGateTitle, { color: colors.text }]}>
-                {tt('complete_profile_title', 'Profilini Tamamla')}
-              </Text>
-              <Text style={[styles.profileGateSubtitle, { color: colors.mutedText }]}>
-                {profileCompletionSummaryText}
-              </Text>
-            </View>
-
-            <View
-              style={[
-                styles.profileGateScoreBadge,
-                { backgroundColor: withAlpha(colors.primary, '12') },
-              ]}
-            >
-              <Text style={[styles.profileGateScoreText, { color: colors.primary }]}>
-                %{profileCompletion.score}
-              </Text>
-            </View>
-          </View>
-
-          <View
-            style={[
-              styles.profileGateProgressTrack,
-              { backgroundColor: withAlpha(colors.border, '72') },
-            ]}
-          >
-            <View
-              style={[
-                styles.profileGateProgressFill,
-                {
-                  width: `${profileCompletion.score}%`,
-                  backgroundColor: colors.primary,
-                },
-              ]}
-            />
-          </View>
-
-          <TouchableOpacity
-            style={[styles.profileGateButton, { backgroundColor: colors.primary }]}
-            onPress={openSettingsFromProfileGate}
-            activeOpacity={0.9}
-          >
-            <Ionicons name="person-circle-outline" size={18} color={colors.primaryContrast} />
-            <Text style={[styles.profileGateButtonText, { color: colors.primaryContrast }]}>
-              {tt('complete_profile_cta', 'Profili Tamamla')}
-            </Text>
-          </TouchableOpacity>
-          </View>
-        ) : null}
+      <LiveInsightCard
+        items={liveCardItems}
+        badgeLabel={liveCardBadgeLabel}
+        colors={colors}
+      />
 
       <AdBanner
         placement="home_mid_feed"
@@ -394,24 +318,6 @@ export const HomeScreen: React.FC = () => {
 
       <QuickInsightsStrip items={quickInsights} colors={colors} />
 
-      <SummaryCard
-        icon="stats-chart-outline"
-        title={tt('history_overview', 'Geçmiş Özeti')}
-        description={
-          loadError
-            ? tt('error_generic', 'Veriler yüklenemedi')
-            : `${snapshot.totalHistoryCount} ${tt('products_label', 'ürün kaydı')} geçmişte saklanıyor.`
-        }
-        colors={colors}
-      />
-
-      <LiveInsightCard
-        items={liveCardItems}
-        badgeLabel={liveCardBadgeLabel}
-        helperText={liveCardHelperText}
-        colors={colors}
-      />
-
       {snapshot.lastScannedProduct ? (
         <LastProductCard
           item={snapshot.lastScannedProduct}
@@ -419,9 +325,15 @@ export const HomeScreen: React.FC = () => {
           subtitle={tt('continue_where_left_off', 'Kaldığın yerden devam et')}
           barcodeLabel={tt('barcode_label', 'Barkod')}
           scoreLabel={tt('score_label', 'Skor')}
+          medicineLabel={tt('medicine_label', 'İlaç')}
           fallbackBrand={tt('unknown_brand', 'Bilinmeyen Marka')}
           fallbackName={tt('unnamed_product', 'İsimsiz Ürün')}
-          onPress={() => openBarcodeDetail(snapshot.lastScannedProduct!.barcode)}
+          onPress={() =>
+            openBarcodeDetail(snapshot.lastScannedProduct!.barcode, {
+              entrySource: 'home',
+              prefetchedProduct: snapshot.lastScannedProduct!,
+            })
+          }
           colors={colors}
         />
       ) : null}
@@ -466,81 +378,77 @@ export const HomeScreen: React.FC = () => {
             </Text>
           </View>
         ) : rescanSnapshot.favoriteItems.length ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.favoriteScrollContent}
-          >
+          <View style={styles.favoriteList}>
             {rescanSnapshot.favoriteItems.map((item) => (
-              <View
+              <TouchableOpacity
                 key={item.barcode}
                 style={[
-                  styles.favoriteCard,
+                  styles.favoriteListItem,
                   {
                     backgroundColor: colors.background,
                     borderColor: colors.border,
                   },
                 ]}
+                onPress={() =>
+                  openBarcodeDetail(item.barcode, {
+                    entrySource: 'home',
+                    prefetchedProduct: item,
+                  })
+                }
+                activeOpacity={0.88}
               >
-                <View style={styles.favoriteCardTopRow}>
-                  <Image
-                    source={{ uri: item.image_url || FALLBACK_IMAGE }}
-                    style={styles.favoriteImage}
-                  />
+                <Image
+                  source={{ uri: item.image_url || FALLBACK_IMAGE }}
+                  style={styles.favoriteImage}
+                />
 
-                  <TouchableOpacity
-                    style={[
-                      styles.favoriteIconButton,
-                      {
-                        backgroundColor: `${colors.primary}12`,
-                        borderColor: colors.border,
-                      },
-                    ]}
-                    onPress={() => {
-                      void toggleFavorite(item.barcode);
-                    }}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="star" size={18} color={colors.primary} />
-                  </TouchableOpacity>
-                </View>
+                <View style={styles.favoriteListBody}>
+                  <Text style={[styles.favoriteBrand, { color: colors.primary }]} numberOfLines={1}>
+                    {item.brand || tt('unknown_brand', 'Bilinmeyen Marka')}
+                  </Text>
 
-                <Text style={[styles.favoriteBrand, { color: colors.primary }]} numberOfLines={1}>
-                  {item.brand || tt('unknown_brand', 'Bilinmeyen Marka')}
-                </Text>
+                  <Text style={[styles.favoriteName, { color: colors.text }]} numberOfLines={2}>
+                    {item.name || tt('unnamed_product', 'İsimsiz Ürün')}
+                  </Text>
 
-                <Text style={[styles.favoriteName, { color: colors.text }]} numberOfLines={2}>
-                  {item.name || tt('unnamed_product', 'İsimsiz Ürün')}
-                </Text>
-
-                <View style={styles.favoriteMetaRow}>
-                  <View style={[styles.metaChip, { backgroundColor: `${colors.primary}12` }]}>
-                    <Text style={[styles.metaChipText, { color: colors.primary }]}>
-                      {item.score ?? '-'} / 100
-                    </Text>
-                  </View>
-                  <View style={[styles.metaChip, { backgroundColor: `${colors.primary}12` }]}>
-                    <Text style={[styles.metaChipText, { color: colors.primary }]}>
-                      {item.type === 'beauty'
-                        ? tt('beauty_label', 'Kozmetik')
-                        : tt('food_label', 'Gıda')}
-                    </Text>
+                  <View style={styles.favoriteMetaRow}>
+                    <View style={[styles.metaChip, { backgroundColor: `${colors.primary}12` }]}>
+                      <Text style={[styles.metaChipText, { color: colors.primary }]}>
+                        {item.type === 'medicine'
+                          ? tt('medicine_label', 'İlaç')
+                          : `${item.score ?? '-'} / 100`}
+                      </Text>
+                    </View>
+                    <View style={[styles.metaChip, { backgroundColor: `${colors.primary}12` }]}>
+                      <Text style={[styles.metaChipText, { color: colors.primary }]}>
+                        {item.type === 'beauty'
+                          ? tt('beauty_label', 'Kozmetik')
+                          : item.type === 'medicine'
+                            ? tt('medicine_label', 'İlaç')
+                            : tt('food_label', 'Gıda')}
+                      </Text>
+                    </View>
                   </View>
                 </View>
 
                 <TouchableOpacity
-                  style={[styles.primaryShortcutButton, { backgroundColor: colors.primary }]}
-                  onPress={() => openBarcodeDetail(item.barcode)}
-                  activeOpacity={0.9}
+                  style={[
+                    styles.favoriteIconButton,
+                    {
+                      backgroundColor: `${colors.primary}12`,
+                      borderColor: colors.border,
+                    },
+                  ]}
+                  onPress={() => {
+                    void toggleFavorite(item.barcode);
+                  }}
+                  activeOpacity={0.85}
                 >
-                  <Ionicons name="scan-outline" size={16} color="#000" />
-                  <Text style={styles.primaryShortcutButtonText}>
-                    {tt('rescan_now', 'Yeniden Sorgula')}
-                  </Text>
+                  <Ionicons name="star" size={18} color={colors.primary} />
                 </TouchableOpacity>
-              </View>
+              </TouchableOpacity>
             ))}
-          </ScrollView>
+          </View>
         ) : (
           <View style={styles.sectionEmptyWrap}>
             <Text style={[styles.sectionEmptyText, { color: colors.text }]}>
@@ -557,9 +465,16 @@ export const HomeScreen: React.FC = () => {
         title={tt('recent_products', 'Son Ürünler')}
         subtitle={tt('recent_products_subtitle', 'Son taradığınız ürünlere hızlı dönün')}
         items={snapshot.recentProducts}
+        scoreLabel={tt('score_label', 'Skor')}
+        medicineLabel={tt('medicine_label', 'İlaç')}
         fallbackBrand={tt('unknown_brand', 'Bilinmeyen Marka')}
         fallbackName={tt('unnamed_product', 'İsimsiz Ürün')}
-        onItemPress={openBarcodeDetail}
+        onItemPress={(item) =>
+          openBarcodeDetail(item.barcode, {
+            entrySource: 'home',
+            prefetchedProduct: item,
+          })
+        }
         colors={colors}
       />
         <View style={styles.footerBrand}>
@@ -663,17 +578,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     marginTop: 18,
   },
-  heroPrimaryAction: {
+  heroSecondaryAction: {
     width: '100%',
     minHeight: 52,
     borderRadius: 18,
     paddingHorizontal: 16,
+    borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
   },
-  heroPrimaryActionText: {
+  heroSecondaryActionText: {
     fontSize: 14,
     fontWeight: '900',
     letterSpacing: 0.2,
@@ -799,6 +715,20 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     opacity: 0.72,
   },
+  favoriteList: {
+    paddingTop: 18,
+    gap: 10,
+  },
+  favoriteListItem: {
+    minHeight: 84,
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   favoriteScrollContent: {
     paddingTop: 18,
     paddingRight: 4,
@@ -817,37 +747,40 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   favoriteImage: {
-    width: 64,
-    height: 64,
-    borderRadius: 18,
+    width: 58,
+    height: 58,
+    borderRadius: 16,
     resizeMode: 'cover',
   },
+  favoriteListBody: {
+    flex: 1,
+    justifyContent: 'center',
+  },
   favoriteIconButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
   },
   favoriteBrand: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '900',
     textTransform: 'uppercase',
-    letterSpacing: 1,
+    letterSpacing: 0.9,
   },
   favoriteName: {
-    marginTop: 6,
-    fontSize: 15,
+    marginTop: 4,
+    fontSize: 14,
     fontWeight: '800',
-    lineHeight: 21,
-    minHeight: 42,
+    lineHeight: 19,
   },
   favoriteMetaRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
+    gap: 6,
+    marginTop: 8,
   },
   metaChip: {
     paddingHorizontal: 10,

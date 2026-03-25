@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
+import * as WebBrowser from 'expo-web-browser';
 
 import {
   lookupProductByBarcode,
@@ -25,6 +26,7 @@ import { analyticsService } from '../../services/analytics.service';
 import { saveProductToHistory } from '../../services/db';
 import { entitlementService } from '../../services/entitlement.service';
 import { freeScanPolicyService } from '../../services/freeScanPolicy.service';
+import { enrichMedicineProductWithProspectus } from '../../services/titckMedicine.service';
 import { enqueueRemoteHistorySync } from '../../services/historyRemoteSync.service';
 import { useScanStore } from '../../store/useScanStore';
 import {
@@ -39,6 +41,7 @@ import { AlternativeCard } from '../../components/AlternativeCard';
 import { FamilyHealthAlert } from '../../components/organisms/FamilyHealthAlert';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import {
+  ActionLinksSection,
   AdditivesSection,
   DetailErrorState,
   DetailHeroSection,
@@ -62,7 +65,7 @@ type DisplayProduct = Product & {
 };
 
 type DetailLookupContext = {
-  source?: 'food' | 'beauty' | 'cache';
+  source?: 'food' | 'beauty' | 'medicine' | 'cache';
   cacheTier?: ProductRepositoryCacheTier;
   lookupMeta?: ProductRepositoryLookupMeta;
 };
@@ -90,7 +93,7 @@ const normalizeDisplayText = (value?: string | null): string => {
 
 const mapStoreSourceToLookupSource = (
   sourceName?: string
-): 'food' | 'beauty' | 'cache' | undefined => {
+): 'food' | 'beauty' | 'medicine' | 'cache' | undefined => {
   if (sourceName === 'openfoodfacts') {
     return 'food';
   }
@@ -99,15 +102,26 @@ const mapStoreSourceToLookupSource = (
     return 'beauty';
   }
 
+  if (sourceName === 'titck') {
+    return 'medicine';
+  }
+
   return undefined;
 };
 
 const buildProductShareUrl = (
   barcode: string,
   productType?: Product['type'],
-  sourceName?: Product['sourceName']
+  sourceName?: Product['sourceName'],
+  prospectusPdfUrl?: string,
+  summaryPdfUrl?: string
 ): string => {
   const normalizedBarcode = String(barcode || '').replace(/[^\d]/g, '').trim();
+
+  if (productType === 'medicine' || sourceName === 'titck') {
+    return prospectusPdfUrl || summaryPdfUrl || 'https://www.titck.gov.tr/kubkt';
+  }
+
   const source = sourceName === 'openbeautyfacts' || productType === 'beauty'
     ? 'openbeautyfacts'
     : 'openfoodfacts';
@@ -172,9 +186,17 @@ const translateRiskCompound = (tt: TranslateFn, value?: string | null): string =
 
 const buildLocalizedAnalysisSummary = (params: {
   tt: TranslateFn;
+  type: Product['type'];
   foundECodesCount: number;
   hasApiScore: boolean;
 }): string => {
+  if (params.type === 'medicine') {
+    return params.tt(
+      'medicine_summary_default',
+      'Bu ilaç kaydı resmi TITCK veri kaynağından getirildi. Prospektüs ve kısa ürün bilgisini inceleyerek kullanın.'
+    );
+  }
+
   if (params.foundECodesCount > 0) {
     return applyTemplate(
       params.tt(
@@ -206,6 +228,13 @@ const buildLocalizedRecommendation = (params: {
   hasApiScore: boolean;
 }): string => {
   const riskLevel = normalizeRiskLevelKey(params.riskLevel);
+
+  if (params.type === 'medicine') {
+    return params.tt(
+      'medicine_recommendation_default',
+      'İlacı kullanmadan önce prospektüsü okuyun ve doktor veya eczacı yönlendirmesine göre hareket edin.'
+    );
+  }
 
   if (params.type === 'beauty') {
     if (riskLevel === 'high') {
@@ -307,6 +336,9 @@ export const DetailScreen: React.FC = () => {
   const {
     barcode,
     entrySource = 'unknown',
+    lookupMode = 'auto',
+    prefetchedProduct,
+    historyAlreadySaved = false,
   } = route.params;
   const { setAnalysis, currentProduct, currentAnalysis } = useScanStore();
 
@@ -315,24 +347,50 @@ export const DetailScreen: React.FC = () => {
     [barcode]
   );
 
+  const prefetchedRouteProduct = useMemo(() => {
+    if (!prefetchedProduct) {
+      return null;
+    }
+
+    const normalizedPrefetchedBarcode = String(prefetchedProduct.barcode || '')
+      .replace(/[^\d]/g, '')
+      .trim();
+
+    return normalizedPrefetchedBarcode === normalizedRouteBarcode
+      ? prefetchedProduct
+      : null;
+  }, [normalizedRouteBarcode, prefetchedProduct]);
+
+  const prefetchedRouteAnalysis = useMemo(() => {
+    return prefetchedRouteProduct ? analyzeProduct(prefetchedRouteProduct) : null;
+  }, [prefetchedRouteProduct]);
+
   const isCurrentBarcodeInStore = currentProduct?.barcode === normalizedRouteBarcode;
 
-  const [loading, setLoading] = useState(!isCurrentBarcodeInStore);
+  const [loading, setLoading] = useState(
+    !isCurrentBarcodeInStore && !prefetchedRouteProduct
+  );
   const [error, setError] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
   const [shareSheetVisible, setShareSheetVisible] = useState(false);
   const [notFoundReason, setNotFoundReason] = useState<'not_found' | 'invalid_barcode' | 'unknown' | null>(null);
 
   const [localProduct, setLocalProduct] = useState<Product | null>(
-    isCurrentBarcodeInStore ? currentProduct : null
+    isCurrentBarcodeInStore ? currentProduct : prefetchedRouteProduct
   );
   const [localAnalysis, setLocalAnalysis] = useState<AnalysisResult | null>(
-    isCurrentBarcodeInStore ? currentAnalysis : null
+    isCurrentBarcodeInStore ? currentAnalysis : prefetchedRouteAnalysis
   );
   const [lookupContext, setLookupContext] = useState<DetailLookupContext>(() => {
     if (isCurrentBarcodeInStore && currentProduct) {
       return {
         source: mapStoreSourceToLookupSource(currentProduct.sourceName),
+      };
+    }
+
+    if (prefetchedRouteProduct) {
+      return {
+        source: mapStoreSourceToLookupSource(prefetchedRouteProduct.sourceName),
       };
     }
 
@@ -363,6 +421,25 @@ export const DetailScreen: React.FC = () => {
     normalizedRouteBarcode,
   ]);
 
+  useEffect(() => {
+    if (isCurrentBarcodeInStore || !prefetchedRouteProduct) {
+      return;
+    }
+
+    setLocalProduct(prefetchedRouteProduct);
+    setLocalAnalysis(prefetchedRouteAnalysis);
+    setLoading(false);
+    setError(null);
+    setNotFoundReason(null);
+    setLookupContext({
+      source: mapStoreSourceToLookupSource(prefetchedRouteProduct.sourceName),
+    });
+  }, [
+    isCurrentBarcodeInStore,
+    prefetchedRouteAnalysis,
+    prefetchedRouteProduct,
+  ]);
+
   const originInfo = useMemo(
     () => barcodeDecoder.decode(normalizedRouteBarcode),
     [normalizedRouteBarcode]
@@ -371,6 +448,7 @@ export const DetailScreen: React.FC = () => {
   const displayedProduct = localProduct;
   const displayedAnalysis = localAnalysis;
   const extendedProduct = displayedProduct as DisplayProduct | null;
+  const isMedicineProduct = displayedProduct?.type === 'medicine';
   const analysisColor = displayedAnalysis?.color ?? '#888';
 
   const sourceLabel = useMemo(() => {
@@ -378,6 +456,8 @@ export const DetailScreen: React.FC = () => {
 
     return extendedProduct.sourceName === 'openfoodfacts'
       ? tt('source_open_food_facts', 'Open Food Facts')
+      : extendedProduct.sourceName === 'titck'
+        ? tt('source_titck', 'TITCK')
       : tt('source_open_beauty_facts', 'Open Beauty Facts');
   }, [extendedProduct?.sourceName, tt]);
 
@@ -406,6 +486,13 @@ export const DetailScreen: React.FC = () => {
   }, [originInfo.gs1PrefixCountry, originInfo.hasGs1PrefixInfo, originInfo.prefix, tt]);
 
   const headerBadgeLabel = useMemo(() => {
+    if (extendedProduct?.type === 'medicine') {
+      return (
+        extendedProduct.license_status ||
+        tt('medicine_license_status_unknown', 'Lisans durumu bilinmiyor')
+      );
+    }
+
     if (FEATURES.productPresentation.gs1OriginLabelFixEnabled) {
       if (hasActualOrigin) {
         return actualOriginLabel;
@@ -422,6 +509,8 @@ export const DetailScreen: React.FC = () => {
   }, [
     actualOriginLabel,
     actualOriginRaw,
+    extendedProduct?.license_status,
+    extendedProduct?.type,
     hasActualOrigin,
     originInfo.country,
     originInfo.gs1PrefixCountry,
@@ -478,13 +567,28 @@ export const DetailScreen: React.FC = () => {
 
     return buildLocalizedAnalysisSummary({
       tt,
+      type: displayedProduct?.type ?? 'food',
       foundECodesCount: displayedAnalysis.foundECodes.length,
       hasApiScore: hasApiScoreSignal,
     });
-  }, [displayedAnalysis, hasApiScoreSignal, tt]);
+  }, [displayedAnalysis, displayedProduct?.type, hasApiScoreSignal, tt]);
 
   const familyAlerts = useMemo(() => {
     if (!displayedProduct || !displayedAnalysis) return [];
+
+    if (displayedProduct.type === 'medicine') {
+      return [
+        {
+          id: 'medicine-official',
+          title: tt('medicine_alert_title', 'Resmi ilaç kaydı'),
+          description: tt(
+            'medicine_alert_desc',
+            'Bu bilgi TITCK ilaç kayıtlarından çözümlendi. Kullanım öncesi prospektüs ve sağlık profesyoneli yönlendirmesi dikkate alınmalıdır.'
+          ),
+          severity: 'info' as const,
+        },
+      ];
+    }
 
     const alerts = [];
 
@@ -532,45 +636,105 @@ export const DetailScreen: React.FC = () => {
   }, [displayedAnalysis, displayedProduct, tt]);
 
   const showAlternativeCard = useMemo(() => {
-    if (!displayedAnalysis) return false;
+    if (!displayedAnalysis || displayedProduct?.type === 'medicine') return false;
     return displayedAnalysis.score < 75;
-  }, [displayedAnalysis]);
+  }, [displayedAnalysis, displayedProduct?.type]);
 
   const productImageUri = imageError
     ? 'https://via.placeholder.com/400?text=No+Image'
     : displayedProduct?.image_url || 'https://via.placeholder.com/400?text=No+Image';
 
   const metaChipItems = useMemo(
-    () => [
-      {
-        icon: 'server-outline' as const,
-        label: sourceLabel,
-      },
-      {
-        icon: 'flag-outline' as const,
-        label: actualOriginLabel,
-      },
-      {
-        icon: 'barcode-outline' as const,
-        label: `GS1: ${gs1PrefixLabel}`,
-      },
-      {
-        icon: 'analytics-outline' as const,
-        label: `${tt('api_score', 'API Skoru')}: ${displayedProduct?.score ?? '-'}`,
-      },
-    ],
-    [actualOriginLabel, displayedProduct?.score, gs1PrefixLabel, sourceLabel, tt]
+    () =>
+      displayedProduct?.type === 'medicine'
+        ? [
+            {
+              icon: 'server-outline' as const,
+              label: sourceLabel,
+            },
+            {
+              icon: 'medkit-outline' as const,
+              label:
+                displayedProduct.license_status ||
+                tt('medicine_license_status_unknown', 'Lisans durumu bilinmiyor'),
+            },
+            {
+              icon: 'document-text-outline' as const,
+              label: `${tt('medicine_license_number', 'Ruhsat No')}: ${
+                displayedProduct.license_number || '-'
+              }`,
+            },
+            {
+              icon: 'flask-outline' as const,
+              label: `${tt('medicine_atc_code', 'ATC Kodu')}: ${
+                displayedProduct.atc_code || '-'
+              }`,
+            },
+          ]
+        : [
+            {
+              icon: 'server-outline' as const,
+              label: sourceLabel,
+            },
+            {
+              icon: 'flag-outline' as const,
+              label: actualOriginLabel,
+            },
+            {
+              icon: 'barcode-outline' as const,
+              label: `GS1: ${gs1PrefixLabel}`,
+            },
+            {
+              icon: 'analytics-outline' as const,
+              label: `${tt('api_score', 'API Skoru')}: ${displayedProduct?.score ?? '-'}`,
+            },
+          ],
+    [
+      actualOriginLabel,
+      displayedProduct,
+      gs1PrefixLabel,
+      sourceLabel,
+      tt,
+    ]
   );
 
   const shareProductUrl = useMemo(() => {
     return buildProductShareUrl(
       normalizedRouteBarcode,
       displayedProduct?.type,
-      displayedProduct?.sourceName
+      displayedProduct?.sourceName,
+      displayedProduct?.prospectus_pdf_url,
+      displayedProduct?.summary_pdf_url
     );
-  }, [displayedProduct?.sourceName, displayedProduct?.type, normalizedRouteBarcode]);
+  }, [
+    displayedProduct?.prospectus_pdf_url,
+    displayedProduct?.sourceName,
+    displayedProduct?.summary_pdf_url,
+    displayedProduct?.type,
+    normalizedRouteBarcode,
+  ]);
 
   const shareMessage = useMemo(() => {
+    if (displayedProduct?.type === 'medicine') {
+      return (
+        `${displayedProduct.brand || tt('unknown_brand', 'Bilinmeyen Firma')} - ${
+          displayedProduct.name || tt('unnamed_product', 'İsimsiz İlaç')
+        }\n` +
+        `${tt('medicine_active_ingredients', 'Etken Maddeler')}: ${
+          displayedProduct.active_ingredients?.join(', ') ||
+          displayedProduct.ingredients_text ||
+          tt('unknown', 'Bilinmiyor')
+        }\n` +
+        `${tt('medicine_license_status', 'Lisans Durumu')}: ${
+          displayedProduct.license_status || tt('unknown', 'Bilinmiyor')
+        }\n` +
+        `${tt('medicine_license_number', 'Ruhsat No')}: ${
+          displayedProduct.license_number || '-'
+        }\n` +
+        `${tt('barcode_label', 'Barkod')}: ${normalizedRouteBarcode}`
+      );
+    }
+
     return (
       `${displayedProduct?.brand || tt('unknown_brand', 'Bilinmeyen Marka')} - ${displayedProduct?.name || tt('unnamed_product', 'İsimsiz Ürün')}\n` +
       `${tt('source', 'Kaynak')}: ${sourceLabel}\n` +
@@ -585,8 +749,13 @@ export const DetailScreen: React.FC = () => {
     actualOriginLabel,
     displayGrade,
     displayScore,
+    displayedProduct?.active_ingredients,
     displayedProduct?.brand,
+    displayedProduct?.ingredients_text,
+    displayedProduct?.license_number,
+    displayedProduct?.license_status,
     displayedProduct?.name,
+    displayedProduct?.type,
     gs1PrefixLabel,
     normalizedRouteBarcode,
     riskCompoundLabel,
@@ -595,8 +764,87 @@ export const DetailScreen: React.FC = () => {
   ]);
 
   const sharePreviewBody = useMemo(() => {
+    if (displayedProduct?.type === 'medicine') {
+      return `${tt('medicine_license_status', 'Lisans Durumu')}: ${
+        displayedProduct.license_status || tt('unknown', 'Bilinmiyor')
+      } • ${tt('medicine_active_ingredients', 'Etken Maddeler')}: ${
+        displayedProduct.active_ingredients?.slice(0, 2).join(', ') ||
+        displayedProduct.ingredients_text ||
+        tt('unknown', 'Bilinmiyor')
+      }`;
+    }
+
     return `${tt('score_label', 'Skor')}: ${displayScore}/100 • ${riskCompoundLabel} • ${sourceLabel}`;
-  }, [displayScore, riskCompoundLabel, sourceLabel, tt]);
+  }, [
+    displayScore,
+    displayedProduct?.active_ingredients,
+    displayedProduct?.ingredients_text,
+    displayedProduct?.license_status,
+    displayedProduct?.type,
+    riskCompoundLabel,
+    sourceLabel,
+    tt,
+  ]);
+
+  const openDocumentUrl = useCallback(
+    async (url: string) => {
+      try {
+        await WebBrowser.openBrowserAsync(url, {
+          presentationStyle: WebBrowser.WebBrowserPresentationStyle.PAGE_SHEET,
+        });
+      } catch (browserError) {
+        console.warn('Document browser open failed, falling back to external URL:', browserError);
+        await Linking.openURL(url);
+      }
+    },
+    []
+  );
+
+  const medicineDocumentItems = useMemo(() => {
+    if (displayedProduct?.type !== 'medicine') {
+      return [];
+    }
+
+    const items = [];
+
+    if (displayedProduct.prospectus_pdf_url) {
+      items.push({
+        key: 'prospectus',
+        icon: 'document-attach-outline' as const,
+        label: tt('medicine_open_prospectus', 'Prospektüsü Aç (KT PDF)'),
+        helper:
+          displayedProduct.prospectus_approval_date
+            ? `${tt('medicine_last_updated', 'Onay tarihi')}: ${displayedProduct.prospectus_approval_date}`
+            : tt(
+                'medicine_document_helper',
+                'Hasta kullanım talimatını uygulama içi tarayıcıda açar.'
+              ),
+        onPress: () => {
+          void openDocumentUrl(displayedProduct.prospectus_pdf_url!);
+        },
+      });
+    }
+
+    if (displayedProduct.summary_pdf_url) {
+      items.push({
+        key: 'summary',
+        icon: 'reader-outline' as const,
+        label: tt('medicine_open_summary', 'KÜB Dosyasını Aç'),
+        helper:
+          displayedProduct.short_text_approval_date
+            ? `${tt('medicine_last_updated', 'Onay tarihi')}: ${displayedProduct.short_text_approval_date}`
+            : tt(
+                'medicine_summary_helper',
+                'Kısa ürün bilgisini resmi TITCK PDF kaynağında açar.'
+              ),
+        onPress: () => {
+          void openDocumentUrl(displayedProduct.summary_pdf_url!);
+        },
+      });
+    }
+
+    return items;
+  }, [displayedProduct, openDocumentUrl, tt]);
 
   const openShareSheet = useCallback(() => {
     setShareSheetVisible(true);
@@ -642,14 +890,35 @@ export const DetailScreen: React.FC = () => {
     }
 
     try {
-      setLoading(true);
+      if (!prefetchedRouteProduct) {
+        setLoading(true);
+      }
       setError(null);
       setImageError(false);
       setNotFoundReason(null);
 
-      const result: ProductLookupResult = await lookupProductByBarcode(normalizedRouteBarcode);
+      const result: ProductLookupResult = await lookupProductByBarcode(
+        normalizedRouteBarcode,
+        { lookupMode }
+      );
 
       if (!result.found) {
+        if (prefetchedRouteProduct && prefetchedRouteAnalysis) {
+          console.warn('[DetailScreen] live lookup missed, keeping prefetched fallback:', {
+            barcode: normalizedRouteBarcode,
+            reason: result.reason,
+          });
+
+          setLocalProduct(prefetchedRouteProduct);
+          setLocalAnalysis(prefetchedRouteAnalysis);
+          setLookupContext({
+            source: mapStoreSourceToLookupSource(prefetchedRouteProduct.sourceName),
+            lookupMeta: result.lookupMeta,
+          });
+          lastResolvedBarcodeRef.current = normalizedRouteBarcode;
+          return;
+        }
+
         useScanStore.getState().markNotFound(result.barcode);
 
         const resolvedReason =
@@ -694,14 +963,23 @@ export const DetailScreen: React.FC = () => {
 
       const historySaveKey = `${product.barcode}-${analysis.score}`;
 
-      if (lastSavedHistoryKeyRef.current !== historySaveKey) {
+      if (!historyAlreadySaved && lastSavedHistoryKeyRef.current !== historySaveKey) {
         try {
-          await Promise.resolve(saveProductToHistory(product, analysis.score));
-          void enqueueRemoteHistorySync({
-            product,
-            score: analysis.score,
-            riskLevel: analysis.riskLevel,
-          });
+          await Promise.resolve(
+            saveProductToHistory(
+              product,
+              product.type === 'medicine' ? null : analysis.score
+            )
+          );
+
+          if (product.type !== 'medicine') {
+            void enqueueRemoteHistorySync({
+              product,
+              score: analysis.score,
+              riskLevel: analysis.riskLevel,
+            });
+          }
+
           lastSavedHistoryKeyRef.current = historySaveKey;
         } catch (historyError) {
           console.warn('History save failed:', historyError);
@@ -709,18 +987,34 @@ export const DetailScreen: React.FC = () => {
       }
     } catch (loadError) {
       console.error('Detail load failed:', loadError);
-      setError(tt('error_generic', 'Bir hata oluştu'));
-      setNotFoundReason('unknown');
-      setLocalProduct(null);
-      setLocalAnalysis(null);
-      setLookupContext({});
+
+      if (prefetchedRouteProduct && prefetchedRouteAnalysis) {
+        setError(null);
+        setNotFoundReason(null);
+        setLocalProduct(prefetchedRouteProduct);
+        setLocalAnalysis(prefetchedRouteAnalysis);
+        setLookupContext({
+          source: mapStoreSourceToLookupSource(prefetchedRouteProduct.sourceName),
+        });
+        lastResolvedBarcodeRef.current = normalizedRouteBarcode;
+      } else {
+        setError(tt('error_generic', 'Bir hata oluştu'));
+        setNotFoundReason('unknown');
+        setLocalProduct(null);
+        setLocalAnalysis(null);
+        setLookupContext({});
+      }
     } finally {
       setLoading(false);
     }
   }, [
     localAnalysis,
     localProduct,
+    historyAlreadySaved,
+    lookupMode,
     normalizedRouteBarcode,
+    prefetchedRouteAnalysis,
+    prefetchedRouteProduct,
     setAnalysis,
     trackNotFoundViewed,
     tt,
@@ -743,6 +1037,52 @@ export const DetailScreen: React.FC = () => {
     localAnalysis,
     localProduct,
     normalizedRouteBarcode,
+  ]);
+
+  useEffect(() => {
+    if (
+      !displayedProduct ||
+      displayedProduct.type !== 'medicine' ||
+      displayedProduct.prospectus_pdf_url ||
+      displayedProduct.summary_pdf_url
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const enrichProspectus = async () => {
+      const enrichedProduct = await enrichMedicineProductWithProspectus(displayedProduct);
+
+      if (
+        cancelled ||
+        (!enrichedProduct.prospectus_pdf_url && !enrichedProduct.summary_pdf_url)
+      ) {
+        return;
+      }
+
+      setLocalProduct((current) => {
+        if (!current || current.barcode !== enrichedProduct.barcode) {
+          return current;
+        }
+
+        return {
+          ...current,
+          ...enrichedProduct,
+        };
+      });
+    };
+
+    void enrichProspectus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    displayedProduct,
+    displayedProduct?.prospectus_pdf_url,
+    displayedProduct?.summary_pdf_url,
+    displayedProduct?.type,
   ]);
 
   useEffect(() => {
@@ -1115,7 +1455,15 @@ export const DetailScreen: React.FC = () => {
 
           <MetaChipsSection items={metaChipItems} colors={colors} />
 
-          {FEATURES.productPresentation.gs1OriginLabelFixEnabled ? (
+          {isMedicineProduct ? (
+            <NoticeCard
+              text={tt(
+                'medicine_notice',
+                'Bu ilaç kaydı resmi TITCK veri kaynaklarından çözümlendi. Prospektüs ve KÜB PDF bağlantılarını aşağıdan açabilirsiniz.'
+              )}
+              colors={colors}
+            />
+          ) : FEATURES.productPresentation.gs1OriginLabelFixEnabled ? (
             <NoticeCard
               text={
                 hasActualOrigin
@@ -1138,14 +1486,16 @@ export const DetailScreen: React.FC = () => {
             />
           ) : null}
 
-          <ScoreOverviewCard
-            score={displayScore}
-            grade={displayGrade}
-            riskLabel={riskCompoundLabel}
-            recommendationText={recommendationText}
-            analysisColor={analysisColor}
-            colors={colors}
-          />
+          {!isMedicineProduct ? (
+            <ScoreOverviewCard
+              score={displayScore}
+              grade={displayGrade}
+              riskLabel={riskCompoundLabel}
+              recommendationText={recommendationText}
+              analysisColor={analysisColor}
+              colors={colors}
+            />
+          ) : null}
 
           <FamilyHealthAlert items={familyAlerts} style={{ marginBottom: 24 }} />
 
@@ -1176,37 +1526,106 @@ export const DetailScreen: React.FC = () => {
           ) : null}
 
           <SummarySection
-            title={tt('analysis_summary', 'Analiz Özeti')}
+            title={
+              isMedicineProduct
+                ? tt('medicine_record_title', 'İlaç Kayıt Özeti')
+                : tt('analysis_summary', 'Analiz Özeti')
+            }
             text={summaryText}
             colors={colors}
           />
 
-          <AdditivesSection
-            title={tt('additives', 'Katkı Maddeleri')}
-            emptyLabel={tt('clean_content_detected', 'Belirgin katkı riski tespit edilmedi')}
-            items={displayedAnalysis.foundECodes ?? []}
-            analysisColor={analysisColor}
-            unknownLabel={tt('unknown', 'Bilinmiyor')}
-            formatRiskLabel={(risk) => translateRiskLevel(tt, risk)}
-            colors={colors}
-          />
+          {isMedicineProduct ? (
+            <>
+              <TextSection
+                title={tt('medicine_active_ingredients', 'Etken Maddeler')}
+                text={
+                  displayedProduct.active_ingredients?.join(', ') ||
+                  displayedProduct.ingredients_text ||
+                  tt('medicine_active_ingredients_missing', 'Etken madde bilgisi bulunamadı')
+                }
+                colors={colors}
+              />
 
-          <TextSection
-            title={tt('ingredients', 'İçerik')}
-            text={
-              displayedProduct.ingredients_text ||
-              tt('no_ingredients_info', 'İçerik bilgisi bulunamadı')
-            }
-            colors={colors}
-          />
+              <TextSection
+                title={tt('medicine_license_status', 'Lisans Durumu')}
+                text={
+                  displayedProduct.license_status ||
+                  tt('medicine_license_status_unknown', 'Lisans durumu bilinmiyor')
+                }
+                colors={colors}
+              />
 
-          {displayedProduct.type === 'beauty' && displayedProduct.usage_instructions ? (
-            <TextSection
-              title={tt('usage_information', 'Kullanım Bilgisi')}
-              text={displayedProduct.usage_instructions}
-              colors={colors}
-            />
-          ) : null}
+              <TextSection
+                title={tt('medicine_registration_info', 'Ruhsat Bilgisi')}
+                text={
+                  [
+                    displayedProduct.license_number
+                      ? `${tt('medicine_license_number', 'Ruhsat No')}: ${displayedProduct.license_number}`
+                      : null,
+                    displayedProduct.license_date
+                      ? `${tt('medicine_license_date', 'Ruhsat Tarihi')}: ${displayedProduct.license_date}`
+                      : null,
+                    displayedProduct.suspension_date
+                      ? `${tt('medicine_suspension_date', 'Askıya Alınma Tarihi')}: ${displayedProduct.suspension_date}`
+                      : null,
+                    displayedProduct.catalog_updated_at
+                      ? `${tt('medicine_catalog_updated_at', 'Katalog Güncellemesi')}: ${displayedProduct.catalog_updated_at}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join('\n') ||
+                  tt('medicine_registration_missing', 'Ruhsat ayrıntısı bulunamadı')
+                }
+                colors={colors}
+              />
+
+              {medicineDocumentItems.length ? (
+                <ActionLinksSection
+                  title={tt('medicine_documents', 'Prospektüs ve Belgeler')}
+                  items={medicineDocumentItems}
+                  colors={colors}
+                />
+              ) : (
+                <NoticeCard
+                  text={tt(
+                    'medicine_documents_missing',
+                    'Bu ilaç için prospektüs veya KÜB PDF kaydı şu anda çözümlenemedi.'
+                  )}
+                  colors={colors}
+                />
+              )}
+            </>
+          ) : (
+            <>
+              <AdditivesSection
+                title={tt('additives', 'Katkı Maddeleri')}
+                emptyLabel={tt('clean_content_detected', 'Belirgin katkı riski tespit edilmedi')}
+                items={displayedAnalysis.foundECodes ?? []}
+                analysisColor={analysisColor}
+                unknownLabel={tt('unknown', 'Bilinmiyor')}
+                formatRiskLabel={(risk) => translateRiskLevel(tt, risk)}
+                colors={colors}
+              />
+
+              <TextSection
+                title={tt('ingredients', 'İçerik')}
+                text={
+                  displayedProduct.ingredients_text ||
+                  tt('no_ingredients_info', 'İçerik bilgisi bulunamadı')
+                }
+                colors={colors}
+              />
+
+              {displayedProduct.type === 'beauty' && displayedProduct.usage_instructions ? (
+                <TextSection
+                  title={tt('usage_information', 'Kullanım Bilgisi')}
+                  text={displayedProduct.usage_instructions}
+                  colors={colors}
+                />
+              ) : null}
+            </>
+          )}
         </View>
       </ScrollView>
 

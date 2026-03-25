@@ -1,5 +1,11 @@
 import axios from 'axios';
 import type { Product } from '../utils/analysis';
+import {
+  resolveBrand,
+  resolveLocalizedName,
+  safeObject,
+  sanitizeFactsText,
+} from './factsShared';
 
 const foodClient = axios.create({
   baseURL: 'https://world.openfoodfacts.org/api/v2',
@@ -16,7 +22,7 @@ const safeText = (value?: string | null, fallback = ''): string => {
 };
 
 const resolveCountry = (product: any): string => {
-  return safeText(
+  return sanitizeFactsText(
     product?.countries ||
       product?.countries_tags?.[0] ||
       product?.manufacturing_places ||
@@ -25,7 +31,7 @@ const resolveCountry = (product: any): string => {
 };
 
 const resolveOrigin = (product: any): string => {
-  return safeText(
+  return sanitizeFactsText(
     product?.origins ||
       product?.origins_tags?.[0] ||
       product?.countries ||
@@ -51,14 +57,10 @@ export const fetchFoodProduct = async (barcode: string): Promise<Product | null>
     if (response.data?.status === 1) {
       const p = response.data.product;
 
-      const resolvedName =
-        safeText(p?.product_name) ||
-        safeText(p?.product_name_tr) ||
-        safeText(p?.product_name_en) ||
-        safeText(p?.generic_name) ||
-        safeText(p?.generic_name_tr) ||
-        safeText(p?.generic_name_en) ||
-        'Bilinmeyen Ürün';
+      const resolvedName = resolveLocalizedName(
+        safeObject(p),
+        'Bilinmeyen Ürün'
+      );
 
       const resolvedScore =
         typeof p?.nutriscore_score === 'number'
@@ -70,7 +72,7 @@ export const fetchFoodProduct = async (barcode: string): Promise<Product | null>
       const product: Product = {
         barcode,
         name: resolvedName,
-        brand: safeText(p?.brands, 'Markasız'),
+        brand: resolveBrand(safeObject(p), 'Markasız'),
         image_url: safeText(p?.image_front_url || p?.image_url),
         type: 'food',
         score: resolvedScore,

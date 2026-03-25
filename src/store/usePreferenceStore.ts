@@ -8,12 +8,14 @@ type PreferenceState = {
   isDarkMode: boolean;
   language: AppLanguage;
   isFirstLaunch: boolean;
+  notificationsEnabled: boolean;
 };
 
 type PreferenceActions = {
   toggleTheme: () => void;
   setTheme: (value: boolean) => void;
   setLanguage: (lang: AppLanguage) => void;
+  setNotificationsEnabled: (value: boolean) => void;
   completeOnboarding: () => void;
   resetOnboarding: () => void;
   setFirstLaunch: (value: boolean) => void;
@@ -26,6 +28,7 @@ const DEFAULT_PREFERENCES: PreferenceState = {
   isDarkMode: true,
   language: 'tr',
   isFirstLaunch: true,
+  notificationsEnabled: true,
 };
 
 export const usePreferenceStore = create<PreferenceStore>()(
@@ -46,6 +49,11 @@ export const usePreferenceStore = create<PreferenceStore>()(
       setLanguage: (lang) =>
         set({
           language: lang,
+        }),
+
+      setNotificationsEnabled: (value) =>
+        set({
+          notificationsEnabled: value,
         }),
 
       completeOnboarding: () =>
@@ -76,6 +84,7 @@ export const usePreferenceStore = create<PreferenceStore>()(
         isDarkMode: state.isDarkMode,
         language: state.language,
         isFirstLaunch: state.isFirstLaunch,
+        notificationsEnabled: state.notificationsEnabled,
       }),
     }
   )

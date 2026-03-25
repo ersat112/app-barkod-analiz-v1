@@ -9,6 +9,7 @@ import { useRescanActions } from './useRescanActions';
 import { buildUserDisplayName } from '../services/userPresentation.service';
 import { calculateProfileCompletion } from '../services/profileCompletion.service';
 import { authAnalyticsService } from '../services/authAnalytics.service';
+import type { Product } from '../utils/analysis';
 
 const getInsightIndex = (): number => new Date().getDay() % 4;
 
@@ -67,14 +68,30 @@ export const useHomeScreenController = () => {
   }, [refresh, refreshRescanActions]);
 
   const openBarcodeDetail = useCallback(
-    (barcode: string) => {
-      navigation.navigate('Detail', { barcode });
+    (
+      barcode: string,
+      options?: {
+        entrySource?: 'scanner' | 'history' | 'home' | 'unknown';
+        prefetchedProduct?: Product;
+      }
+    ) => {
+      navigation.navigate('Detail', {
+        barcode,
+        entrySource: options?.entrySource ?? 'home',
+        prefetchedProduct: options?.prefetchedProduct,
+        lookupMode:
+          options?.prefetchedProduct?.type === 'medicine' ? 'medicine' : undefined,
+      });
     },
     [navigation]
   );
 
   const openScanner = useCallback(() => {
     navigation.navigate('Scanner');
+  }, [navigation]);
+
+  const openMedicineScanner = useCallback(() => {
+    navigation.navigate('MedicineScanner');
   }, [navigation]);
 
   const openSettings = useCallback(() => {
@@ -335,6 +352,7 @@ export const useHomeScreenController = () => {
     handleRefresh,
     openBarcodeDetail,
     openScanner,
+    openMedicineScanner,
     openSettingsFromProfileGate,
     toggleFavorite,
     displayName,

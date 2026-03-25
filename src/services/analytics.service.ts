@@ -255,7 +255,7 @@ export const analyticsService = {
 
   async trackProductDetailViewed(payload: {
     barcode: string;
-    source?: 'food' | 'beauty' | 'cache';
+    source?: 'food' | 'beauty' | 'medicine' | 'cache';
     cacheTier?: ProductRepositoryCacheTier;
     lookupMeta?: ProductRepositoryLookupMeta;
     productType?: string;

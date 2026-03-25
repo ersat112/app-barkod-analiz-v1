@@ -181,7 +181,12 @@ service cloud.firestore {
         && isOptionalString(data.notes)
         && isOptionalString(data.image_url)
         && data.type is string
-        && (data.type == 'food' || data.type == 'beauty' || data.type == 'unknown')
+        && (
+          data.type == 'food'
+          || data.type == 'beauty'
+          || data.type == 'medicine'
+          || data.type == 'unknown'
+        )
         && data.image_status is string
         && (
           data.image_status == 'none'
@@ -240,7 +245,11 @@ service cloud.firestore {
         && isOptionalString(data.brand)
         && isOptionalString(data.image_url)
         && data.type is string
-        && (data.type == 'food' || data.type == 'beauty')
+        && (
+          data.type == 'food'
+          || data.type == 'beauty'
+          || data.type == 'medicine'
+        )
         && isOptionalString(data.source_name)
         && (data.score is int || data.score is float)
         && isOptionalString(data.grade)

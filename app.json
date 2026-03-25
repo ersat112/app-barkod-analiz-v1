@@ -35,7 +35,8 @@
       "permissions": [
         "CAMERA",
         "INTERNET",
-        "com.android.vending.BILLING"
+        "com.android.vending.BILLING",
+        "POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -55,6 +56,7 @@
           "cameraPermission": "Eksik ürün bildirimi için ürün fotoğrafı çekebilmek adına kamera erişimi gerekir."
         }
       ],
+      "expo-notifications",
       "expo-apple-authentication",
       "expo-system-ui",
       [

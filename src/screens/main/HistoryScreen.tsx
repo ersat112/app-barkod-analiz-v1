@@ -172,15 +172,30 @@ export const HistoryScreen: React.FC = () => {
                 timeLabel={timePart}
                 beautyLabel={tt('beauty_label', 'Kozmetik')}
                 foodLabel={tt('food_label', 'Gıda')}
+                medicineLabel={tt('medicine_label', 'İlaç')}
                 favoriteLabel={tt('favorite', 'Favori')}
                 unfavoriteLabel={tt('remove_favorite', 'Favoriden Çıkar')}
                 rescanLabel={tt('rescan_now', 'Yeniden Sorgula')}
                 fallbackBrand={tt('unknown_brand', 'Bilinmeyen Marka')}
                 fallbackName={tt('unnamed_product', 'İsimsiz Ürün')}
                 isFavorite={isFavorite(item.barcode)}
-                onPress={() => navigation.navigate('Detail', { barcode: item.barcode })}
+                onPress={() =>
+                  navigation.navigate('Detail', {
+                    barcode: item.barcode,
+                    entrySource: 'history',
+                    prefetchedProduct: item,
+                    lookupMode: item.type === 'medicine' ? 'medicine' : undefined,
+                  })
+                }
                 onDelete={() => handleDelete(item.id)}
-                onRescan={() => navigation.navigate('Detail', { barcode: item.barcode })}
+                onRescan={() =>
+                  navigation.navigate('Detail', {
+                    barcode: item.barcode,
+                    entrySource: 'history',
+                    prefetchedProduct: item,
+                    lookupMode: item.type === 'medicine' ? 'medicine' : undefined,
+                  })
+                }
                 onToggleFavorite={() => {
                   void toggleFavorite(item.barcode);
                 }}
@@ -213,6 +228,7 @@ export const HistoryScreen: React.FC = () => {
                 allLabel={tt('all', 'Tümü')}
                 foodLabel={tt('food_label', 'Gıda')}
                 beautyLabel={tt('beauty_label', 'Kozmetik')}
+                medicineLabel={tt('medicine_label', 'İlaç')}
                 clearLabel={tt('clear', 'Temizle')}
                 colors={colors}
               />

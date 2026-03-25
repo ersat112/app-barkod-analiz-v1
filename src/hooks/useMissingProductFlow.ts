@@ -13,7 +13,7 @@ type NotFoundEventPayload = {
 
 type MissingProductDraftEventPayload = {
   barcode: string;
-  type: 'food' | 'beauty' | 'unknown';
+  type: 'food' | 'beauty' | 'medicine' | 'unknown';
   hasBrand: boolean;
   hasCountry: boolean;
   hasOrigin: boolean;

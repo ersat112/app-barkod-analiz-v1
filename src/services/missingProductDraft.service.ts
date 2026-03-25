@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { MISSING_PRODUCT_DRAFTS_STORAGE_KEY } from '../config/features';
 
-export type MissingProductType = 'food' | 'beauty' | 'unknown';
+export type MissingProductType = 'food' | 'beauty' | 'medicine' | 'unknown';
 export type MissingProductImageStatus =
   | 'none'
   | 'pending_upload'
@@ -116,7 +116,10 @@ const normalizeDraft = (value: unknown): MissingProductDraft | null => {
       : 'draft';
 
   const typeValue =
-    raw.type === 'food' || raw.type === 'beauty' || raw.type === 'unknown'
+    raw.type === 'food' ||
+    raw.type === 'beauty' ||
+    raw.type === 'medicine' ||
+    raw.type === 'unknown'
       ? raw.type
       : 'unknown';
 

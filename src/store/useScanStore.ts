@@ -1,12 +1,24 @@
 import { create } from 'zustand';
 import type { AnalysisResult, Product } from '../utils/analysis';
 
-type LookupSource = 'openfoodfacts' | 'openbeautyfacts' | 'manual' | 'unknown';
+type LookupSource =
+  | 'openfoodfacts'
+  | 'openbeautyfacts'
+  | 'titck'
+  | 'manual'
+  | 'unknown';
+
+type ScanPreviewCacheEntry = {
+  product: Product;
+  analysis: AnalysisResult;
+  cachedAt: string;
+};
 
 type ScanStoreState = {
   currentBarcode: string | null;
   currentProduct: Product | null;
   currentAnalysis: AnalysisResult | null;
+  previewCacheByBarcode: Record<string, ScanPreviewCacheEntry>;
 
   lastResolvedSource: LookupSource;
   lastScanAt: string | null;
@@ -33,10 +45,41 @@ type ScanStoreState = {
   resetScanState: () => void;
 };
 
+const MAX_PREVIEW_CACHE_ITEMS = 24;
+
+const buildPreviewCacheState = (
+  currentCache: Record<string, ScanPreviewCacheEntry>,
+  product: Product,
+  analysis: AnalysisResult
+): Record<string, ScanPreviewCacheEntry> => {
+  const nextCache: Record<string, ScanPreviewCacheEntry> = {
+    ...currentCache,
+    [product.barcode]: {
+      product,
+      analysis,
+      cachedAt: new Date().toISOString(),
+    },
+  };
+
+  const entries = Object.entries(nextCache);
+
+  if (entries.length <= MAX_PREVIEW_CACHE_ITEMS) {
+    return nextCache;
+  }
+
+  const sortedEntries = entries.sort(
+    (left, right) =>
+      new Date(right[1].cachedAt).getTime() - new Date(left[1].cachedAt).getTime()
+  );
+
+  return Object.fromEntries(sortedEntries.slice(0, MAX_PREVIEW_CACHE_ITEMS));
+};
+
 export const useScanStore = create<ScanStoreState>((set) => ({
   currentBarcode: null,
   currentProduct: null,
   currentAnalysis: null,
+  previewCacheByBarcode: {},
 
   lastResolvedSource: 'unknown',
   lastScanAt: null,
@@ -50,24 +93,34 @@ export const useScanStore = create<ScanStoreState>((set) => ({
     }),
 
   setAnalysis: (product, analysis) =>
-    set({
+    set((state) => ({
       currentBarcode: product.barcode,
       currentProduct: product,
       currentAnalysis: analysis,
+      previewCacheByBarcode: buildPreviewCacheState(
+        state.previewCacheByBarcode,
+        product,
+        analysis
+      ),
       lastResolvedSource: product.sourceName ?? 'unknown',
       lastScanAt: new Date().toISOString(),
       notFoundBarcode: null,
-    }),
+    })),
 
   setScanResult: ({ barcode, product, analysis, source = 'unknown' }) =>
-    set({
+    set((state) => ({
       currentBarcode: barcode,
       currentProduct: product,
       currentAnalysis: analysis,
+      previewCacheByBarcode: buildPreviewCacheState(
+        state.previewCacheByBarcode,
+        product,
+        analysis
+      ),
       lastResolvedSource: source,
       lastScanAt: new Date().toISOString(),
       notFoundBarcode: null,
-    }),
+    })),
 
   markNotFound: (barcode) =>
     set({
@@ -103,6 +156,7 @@ export const useScanStore = create<ScanStoreState>((set) => ({
       currentBarcode: null,
       currentProduct: null,
       currentAnalysis: null,
+      previewCacheByBarcode: {},
       lastResolvedSource: 'unknown',
       lastScanAt: null,
       notFoundBarcode: null,

@@ -46,13 +46,14 @@ function toErrorMessage(error: unknown): string {
 }
 
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<User | null>(auth.currentUser);
   const [profile, setProfile] = useState<AppUserProfile | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(auth.currentUser));
   const [profileError, setProfileError] = useState<string | null>(null);
 
   const isMountedRef = useRef(true);
   const syncSequenceRef = useRef(0);
+  const preloadedUserUidRef = useRef<string | null>(auth.currentUser?.uid ?? null);
 
   const syncProfileForUser = useCallback(
     async (nextUser: User, options?: { trackLogin?: boolean }) => {
@@ -126,15 +127,31 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   useEffect(() => {
     isMountedRef.current = true;
 
+    const initialUser = auth.currentUser;
+
+    if (initialUser?.uid) {
+      setUser(initialUser);
+      setLoading(true);
+      void syncProfileForUser(initialUser, { trackLogin: false });
+    } else {
+      setLoading(false);
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
       setUser(nextUser);
 
       if (!nextUser) {
         syncSequenceRef.current += 1;
+        preloadedUserUidRef.current = null;
         void syncPurchaseProviderIdentity(null);
         setProfile(null);
         setProfileError(null);
         setLoading(false);
+        return;
+      }
+
+       if (preloadedUserUidRef.current === nextUser.uid) {
+        preloadedUserUidRef.current = null;
         return;
       }
 

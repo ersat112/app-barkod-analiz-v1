@@ -1,18 +1,22 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Animated,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  Vibration,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import { useIsFocused, useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -21,12 +25,85 @@ import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { adService } from '../../services/adService';
 import { entitlementService } from '../../services/entitlement.service';
 import { freeScanPolicyService } from '../../services/freeScanPolicy.service';
+import { enqueueRemoteHistorySync } from '../../services/historyRemoteSync.service';
+import {
+  lookupProductByBarcode,
+  type ProductLookupMode,
+} from '../../services/productLookup.service';
+import { saveProductToHistory } from '../../services/db';
+import { prewarmMedicineCatalog } from '../../services/titckMedicine.service';
+import {
+  playScanBeep,
+  prepareScanBeep,
+  unloadScanBeep,
+} from '../../services/scanFeedback.service';
+import { useScanStore } from '../../store/useScanStore';
+import { analyzeProduct, type AnalysisResult, type Product } from '../../utils/analysis';
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
+type ScanPreviewStatus = 'loading' | 'found' | 'not_found' | 'error';
+
+type ScanPreviewItem = {
+  id: string;
+  barcode: string;
+  lookupMode: ProductLookupMode;
+  status: ScanPreviewStatus;
+  createdAt: number;
+  product?: Product;
+  analysis?: AnalysisResult;
+  message?: string;
+};
+
 export const ScannerScreen: React.FC = () => {
+  return <ScannerExperience initialMode="auto" />;
+};
+
+export const MedicineScannerScreen: React.FC = () => {
+  return <ScannerExperience initialMode="medicine" />;
+};
+
+type ScannerExperienceProps = {
+  initialMode?: ProductLookupMode;
+};
+
+const PREVIEW_QUEUE_LIMIT = 6;
+const FALLBACK_IMAGE = 'https://via.placeholder.com/240?text=No+Image';
+
+const buildPreviewId = (): string => {
+  return `preview_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const getScoreTone = (score?: number): string => {
+  if (typeof score !== 'number') {
+    return '#7DD3FC';
+  }
+
+  if (score >= 85) {
+    return '#22C55E';
+  }
+
+  if (score >= 70) {
+    return '#84CC16';
+  }
+
+  if (score >= 55) {
+    return '#F59E0B';
+  }
+
+  if (score >= 35) {
+    return '#F97316';
+  }
+
+  return '#EF4444';
+};
+
+const ScannerExperience: React.FC<ScannerExperienceProps> = ({
+  initialMode = 'auto',
+}) => {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const isFocused = useIsFocused();
 
   const layout = useAppScreenLayout({
@@ -47,14 +124,21 @@ export const ScannerScreen: React.FC = () => {
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
   const [torch, setTorch] = useState(false);
+  const [previewItems, setPreviewItems] = useState<ScanPreviewItem[]>([]);
+  const [activeLookupBarcode, setActiveLookupBarcode] = useState<string | null>(null);
 
   const [isManualMode, setIsManualMode] = useState(false);
   const [manualBarcode, setManualBarcode] = useState('');
   const [manualError, setManualError] = useState('');
 
+  const { setAnalysis, markNotFound, previewCacheByBarcode } = useScanStore();
   const lineAnim = useRef(new Animated.Value(0)).current;
+  const previewSheetAnim = useRef(new Animated.Value(220)).current;
   const scanResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
+  const recentScanMapRef = useRef<Record<string, number>>({});
+  const scanMode: ProductLookupMode =
+    route?.name === 'MedicineScanner' ? 'medicine' : initialMode;
 
   useEffect(() => {
     let disposed = false;
@@ -101,6 +185,22 @@ export const ScannerScreen: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    void prepareScanBeep();
+
+    return () => {
+      void unloadScanBeep();
+    };
+  }, []);
+
+  useEffect(() => {
+    console.log('[ScannerScreen] mode ready:', {
+      routeName: route?.name,
+      initialMode,
+      resolvedMode: scanMode,
+    });
+  }, [initialMode, route?.name, scanMode]);
+
+  useEffect(() => {
     if (isFocused && !isManualMode) {
       lineAnim.setValue(0);
 
@@ -139,6 +239,28 @@ export const ScannerScreen: React.FC = () => {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const prewarm = async () => {
+      try {
+        if (scanMode === 'medicine') {
+          await prewarmMedicineCatalog();
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('[ScannerScreen] medicine catalog prewarm failed:', error);
+        }
+      }
+    };
+
+    void prewarm();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [scanMode]);
+
   const closeManualMode = useCallback(() => {
     setIsManualMode(false);
     setManualError('');
@@ -146,62 +268,229 @@ export const ScannerScreen: React.FC = () => {
     Keyboard.dismiss();
   }, []);
 
+  const handleCloseScanner = useCallback(() => {
+    if (typeof navigation.canGoBack === 'function' && navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate('Main');
+  }, [navigation]);
+
   const resetTransientState = useCallback(() => {
     setIsManualMode(false);
     setManualBarcode('');
     setManualError('');
   }, []);
 
+  const pushLoadingPreview = useCallback((barcode: string, lookupMode: ProductLookupMode) => {
+    const item: ScanPreviewItem = {
+      id: buildPreviewId(),
+      barcode,
+      lookupMode,
+      status: 'loading',
+      createdAt: Date.now(),
+      message: tt('scanner_lookup_loading', 'Urun bilgileri getiriliyor...'),
+    };
+
+    setPreviewItems((current) => [item, ...current].slice(0, PREVIEW_QUEUE_LIMIT));
+    return item.id;
+  }, [tt]);
+
+  const updatePreviewItem = useCallback(
+    (previewId: string, updater: (current: ScanPreviewItem) => ScanPreviewItem) => {
+      setPreviewItems((current) =>
+        current.map((item) => (item.id === previewId ? updater(item) : item))
+      );
+    },
+    []
+  );
+
+  const handleOpenPreviewDetail = useCallback(
+    (item: ScanPreviewItem) => {
+      if (!item.product) {
+        return;
+      }
+
+      navigation.navigate('Detail', {
+        barcode: item.barcode,
+        entrySource: 'scanner',
+        lookupMode: item.lookupMode,
+        prefetchedProduct: item.product,
+        historyAlreadySaved: true,
+      });
+    },
+    [navigation]
+  );
+
+  const handleOpenMissingProduct = useCallback(
+    (barcode: string) => {
+      navigation.navigate('MissingProduct', { barcode });
+    },
+    [navigation]
+  );
+
   const processBarcode = useCallback(
     async (validBarcodeData: string) => {
       setScanned(true);
-
+      setActiveLookupBarcode(validBarcodeData);
       try {
-        const freeScanResult = await freeScanPolicyService.registerSuccessfulScan();
+        try {
+          const freeScanResult = await freeScanPolicyService.registerSuccessfulScan();
 
-        if (!freeScanResult.allowed) {
-          resetTransientState();
-          setScanned(false);
+          if (!freeScanResult.allowed) {
+            resetTransientState();
+            setScanned(false);
 
-          if (freeScanResult.snapshot.paywallEnabled) {
-            navigation.navigate('Paywall', { source: 'scan_limit' });
-          } else {
-            Alert.alert(
-              tt('scan_limit_title', 'Tarama limiti'),
-              tt(
-                'scan_limit_reached_message',
-                'Günlük ücretsiz tarama limitine ulaştınız.'
-              )
-            );
+            if (freeScanResult.snapshot.paywallEnabled) {
+              navigation.navigate('Paywall', { source: 'scan_limit' });
+            } else {
+              Alert.alert(
+                tt('scan_limit_title', 'Tarama limiti'),
+                tt(
+                  'scan_limit_reached_message',
+                  'Günlük ücretsiz tarama limitine ulaştınız.'
+                )
+              );
+            }
+
+            return;
+          }
+        } catch (error) {
+          console.error('Free scan policy failed, allowing scan:', error);
+        }
+
+        Vibration.vibrate(18);
+        void playScanBeep();
+        resetTransientState();
+        const previewId = pushLoadingPreview(validBarcodeData, scanMode);
+        const cachedPreview = previewCacheByBarcode[validBarcodeData];
+
+        if (cachedPreview) {
+          if (cachedPreview.product.image_url) {
+            void Image.prefetch(cachedPreview.product.image_url);
           }
 
-          return;
+          setAnalysis(cachedPreview.product, cachedPreview.analysis);
+          updatePreviewItem(previewId, (current) => ({
+            ...current,
+            status: 'found',
+            product: cachedPreview.product,
+            analysis: cachedPreview.analysis,
+            message: tt(
+              'scanner_preview_cached',
+              'Son sonuc gosteriliyor, yeni veri arka planda kontrol ediliyor.'
+            ),
+          }));
         }
-      } catch (error) {
-        console.error('Free scan policy failed, allowing scan:', error);
+
+        console.log('[ScannerScreen] lookup started:', {
+          barcode: validBarcodeData,
+          routeName: route?.name,
+          scanMode,
+        });
+
+        try {
+          const result = await lookupProductByBarcode(validBarcodeData, {
+            lookupMode: scanMode,
+          });
+
+          if (!result.found) {
+            markNotFound(validBarcodeData);
+
+            updatePreviewItem(previewId, (current) => ({
+              ...current,
+              status: result.reason === 'invalid_barcode' ? 'error' : 'not_found',
+              message:
+                result.reason === 'invalid_barcode'
+                  ? tt('invalid_barcode', 'Geçersiz barkod formatı')
+                  : tt('product_not_found', 'Ürün verisi bulunamadı'),
+            }));
+
+            return;
+          }
+
+          const product = result.product;
+          const analysis = analyzeProduct(product);
+          setAnalysis(product, analysis);
+
+          if (product.image_url) {
+            void Image.prefetch(product.image_url);
+          }
+
+          try {
+            await Promise.resolve(
+              saveProductToHistory(
+                product,
+                product.type === 'medicine' ? null : analysis.score
+              )
+            );
+
+            if (product.type !== 'medicine') {
+              void enqueueRemoteHistorySync({
+                product,
+                score: analysis.score,
+                riskLevel: analysis.riskLevel,
+              });
+            }
+          } catch (historyError) {
+            console.warn('[ScannerScreen] preview history save failed:', historyError);
+          }
+
+          updatePreviewItem(previewId, (current) => ({
+            ...current,
+            status: 'found',
+            product,
+            analysis,
+            message:
+              product.type === 'medicine'
+                ? tt(
+                    'scanner_preview_medicine_ready',
+                    'Ilac bulundu. Prospektus ve detaylar icin karta dokunun.'
+                  )
+                : tt(
+                    'scanner_preview_ready',
+                    'Hizli sonuc hazir. Detay icin karta dokunun.'
+                  ),
+          }));
+        } catch (lookupError) {
+          console.error('[ScannerScreen] lookup failed:', lookupError);
+
+          updatePreviewItem(previewId, (current) => ({
+            ...current,
+            status: 'error',
+            message: tt('error_generic', 'Bir hata oluştu'),
+          }));
+        }
+      } finally {
+        if (scanResetTimeoutRef.current) {
+          clearTimeout(scanResetTimeoutRef.current);
+        }
+
+        scanResetTimeoutRef.current = setTimeout(() => {
+          setScanned(false);
+        }, 900);
+
+        setActiveLookupBarcode(null);
       }
-
-      resetTransientState();
-
-      navigation.navigate('Detail', {
-        barcode: validBarcodeData,
-        entrySource: 'scanner',
-      });
-
-      if (scanResetTimeoutRef.current) {
-        clearTimeout(scanResetTimeoutRef.current);
-      }
-
-      scanResetTimeoutRef.current = setTimeout(() => {
-        setScanned(false);
-      }, 1800);
     },
-    [navigation, resetTransientState, tt]
+    [
+      navigation,
+      markNotFound,
+      previewCacheByBarcode,
+      pushLoadingPreview,
+      resetTransientState,
+      route?.name,
+      scanMode,
+      setAnalysis,
+      tt,
+      updatePreviewItem,
+    ]
   );
 
   const handleBarCodeScanned = useCallback(
     ({ data, type }: { data: string; type?: string }) => {
-      if (scanned || !isFocused || isManualMode) {
+      if (scanned || activeLookupBarcode || !isFocused || isManualMode) {
         return;
       }
 
@@ -211,9 +500,18 @@ export const ScannerScreen: React.FC = () => {
         return;
       }
 
+      const lastScannedAt = recentScanMapRef.current[decoded.normalizedData] ?? 0;
+      const now = Date.now();
+
+      if (now - lastScannedAt < 2200) {
+        return;
+      }
+
+      recentScanMapRef.current[decoded.normalizedData] = now;
+
       void processBarcode(decoded.normalizedData);
     },
-    [isFocused, isManualMode, processBarcode, scanned]
+    [activeLookupBarcode, isFocused, isManualMode, processBarcode, scanned]
   );
 
   const handleManualSubmit = useCallback(() => {
@@ -236,6 +534,20 @@ export const ScannerScreen: React.FC = () => {
 
     void processBarcode(decoded.normalizedData);
   }, [manualBarcode, processBarcode, tt]);
+
+  const hasPreviewSurface = previewItems.length > 0 || Boolean(activeLookupBarcode);
+  const latestPreview = previewItems[0] ?? null;
+  const previewHistory = previewItems.slice(1);
+
+  useEffect(() => {
+    Animated.spring(previewSheetAnim, {
+      toValue: hasPreviewSurface ? 0 : 220,
+      damping: 22,
+      stiffness: 200,
+      mass: 0.9,
+      useNativeDriver: true,
+    }).start();
+  }, [hasPreviewSurface, previewSheetAnim]);
 
   if (!permission) {
     return <View style={[styles.container, { backgroundColor: '#000' }]} />;
@@ -286,8 +598,6 @@ export const ScannerScreen: React.FC = () => {
   }
 
   const topInsetPadding = layout.headerTopPadding;
-  const bottomControlsOffset = layout.floatingBottomOffset;
-  const infoPanelBottomOffset = bottomControlsOffset + 116;
 
   return (
     <View style={styles.container}>
@@ -304,12 +614,50 @@ export const ScannerScreen: React.FC = () => {
 
       <View style={styles.overlay} pointerEvents="box-none">
         <View style={[styles.topDarkArea, { paddingTop: topInsetPadding }]}>
-          <TouchableOpacity
-            style={styles.topCloseBtn}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="close" size={28} color="#FFF" />
-          </TouchableOpacity>
+          {!isManualMode ? (
+            <View style={styles.topControlsRow}>
+              <TouchableOpacity
+                style={styles.topManualButton}
+                onPress={() => setIsManualMode(true)}
+                activeOpacity={0.88}
+              >
+                <Ionicons name="keypad-outline" size={16} color="#FFFFFF" />
+                <Text style={styles.topManualButtonText}>
+                  {tt('manual_entry_short', 'Elle Gir')}
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.topActionsGroup}>
+                <TouchableOpacity
+                  style={styles.topIconButton}
+                  onPress={() => setTorch((prev) => !prev)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons
+                    name={torch ? 'flash' : 'flash-off'}
+                    size={17}
+                    color={torch ? colors.primary : '#FFFFFF'}
+                  />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.topIconButton}
+                  onPress={() => setScanned(false)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="refresh-outline" size={17} color="#FFFFFF" />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.topIconButton}
+                  onPress={handleCloseScanner}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="close" size={17} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
         </View>
 
         <View style={styles.middleRow}>
@@ -344,56 +692,173 @@ export const ScannerScreen: React.FC = () => {
         <View style={styles.bottomDarkArea} />
       </View>
 
-      {!isManualMode && (
-        <View style={[styles.infoPanel, { bottom: infoPanelBottomOffset }]}>
-          <Text style={styles.infoTitle}>{tt('scan_now', 'Şimdi Tara')}</Text>
-          <Text style={styles.infoText}>
-            {tt('align_barcode_instruction', 'Barkodu çerçeveye hizalayın')}
-          </Text>
-        </View>
-      )}
-
-      {!isManualMode && (
-        <View
-          style={[styles.controls, { bottom: bottomControlsOffset }]}
-          pointerEvents="box-none"
+      {!isManualMode && hasPreviewSurface ? (
+        <Animated.View
+          style={[
+            styles.previewSheet,
+            {
+              bottom: Math.max(layout.contentBottomPadding - 18, 92),
+              backgroundColor: 'rgba(11,14,20,0.94)',
+              borderColor: 'rgba(255,255,255,0.12)',
+              transform: [{ translateY: previewSheetAnim }],
+            },
+          ]}
         >
-          <TouchableOpacity
-            style={styles.controlBtn}
-            onPress={() => setTorch((prev) => !prev)}
-            activeOpacity={0.85}
-          >
-            <Ionicons
-              name={torch ? 'flash' : 'flash-off'}
-              size={24}
-              color={torch ? colors.primary : '#FFF'}
-            />
-            <Text style={styles.controlLabel}>
-              {torch ? tt('flash_on', 'Açık') : tt('flash_label', 'Flaş')}
-            </Text>
-          </TouchableOpacity>
+          {latestPreview ? (
+            <TouchableOpacity
+              activeOpacity={latestPreview.status === 'found' ? 0.9 : 1}
+              disabled={latestPreview.status !== 'found'}
+              onPress={() => handleOpenPreviewDetail(latestPreview)}
+              style={styles.previewPrimaryCard}
+            >
+              <View style={styles.previewCardTopRow}>
+                <View style={styles.previewBadgeRow}>
+                  <View
+                    style={[
+                      styles.previewStatusPill,
+                      {
+                        backgroundColor:
+                          latestPreview.status === 'found'
+                            ? `${getScoreTone(latestPreview.analysis?.score)}22`
+                            : latestPreview.status === 'loading'
+                              ? 'rgba(125,211,252,0.16)'
+                              : latestPreview.status === 'not_found'
+                                ? 'rgba(248,113,113,0.16)'
+                                : 'rgba(244,114,182,0.16)',
+                      },
+                    ]}
+                  >
+                    <Text style={styles.previewStatusText}>
+                      {latestPreview.status === 'found'
+                        ? latestPreview.product?.type === 'medicine'
+                          ? tt('medicine_label', 'İlaç')
+                          : `${Math.round(latestPreview.analysis?.score ?? 0)}/100`
+                        : latestPreview.status === 'loading'
+                          ? tt('scanner_status_searching', 'Aranıyor')
+                          : latestPreview.status === 'not_found'
+                            ? tt('scanner_status_not_found', 'Bulunamadı')
+                            : tt('error_title', 'Hata')}
+                    </Text>
+                  </View>
+                  <Text style={styles.previewBarcodeText}>{latestPreview.barcode}</Text>
+                </View>
+                {latestPreview.status === 'loading' ? (
+                  <ActivityIndicator size="small" color="#7DD3FC" />
+                ) : (
+                  <Ionicons
+                    name={latestPreview.status === 'found' ? 'chevron-up' : 'alert-circle-outline'}
+                    size={20}
+                    color="#FFFFFF"
+                  />
+                )}
+              </View>
 
-          <TouchableOpacity
-            style={styles.controlBtnCenter}
-            onPress={() => setIsManualMode(true)}
-            activeOpacity={0.9}
-          >
-            <Ionicons name="keypad-outline" size={30} color={colors.primary} />
-            <Text style={[styles.controlCenterLabel, { color: colors.primary }]}>
-              {tt('manual_entry_title', 'Barkodu Elle Girin')}
-            </Text>
-          </TouchableOpacity>
+              <View style={styles.previewBody}>
+                <Image
+                  source={{
+                    uri: latestPreview.product?.image_url || FALLBACK_IMAGE,
+                  }}
+                  style={styles.previewImage}
+                />
+                <View style={styles.previewTextWrap}>
+                  <Text style={styles.previewBrand} numberOfLines={1}>
+                    {latestPreview.product?.brand ||
+                      tt('unknown_brand', 'Bilinmeyen Marka')}
+                  </Text>
+                  <Text style={styles.previewName} numberOfLines={2}>
+                    {latestPreview.product?.name ||
+                      (latestPreview.status === 'not_found'
+                        ? tt('scanner_not_found_title', 'Ürün bulunamadı')
+                        : tt('scanner_lookup_loading', 'Urun bilgileri getiriliyor...'))}
+                  </Text>
+                  <Text style={styles.previewMessage} numberOfLines={2}>
+                    {latestPreview.message ||
+                      tt('scanner_preview_ready', 'Hizli sonuc hazir. Detay icin karta dokunun.')}
+                  </Text>
+                </View>
+                {latestPreview.status === 'found' ? (
+                  <View
+                    style={[
+                      styles.previewScoreBubble,
+                      {
+                        backgroundColor: getScoreTone(latestPreview.analysis?.score),
+                      },
+                    ]}
+                  >
+                    <Text style={styles.previewScoreValue}>
+                      {latestPreview.product?.type === 'medicine'
+                        ? tt('medicine_short_label', 'ILAC')
+                        : Math.round(latestPreview.analysis?.score ?? 0)}
+                    </Text>
+                    <Text style={styles.previewScoreCaption}>
+                      {latestPreview.product?.type === 'medicine'
+                        ? tt('medicine_label', 'İlaç')
+                        : tt('score_short', 'Skor')}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
 
-          <TouchableOpacity
-            style={styles.controlBtn}
-            onPress={() => setScanned(false)}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="refresh-outline" size={24} color="#FFF" />
-            <Text style={styles.controlLabel}>{tt('retry', 'Yenile')}</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+              {latestPreview.status === 'not_found' ? (
+                <TouchableOpacity
+                  style={styles.previewActionButton}
+                  onPress={() => handleOpenMissingProduct(latestPreview.barcode)}
+                  activeOpacity={0.88}
+                >
+                  <Ionicons name="add-circle-outline" size={18} color="#0B0E14" />
+                  <Text style={styles.previewActionButtonText}>
+                    {tt('add_product', 'Ürün Ekle')}
+                  </Text>
+                </TouchableOpacity>
+              ) : latestPreview.status === 'found' ? (
+                <Text style={styles.previewHintText}>
+                  {tt(
+                    'scanner_open_detail_hint',
+                    'Detay ekranını açmak için karta dokunun, kamera taramaya devam eder.'
+                  )}
+                </Text>
+              ) : null}
+            </TouchableOpacity>
+          ) : null}
+
+          {previewHistory.length ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.previewQueueRow}
+            >
+              {previewHistory.map((item) => (
+                <TouchableOpacity
+                  key={item.id}
+                  style={styles.previewQueueCard}
+                  onPress={() => {
+                    if (item.status === 'found') {
+                      handleOpenPreviewDetail(item);
+                    } else if (item.status === 'not_found') {
+                      handleOpenMissingProduct(item.barcode);
+                    }
+                  }}
+                  activeOpacity={0.88}
+                >
+                  <Text style={styles.previewQueueTitle} numberOfLines={1}>
+                    {item.product?.name ||
+                      (item.status === 'not_found'
+                        ? tt('scanner_not_found_short', 'Bulunamadı')
+                        : tt('scanner_status_searching', 'Aranıyor'))}
+                  </Text>
+                  <Text style={styles.previewQueueMeta} numberOfLines={1}>
+                    {item.product?.type === 'medicine'
+                      ? tt('medicine_label', 'İlaç')
+                      : typeof item.analysis?.score === 'number'
+                        ? `${Math.round(item.analysis.score)}/100`
+                        : item.barcode}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          ) : null}
+        </Animated.View>
+      ) : null}
 
       {isManualMode && (
         <KeyboardAvoidingView
@@ -542,12 +1007,40 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.72)',
     paddingHorizontal: 20,
   },
-  topCloseBtn: {
-    alignSelf: 'flex-end',
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.10)',
+  topControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  topManualButton: {
+    minHeight: 38,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.11)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  topManualButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  topActionsGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  topIconButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.11)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -609,73 +1102,155 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.72)',
   },
-  infoPanel: {
+  previewSheet: {
     position: 'absolute',
-    left: 24,
-    right: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 3,
-  },
-  infoTitle: {
-    color: '#FFF',
-    fontSize: 13,
-    fontWeight: '900',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    opacity: 0.9,
-  },
-  infoText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginTop: 12,
-    lineHeight: 20,
-    opacity: 0.82,
-  },
-  controls: {
-    position: 'absolute',
-    width: '100%',
-    flexDirection: 'row',
-    justifyContent: 'space-evenly',
-    alignItems: 'center',
-    paddingHorizontal: 14,
+    left: 0,
+    right: 0,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+    paddingBottom: 18,
     zIndex: 4,
   },
-  controlBtn: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: 'rgba(255,255,255,0.10)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  previewPrimaryCard: {
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    padding: 14,
+  },
+  previewCardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  previewBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+  },
+  previewStatusPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  previewStatusText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  previewBarcodeText: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 12,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  previewBody: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 14,
+    alignItems: 'center',
+  },
+  previewImage: {
+    width: 66,
+    height: 66,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  previewTextWrap: {
+    flex: 1,
+  },
+  previewScoreBubble: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    borderWidth: 3,
     borderColor: 'rgba(255,255,255,0.18)',
   },
-  controlBtnCenter: {
-    width: 94,
-    height: 94,
-    borderRadius: 47,
-    backgroundColor: 'rgba(0,0,0,0.68)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.30)',
+  previewScoreValue: {
+    color: '#FFFFFF',
+    fontSize: 22,
+    fontWeight: '900',
+    textAlign: 'center',
   },
-  controlLabel: {
-    marginTop: 4,
-    color: '#FFF',
+  previewScoreCaption: {
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 9,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  previewBrand: {
+    color: '#FFD34D',
+    fontSize: 12,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  previewName: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+    lineHeight: 20,
+  },
+  previewMessage: {
+    color: 'rgba(255,255,255,0.76)',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
+  },
+  previewActionButton: {
+    marginTop: 14,
+    minHeight: 46,
+    borderRadius: 14,
+    backgroundColor: '#FFD34D',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  previewActionButtonText: {
+    color: '#0B0E14',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  previewHintText: {
+    color: 'rgba(255,255,255,0.68)',
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 12,
+  },
+  previewQueueRow: {
+    paddingTop: 10,
+    gap: 10,
+  },
+  previewQueueCard: {
+    width: 140,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  previewQueueTitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  previewQueueMeta: {
+    color: 'rgba(255,255,255,0.68)',
     fontSize: 11,
     fontWeight: '700',
-    opacity: 0.85,
-  },
-  controlCenterLabel: {
-    marginTop: 4,
-    fontSize: 11,
-    fontWeight: '800',
-    textAlign: 'center',
-    paddingHorizontal: 6,
+    marginTop: 6,
   },
   manualOverlay: {
     ...StyleSheet.absoluteFillObject,

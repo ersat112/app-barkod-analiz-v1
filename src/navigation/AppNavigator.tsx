@@ -1,46 +1,39 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   NavigationContainer,
   DefaultTheme,
   DarkTheme,
+  createNavigationContainerRef,
+  type NavigatorScreenParams,
   type Theme as NavigationTheme,
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { Platform } from 'react-native';
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
+import { PERSISTENT_BOTTOM_NAV_HEIGHT } from './navigationLayout';
 
 import { SplashScreen } from '../screens/auth/SplashScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
 import { SignUpScreen } from '../screens/auth/SignUpScreen';
 
 import { HomeScreen } from '../screens/main/HomeScreen';
-import { ScannerScreen } from '../screens/main/ScannerScreen';
+import { MedicineScannerScreen, ScannerScreen } from '../screens/main/ScannerScreen';
 import { DetailScreen } from '../screens/main/DetailScreen';
 import { HistoryScreen } from '../screens/main/HistoryScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
+import { ECodeCatalogScreen } from '../screens/main/ECodeCatalogScreen';
+import { ProfileSettingsScreen } from '../screens/main/ProfileSettingsScreen';
 import { MissingProductScreen } from '../screens/main/MissingProductScreen';
 import { PaywallScreen } from '../screens/main/PaywallScreen';
 import type { PaywallEntrySource } from '../types/monetization';
-
-export type RootStackParamList = {
-  Main: undefined;
-  Scanner: undefined;
-  Detail: {
-    barcode: string;
-    entrySource?: 'scanner' | 'history' | 'home' | 'unknown';
-  };
-  MissingProduct: { barcode: string };
-  Paywall: { source?: PaywallEntrySource } | undefined;
-  Login: undefined;
-  SignUp: undefined;
-};
+import type { Product } from '../utils/analysis';
 
 export type MainTabParamList = {
   Home: undefined;
@@ -48,10 +41,128 @@ export type MainTabParamList = {
   Settings: undefined;
 };
 
+export type RootStackParamList = {
+  Main: NavigatorScreenParams<MainTabParamList> | undefined;
+  Scanner: undefined;
+  MedicineScanner: undefined;
+  Detail: {
+    barcode: string;
+    entrySource?: 'scanner' | 'history' | 'home' | 'unknown';
+    lookupMode?: 'auto' | 'medicine';
+    prefetchedProduct?: Product;
+    historyAlreadySaved?: boolean;
+  };
+  ECodeCatalog: undefined;
+  ProfileSettings: undefined;
+  MissingProduct: { barcode: string };
+  Paywall: { source?: PaywallEntrySource } | undefined;
+  Login: undefined;
+  SignUp: undefined;
+};
+
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tab = createBottomTabNavigator<MainTabParamList>();
+const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
-const MainTabNavigator: React.FC = () => {
+const getDeepestRouteName = (state: unknown): string | undefined => {
+  if (!state || typeof state !== 'object' || !('routes' in state)) {
+    return undefined;
+  }
+
+  const navigationState = state as {
+    index?: number;
+    routes: { name: string; state?: unknown }[];
+  };
+  const activeRoute =
+    navigationState.routes[navigationState.index ?? navigationState.routes.length - 1];
+
+  if (!activeRoute) {
+    return undefined;
+  }
+
+  if (activeRoute.state) {
+    return getDeepestRouteName(activeRoute.state) ?? activeRoute.name;
+  }
+
+  return activeRoute.name;
+};
+
+const CenterScanTabButton: React.FC<{
+  colors: ReturnType<typeof useTheme>['colors'];
+  label: string;
+  onPress?: () => void;
+}> = ({ colors, label, onPress }) => {
+  return (
+    <View pointerEvents="box-none" style={styles.centerScanButtonOverlay}>
+      <TouchableOpacity
+        style={styles.centerScanButtonWrap}
+        onPress={onPress}
+        activeOpacity={0.92}
+      >
+        <View
+          style={[
+            styles.centerScanButton,
+            {
+              backgroundColor: colors.primary,
+              shadowColor: colors.shadow,
+            },
+          ]}
+        >
+          <Ionicons name="scan-outline" size={24} color={colors.primaryContrast} />
+        </View>
+        <Text style={[styles.centerScanLabel, { color: colors.primary }]}>{label}</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+const TabBarItem: React.FC<{
+  active: boolean;
+  colors: ReturnType<typeof useTheme>['colors'];
+  iconName: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+}> = ({ active, colors, iconName, label, onPress }) => {
+  return (
+    <TouchableOpacity
+      style={styles.tabBarItem}
+      onPress={onPress}
+      activeOpacity={0.9}
+    >
+      <Ionicons
+        name={iconName}
+        size={22}
+        color={active ? colors.primary : colors.border}
+      />
+      <Text
+        style={[
+          styles.tabBarItemLabel,
+          { color: active ? colors.primary : colors.border },
+        ]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+};
+
+const PersistentBottomNav: React.FC<{
+  activeRouteName: string;
+  activeMainTab: keyof MainTabParamList;
+  onOpenHome: () => void;
+  onOpenHistory: () => void;
+  onOpenScanner: () => void;
+  onOpenMedicine: () => void;
+  onOpenSettings: () => void;
+}> = ({
+  activeRouteName,
+  activeMainTab,
+  onOpenHome,
+  onOpenHistory,
+  onOpenScanner,
+  onOpenMedicine,
+  onOpenSettings,
+}) => {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -66,61 +177,111 @@ const MainTabNavigator: React.FC = () => {
     Platform.OS === 'ios' ? 24 : 12
   );
   const tabBarTopPadding = 10;
-  const tabBarHeight = 56 + tabBarBottomPadding + tabBarTopPadding;
+  const activeSection =
+    activeRouteName === 'Home' ||
+    activeRouteName === 'History' ||
+    activeRouteName === 'Settings'
+      ? activeRouteName
+      : activeMainTab;
+
+  return (
+    <View
+      pointerEvents="box-none"
+      style={[
+        styles.customTabBar,
+        {
+          backgroundColor: colors.background,
+          borderTopColor: colors.border,
+          paddingBottom: tabBarBottomPadding,
+          paddingTop: tabBarTopPadding,
+        },
+      ]}
+    >
+      <View style={styles.customTabBarGrid}>
+        <View style={styles.tabBarSlot}>
+          <TabBarItem
+            active={activeSection === 'Home'}
+            colors={colors}
+            iconName={activeSection === 'Home' ? 'home' : 'home-outline'}
+            label={tt('home', 'Ana Sayfa')}
+            onPress={onOpenHome}
+          />
+        </View>
+        <View style={styles.tabBarSlot}>
+          <TabBarItem
+            active={activeSection === 'History'}
+            colors={colors}
+            iconName={activeSection === 'History' ? 'time' : 'time-outline'}
+            label={tt('history', 'Geçmiş')}
+            onPress={onOpenHistory}
+          />
+        </View>
+        <View style={styles.centerTabSpacer} />
+        <View style={styles.tabBarSlot}>
+          <TabBarItem
+            active={activeRouteName === 'MedicineScanner'}
+            colors={colors}
+            iconName="medkit-outline"
+            label={tt('scan_medicine', 'İlaç Tara')}
+            onPress={onOpenMedicine}
+          />
+        </View>
+        <View style={styles.tabBarSlot}>
+          <TabBarItem
+            active={activeSection === 'Settings'}
+            colors={colors}
+            iconName={
+              activeSection === 'Settings' ? 'settings' : 'settings-outline'
+            }
+            label={tt('settings', 'Ayarlar')}
+            onPress={onOpenSettings}
+          />
+        </View>
+      </View>
+
+      <CenterScanTabButton
+        colors={colors}
+        label={tt('scan_now', 'Şimdi Tara')}
+        onPress={onOpenScanner}
+      />
+    </View>
+  );
+};
+
+const MainTabNavigator: React.FC = () => {
+  const { t } = useTranslation();
+  const { colors } = useTheme();
+
+  const tt = (key: string, fallback: string) => {
+    const value = t(key, { defaultValue: fallback });
+    return value === key ? fallback : value;
+  };
 
   return (
     <Tab.Navigator
       id="main-tabs"
-      screenOptions={({ route }) => ({
+      tabBar={() => null}
+      screenOptions={{
         headerShown: false,
-        tabBarHideOnKeyboard: true,
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.border,
         sceneStyle: {
           backgroundColor: colors.background,
         },
-        tabBarStyle: {
-          backgroundColor: colors.background,
-          borderTopColor: colors.border,
-          height: tabBarHeight,
-          paddingBottom: tabBarBottomPadding,
-          paddingTop: tabBarTopPadding,
-          elevation: 0,
-          shadowOpacity: 0,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '700',
-        },
-        tabBarIcon: ({ focused, color, size }) => {
-          let iconName: keyof typeof Ionicons.glyphMap = 'home-outline';
-
-          if (route.name === 'Home') {
-            iconName = focused ? 'home' : 'home-outline';
-          } else if (route.name === 'History') {
-            iconName = focused ? 'time' : 'time-outline';
-          } else if (route.name === 'Settings') {
-            iconName = focused ? 'settings' : 'settings-outline';
-          }
-
-          return <Ionicons name={iconName} size={size} color={color} />;
-        },
-      })}
+      }}
     >
       <Tab.Screen
         name="Home"
         component={HomeScreen}
-        options={{ tabBarLabel: tt('home', 'Ana Sayfa') }}
+        options={{ title: tt('home', 'Ana Sayfa') }}
       />
       <Tab.Screen
         name="History"
         component={HistoryScreen}
-        options={{ tabBarLabel: tt('history', 'Geçmiş') }}
+        options={{ title: tt('history', 'Geçmiş') }}
       />
       <Tab.Screen
         name="Settings"
         component={SettingsScreen}
-        options={{ tabBarLabel: tt('settings', 'Ayarlar') }}
+        options={{ title: tt('settings', 'Ayarlar') }}
       />
     </Tab.Navigator>
   );
@@ -146,8 +307,23 @@ const AppStack = () => (
       options={{ animation: 'slide_from_bottom' }}
     />
     <Stack.Screen
+      name="MedicineScanner"
+      component={MedicineScannerScreen}
+      options={{ animation: 'slide_from_bottom' }}
+    />
+    <Stack.Screen
       name="Detail"
       component={DetailScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="ECodeCatalog"
+      component={ECodeCatalogScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="ProfileSettings"
+      component={ProfileSettingsScreen}
       options={{ animation: 'slide_from_right' }}
     />
     <Stack.Screen
@@ -167,6 +343,44 @@ export const AppNavigator: React.FC = () => {
   const { loading, isAuthenticated } = useAuth();
   const { colors, isDark, ready: themeReady } = useTheme();
   const { ready: languageReady } = useLanguage();
+  const [activeRouteName, setActiveRouteName] = useState<string>('Home');
+  const [activeMainTab, setActiveMainTab] = useState<keyof MainTabParamList>('Home');
+
+  const syncActiveRoute = useCallback(() => {
+    const nextRouteName = getDeepestRouteName(navigationRef.getRootState()) ?? 'Home';
+
+    setActiveRouteName(nextRouteName);
+
+    if (
+      nextRouteName === 'Home' ||
+      nextRouteName === 'History' ||
+      nextRouteName === 'Settings'
+    ) {
+      setActiveMainTab(nextRouteName);
+    }
+  }, []);
+
+  const navigateToMainTab = useCallback((screen: keyof MainTabParamList) => {
+    if (!navigationRef.isReady()) {
+      return;
+    }
+
+    navigationRef.navigate('Main', { screen });
+    setActiveMainTab(screen);
+    setActiveRouteName(screen);
+  }, []);
+
+  const navigateToStackScreen = useCallback(
+    (screen: 'Scanner' | 'MedicineScanner') => {
+      if (!navigationRef.isReady()) {
+        return;
+      }
+
+      navigationRef.navigate(screen);
+      setActiveRouteName(screen);
+    },
+    []
+  );
 
   const navigationTheme = useMemo<NavigationTheme>(() => {
     const baseTheme = isDark ? DarkTheme : DefaultTheme;
@@ -191,16 +405,113 @@ export const AppNavigator: React.FC = () => {
   }
 
   return (
-    <NavigationContainer theme={navigationTheme}>
-      <Stack.Navigator
-        id="root-stack"
-        screenOptions={{
-          headerShown: false,
-          animation: 'slide_from_right',
-        }}
+    <View style={styles.appShell}>
+      <NavigationContainer
+        ref={navigationRef}
+        theme={navigationTheme}
+        onReady={syncActiveRoute}
+        onStateChange={syncActiveRoute}
       >
-        {isAuthenticated ? AppStack() : AuthStack()}
-      </Stack.Navigator>
-    </NavigationContainer>
+        <Stack.Navigator
+          id="root-stack"
+          screenOptions={{
+            headerShown: false,
+            animation: 'slide_from_right',
+          }}
+        >
+          {isAuthenticated ? AppStack() : AuthStack()}
+        </Stack.Navigator>
+      </NavigationContainer>
+
+      {isAuthenticated ? (
+        <PersistentBottomNav
+          activeRouteName={activeRouteName}
+          activeMainTab={activeMainTab}
+          onOpenHome={() => navigateToMainTab('Home')}
+          onOpenHistory={() => navigateToMainTab('History')}
+          onOpenScanner={() => navigateToStackScreen('Scanner')}
+          onOpenMedicine={() => navigateToStackScreen('MedicineScanner')}
+          onOpenSettings={() => navigateToMainTab('Settings')}
+        />
+      ) : null}
+    </View>
   );
 };
+
+const styles = StyleSheet.create({
+  appShell: {
+    flex: 1,
+  },
+  customTabBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: 1,
+    paddingHorizontal: 10,
+    minHeight: PERSISTENT_BOTTOM_NAV_HEIGHT,
+    zIndex: 30,
+  },
+  customTabBarGrid: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    minHeight: 62,
+  },
+  tabBarSlot: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  centerTabSpacer: {
+    flex: 1,
+    minWidth: 76,
+  },
+  tabBarItem: {
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  tabBarItemLabel: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  centerScanButtonWrap: {
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    width: 88,
+  },
+  centerScanButtonOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 6,
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    zIndex: 3,
+  },
+  centerScanButton: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOpacity: 0.24,
+    shadowRadius: 18,
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    elevation: 10,
+  },
+  centerScanLabel: {
+    marginTop: 4,
+    fontSize: 10,
+    fontWeight: '900',
+  },
+});

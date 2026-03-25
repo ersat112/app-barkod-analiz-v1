@@ -5,8 +5,8 @@ import { E_CODES_DATA } from '../services/eCodesData';
  * Gıda ve kozmetik ürünleri için hibrit risk analizi ve puanlama sağlar.
  */
 
-export type ProductType = 'food' | 'beauty';
-export type ProductSource = 'openfoodfacts' | 'openbeautyfacts';
+export type ProductType = 'food' | 'beauty' | 'medicine';
+export type ProductSource = 'openfoodfacts' | 'openbeautyfacts' | 'titck';
 export type ProductSourceStatus = 'found' | 'not_found';
 
 export interface Product {
@@ -32,6 +32,17 @@ export interface Product {
   origins_tags?: string[];
   sourceName?: ProductSource;
   sourceStatus?: ProductSourceStatus;
+  active_ingredients?: string[];
+  license_status?: string;
+  license_number?: string;
+  license_date?: string;
+  suspension_date?: string;
+  atc_code?: string;
+  prospectus_pdf_url?: string;
+  summary_pdf_url?: string;
+  prospectus_approval_date?: string;
+  short_text_approval_date?: string;
+  catalog_updated_at?: string;
 }
 
 export interface ECodeMatch {
@@ -70,6 +81,27 @@ const clamp = (value: number, min = 0, max = 100): number =>
 
 const normalizeText = (value?: string): string =>
   (value || '').toUpperCase().trim();
+
+export const normalizeProductType = (
+  value: unknown,
+  fallback: ProductType = 'food'
+): ProductType => {
+  if (value === 'food' || value === 'beauty' || value === 'medicine') {
+    return value;
+  }
+
+  return fallback;
+};
+
+export const normalizeProductSource = (
+  value: unknown
+): ProductSource | undefined => {
+  if (value === 'openfoodfacts' || value === 'openbeautyfacts' || value === 'titck') {
+    return value;
+  }
+
+  return undefined;
+};
 
 /**
  * API skorlarını 0-100 aralığına normalize eder.
@@ -150,6 +182,19 @@ const getRecommendation = (
 };
 
 export const analyzeProduct = (product: Product): AnalysisResult => {
+  if (product.type === 'medicine') {
+    return {
+      riskLevel: 'Düşük',
+      foundECodes: [],
+      summary:
+        'İlaç kaydı resmi TITCK verileri üzerinden çözümlendi. Kullanmadan önce prospektüsü ve hekim/eczacı yönlendirmesini dikkate alın.',
+      color: '#2AAE6F',
+      recommendation:
+        'İlaçları yalnızca prospektüs, doktor veya eczacı önerisine uygun şekilde kullanın.',
+      score: 0,
+    };
+  }
+
   const text = normalizeText(product.ingredients_text);
   const foundECodesMap = new Map<string, ECodeMatch>();
 

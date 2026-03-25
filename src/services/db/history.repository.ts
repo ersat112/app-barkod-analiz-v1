@@ -1,4 +1,8 @@
-import type { Product } from '../../utils/analysis';
+import {
+  normalizeProductSource,
+  normalizeProductType,
+  type Product,
+} from '../../utils/analysis';
 import { TABLES, getDatabase, safeNumber, safeText } from './core';
 import type { BestScoreRow, CountRow, DayRow, HistoryEntry } from './types';
 import type {
@@ -37,6 +41,11 @@ type DashboardRow = {
   last_scanned_updated_at: string | null;
 };
 
+type ScanHourPreferenceRow = {
+  scan_hour: number | null;
+  count: number | null;
+};
+
 const db = getDatabase();
 
 const HISTORY_SELECT_SQL = `
@@ -62,6 +71,10 @@ const toNullableNumber = (value?: number | null): number | null => {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 };
 
+const clampHour = (value: number, min: number, max: number): number => {
+  return Math.min(Math.max(value, min), max);
+};
+
 const normalizeBarcodeList = (barcodes: string[]): string[] => {
   return Array.from(
     new Set(
@@ -79,16 +92,13 @@ export const normalizeHistoryRow = (row: HistoryRow): HistoryEntry => {
     name: row.name,
     brand: row.brand ?? '',
     image_url: row.image_url ?? '',
-    type: row.type === 'beauty' ? 'beauty' : 'food',
+    type: normalizeProductType(row.type),
     score: typeof row.score === 'number' ? row.score : undefined,
     grade: row.grade ?? undefined,
     ingredients_text: row.ingredients_text ?? undefined,
     country: row.country ?? undefined,
     origin: row.origin ?? undefined,
-    sourceName:
-      row.sourceName === 'openfoodfacts' || row.sourceName === 'openbeautyfacts'
-        ? row.sourceName
-        : undefined,
+    sourceName: normalizeProductSource(row.sourceName),
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -105,17 +115,13 @@ const toLastScannedHistoryEntry = (row: DashboardRow): HistoryEntry | null => {
     name: row.last_scanned_name ?? '',
     brand: row.last_scanned_brand ?? '',
     image_url: row.last_scanned_image_url ?? '',
-    type: row.last_scanned_type === 'beauty' ? 'beauty' : 'food',
+    type: normalizeProductType(row.last_scanned_type),
     score: toNullableNumber(row.last_scanned_score) ?? undefined,
     grade: row.last_scanned_grade ?? undefined,
     ingredients_text: row.last_scanned_ingredients_text ?? undefined,
     country: row.last_scanned_country ?? undefined,
     origin: row.last_scanned_origin ?? undefined,
-    sourceName:
-      row.last_scanned_source_name === 'openfoodfacts' ||
-      row.last_scanned_source_name === 'openbeautyfacts'
-        ? row.last_scanned_source_name
-        : undefined,
+    sourceName: normalizeProductSource(row.last_scanned_source_name),
     created_at: row.last_scanned_created_at ?? '',
     updated_at: row.last_scanned_updated_at ?? '',
   };
@@ -160,8 +166,20 @@ export const getTodayUniqueProductCount = (): number => {
 /**
  * Her taramayı ayrı kayıt olarak history'ye ekler.
  */
-export const saveProductToHistory = (product: Product, score = 0): void => {
+export const saveProductToHistory = (
+  product: Product,
+  score?: number | null
+): void => {
   try {
+    const resolvedScore =
+      product.type === 'medicine'
+        ? null
+        : typeof score === 'number' && Number.isFinite(score)
+          ? Math.round(score)
+          : typeof product.score === 'number' && Number.isFinite(product.score)
+            ? Math.round(product.score)
+            : 0;
+
     db.runSync(
       `INSERT INTO ${TABLES.HISTORY} (
         barcode,
@@ -184,7 +202,7 @@ export const saveProductToHistory = (product: Product, score = 0): void => {
         safeText(product.brand, 'Markasız'),
         safeText(product.image_url),
         safeText(product.type, 'food'),
-        safeNumber(score, safeNumber(product.score, 0)),
+        resolvedScore,
         safeText(product.grade),
         safeText(product.ingredients_text),
         safeText(product.country),
@@ -344,7 +362,7 @@ export const getHistoryPage = ({
   const whereClauses: string[] = [];
   const params: (string | number)[] = [];
 
-  if (type === 'food' || type === 'beauty') {
+  if (type === 'food' || type === 'beauty' || type === 'medicine') {
     whereClauses.push(`type = ?`);
     params.push(type);
   }
@@ -466,6 +484,54 @@ export const getBestScoreToday = (): number | null => {
   } catch (error) {
     console.error('Best score today error:', error);
     return null;
+  }
+};
+
+export const getPersonalizedEngagementSchedule = (): {
+  preferredHour: number | null;
+  reminderHour: number;
+  reminderMinute: number;
+  summaryHour: number;
+  summaryMinute: number;
+} => {
+  try {
+    const row = db.getFirstSync<ScanHourPreferenceRow>(
+      `SELECT
+         CAST(strftime('%H', datetime(created_at, 'localtime')) AS INTEGER) as scan_hour,
+         COUNT(*) as count
+       FROM ${TABLES.HISTORY}
+       WHERE date(created_at) >= date('now', 'localtime', '-30 days')
+       GROUP BY scan_hour
+       ORDER BY count DESC, scan_hour DESC
+       LIMIT 1`
+    );
+
+    const preferredHour =
+      typeof row?.scan_hour === 'number' && Number.isFinite(row.scan_hour)
+        ? row.scan_hour
+        : null;
+
+    const reminderHour =
+      preferredHour == null ? 13 : clampHour(preferredHour, 10, 20);
+    const summaryHour = clampHour(reminderHour + 6, 19, 22);
+
+    return {
+      preferredHour,
+      reminderHour,
+      reminderMinute: 0,
+      summaryHour,
+      summaryMinute: 30,
+    };
+  } catch (error) {
+    console.error('Engagement schedule read error:', error);
+
+    return {
+      preferredHour: null,
+      reminderHour: 13,
+      reminderMinute: 0,
+      summaryHour: 20,
+      summaryMinute: 30,
+    };
   }
 };
 

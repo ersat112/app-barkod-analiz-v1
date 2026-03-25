@@ -31,6 +31,14 @@ type ShareAction = {
   onPress: () => void;
 };
 
+type ActionLinkItem = {
+  key: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  helper?: string;
+  onPress: () => void;
+};
+
 export const DetailLoadingState: React.FC<{
   label: string;
   colors: ThemeColors;
@@ -516,6 +524,61 @@ export const TextSection: React.FC<{
   );
 };
 
+export const ActionLinksSection: React.FC<{
+  title: string;
+  items: ActionLinkItem[];
+  colors: ThemeColors;
+}> = ({ title, items, colors }) => {
+  if (!items.length) {
+    return null;
+  }
+
+  return (
+    <>
+      <Text style={[styles.sectionTitle, styles.textSectionTitle, { color: colors.text }]}>
+        {title}
+      </Text>
+
+      <View style={styles.actionLinksWrap}>
+        {items.map((item) => (
+          <TouchableOpacity
+            key={item.key}
+            style={[
+              styles.actionLinkCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+            onPress={item.onPress}
+            activeOpacity={0.88}
+          >
+            <View
+              style={[
+                styles.actionLinkIconWrap,
+                { backgroundColor: withAlpha(colors.primary, '16') },
+              ]}
+            >
+              <Ionicons name={item.icon} size={18} color={colors.primary} />
+            </View>
+
+            <View style={styles.actionLinkTextWrap}>
+              <Text style={[styles.actionLinkLabel, { color: colors.text }]}>
+                {item.label}
+              </Text>
+
+              {item.helper ? (
+                <Text style={[styles.actionLinkHelper, { color: colors.mutedText }]}>
+                  {item.helper}
+                </Text>
+              ) : null}
+            </View>
+
+            <Ionicons name="open-outline" size={18} color={colors.primary} />
+          </TouchableOpacity>
+        ))}
+      </View>
+    </>
+  );
+};
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -759,6 +822,37 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     borderWidth: 1,
     borderStyle: 'dashed',
+  },
+  actionLinksWrap: {
+    gap: 12,
+    marginBottom: 24,
+  },
+  actionLinkCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  actionLinkIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionLinkTextWrap: {
+    flex: 1,
+  },
+  actionLinkLabel: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  actionLinkHelper: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
   },
   shareSheetCard: {
     width: '100%',

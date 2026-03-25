@@ -253,7 +253,7 @@ export async function enqueueRemoteHistorySync(params: {
     name: String(params.product.name || '').trim(),
     brand: String(params.product.brand || '').trim(),
     imageUrl: String(params.product.image_url || '').trim(),
-    productType: params.product.type === 'beauty' ? 'beauty' : 'food',
+    productType: params.product.type,
     productSource: params.product.sourceName ?? null,
     score: Number.isFinite(params.score) ? Math.round(params.score) : 0,
     grade:

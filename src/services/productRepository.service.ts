@@ -2,6 +2,7 @@ import { CACHE_POLICY, FEATURES } from '../config/features';
 import type { Product } from '../utils/analysis';
 import { fetchBeautyProduct } from '../api/beautyApi';
 import { fetchFoodProduct } from '../api/foodApi';
+import { fetchMedicineProduct } from './titckMedicine.service';
 import {
   getLocalProductCacheHit,
   invalidateLocalProductCacheBarcode,
@@ -160,6 +161,17 @@ const fetchRemoteSourcesSequential = async (
     };
   }
 
+  const medicineProduct = await fetchMedicineProduct(barcode);
+
+  if (medicineProduct) {
+    return {
+      found: true,
+      barcode,
+      product: medicineProduct,
+      source: 'medicine',
+    };
+  }
+
   return {
     found: false,
     barcode,
@@ -192,6 +204,17 @@ const fetchRemoteSourcesParallel = async (
   }
 
   if (!candidates.length) {
+    const medicineProduct = await fetchMedicineProduct(barcode);
+
+    if (medicineProduct) {
+      return {
+        found: true,
+        barcode,
+        product: medicineProduct,
+        source: 'medicine',
+      };
+    }
+
     return {
       found: false,
       barcode,

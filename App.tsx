@@ -12,7 +12,9 @@ import { auth } from './src/config/firebase';
 import { bootstrapOperabilitySurface } from './src/services/operability.service';
 import { adService } from './src/services/adService';
 import { entitlementService } from './src/services/entitlement.service';
+import { syncEngagementNotifications } from './src/services/engagementNotifications.service';
 import { syncPurchaseProviderIdentity } from './src/services/purchaseProvider.service';
+import { refreshCurrentUserProfile } from './src/services/userProfile.service';
 
 const AppContent: React.FC = () => {
   const { isDark } = useTheme();
@@ -23,6 +25,10 @@ const AppContent: React.FC = () => {
     let mounted = true;
 
     const bootstrap = async () => {
+      if (auth.currentUser?.uid) {
+        void refreshCurrentUserProfile();
+      }
+
       const snapshot = await bootstrapOperabilitySurface();
 
       if (mounted) {
@@ -36,6 +42,14 @@ const AppContent: React.FC = () => {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (loading) {
+      return;
+    }
+
+    void syncEngagementNotifications();
+  }, [loading]);
 
   useEffect(() => {
     if (loading) {

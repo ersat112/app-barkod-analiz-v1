@@ -2,7 +2,7 @@ import type { HistoryEntry } from '../services/db';
 
 export const HISTORY_PAGE_SIZE = 20;
 
-export type HistoryFilterType = 'all' | 'food' | 'beauty';
+export type HistoryFilterType = 'all' | 'food' | 'beauty' | 'medicine';
 
 export type HistoryListTranslationFn = (
   key: string,

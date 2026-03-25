@@ -44,8 +44,19 @@ export const useHistoryScreenController = ({
   }, [navigation]);
 
   const openDetail = useCallback(
-    (barcode: string) => {
-      navigation.navigate('Detail', { barcode });
+    (barcode: string, prefetchedProduct?: Record<string, unknown>) => {
+      navigation.navigate('Detail', {
+        barcode,
+        entrySource: 'history',
+        prefetchedProduct,
+        lookupMode:
+          prefetchedProduct &&
+          typeof prefetchedProduct === 'object' &&
+          'type' in prefetchedProduct &&
+          prefetchedProduct.type === 'medicine'
+            ? 'medicine'
+            : undefined,
+      });
     },
     [navigation]
   );

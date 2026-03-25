@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { PERSISTENT_BOTTOM_NAV_RESERVED_SPACE } from '../../navigation/navigationLayout';
 
 type AppScreenLayoutOptions = {
   topInsetExtra?: number;
@@ -29,12 +30,12 @@ export const useAppScreenLayout = (
 
     const headerTopPadding = Math.max(insets.top + topInsetExtra, topInsetMin);
     const contentBottomPadding = Math.max(
-      insets.bottom + contentBottomExtra,
-      contentBottomMin
+      insets.bottom + contentBottomExtra + PERSISTENT_BOTTOM_NAV_RESERVED_SPACE,
+      contentBottomMin + PERSISTENT_BOTTOM_NAV_RESERVED_SPACE
     );
     const floatingBottomOffset = Math.max(
-      insets.bottom + floatingBottomExtra,
-      floatingBottomMin
+      insets.bottom + floatingBottomExtra + PERSISTENT_BOTTOM_NAV_RESERVED_SPACE - 16,
+      floatingBottomMin + PERSISTENT_BOTTOM_NAV_RESERVED_SPACE - 16
     );
 
     return {
