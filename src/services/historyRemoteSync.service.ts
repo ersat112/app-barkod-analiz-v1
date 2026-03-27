@@ -43,11 +43,14 @@ type PersistedQueueState = {
 };
 
 const QUEUE_VERSION = 1;
+const ENQUEUE_FLUSH_DELAY_MS = 15_000;
+const ACTIVE_FLUSH_DELAY_MS = 5_000;
 
 let inMemoryQueue: HistoryRemoteSyncItem[] | null = null;
 let hydrationPromise: Promise<HistoryRemoteSyncItem[]> | null = null;
 let flushPromise: Promise<number> | null = null;
 let appStateSubscription: NativeEventSubscription | null = null;
+let scheduledFlushTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -55,6 +58,26 @@ function nowIso(): string {
 
 function createQueueId(): string {
   return `hsq_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function clearScheduledFlush(): void {
+  if (!scheduledFlushTimeout) {
+    return;
+  }
+
+  clearTimeout(scheduledFlushTimeout);
+  scheduledFlushTimeout = null;
+}
+
+function scheduleFlush(reason: FlushReason, delayMs: number): void {
+  if (scheduledFlushTimeout) {
+    return;
+  }
+
+  scheduledFlushTimeout = setTimeout(() => {
+    scheduledFlushTimeout = null;
+    void flushHistoryRemoteSyncQueue({ reason });
+  }, delayMs);
 }
 
 function toErrorMessage(error: unknown): string {
@@ -192,6 +215,8 @@ export async function flushHistoryRemoteSyncQueue(options?: {
     return 0;
   }
 
+  clearScheduledFlush();
+
   if (flushPromise) {
     return flushPromise;
   }
@@ -275,7 +300,7 @@ export async function enqueueRemoteHistorySync(params: {
   };
 
   await persistQueue([...queue, item]);
-  void flushHistoryRemoteSyncQueue({ reason: 'enqueue' });
+  scheduleFlush('enqueue', ENQUEUE_FLUSH_DELAY_MS);
   return true;
 }
 
@@ -288,10 +313,11 @@ export function initializeHistoryRemoteSyncQueue(): void {
     'change',
     (nextState: AppStateStatus) => {
       if (nextState === 'active') {
-        void flushHistoryRemoteSyncQueue({ reason: 'app_active' });
+        scheduleFlush('app_active', ACTIVE_FLUSH_DELAY_MS);
       }
 
       if (nextState === 'background') {
+        clearScheduledFlush();
         void flushHistoryRemoteSyncQueue({ reason: 'app_background' });
       }
     }

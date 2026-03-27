@@ -227,7 +227,7 @@ export const adService = {
     appOpenAd.addAdEventListener(AdEventType.CLOSED, () => {
       console.log('[AppOpenAd] closed');
       preparedAppOpenLoaded = false;
-      appOpenAd.load();
+      clearPreparedAppOpen();
     });
 
     appOpenAd.addAdEventListener(AdEventType.ERROR, (error: unknown) => {

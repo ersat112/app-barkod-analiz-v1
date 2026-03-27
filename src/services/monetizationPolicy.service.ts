@@ -1,7 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, getDoc } from 'firebase/firestore';
 
-import { getEnvBoolean, getEnvNumber, getEnvString } from '../config/appRuntime';
+import {
+  getEnvBoolean,
+  getEnvNumber,
+  getEnvString,
+  hasEnvOverride,
+} from '../config/appRuntime';
 import { auth, db } from '../config/firebase';
 import {
   FEATURES,
@@ -37,8 +42,6 @@ const SCHEMA_VERSION = 1;
 
 let inMemoryPolicy: MonetizationPolicySnapshot | null = null;
 let refreshPromise: Promise<MonetizationPolicySnapshot> | null = null;
-
-const ENV = process.env as Record<string, string | undefined>;
 
 function log(...args: unknown[]) {
   if (FEATURES.monetization.diagnosticsLoggingEnabled) {
@@ -87,7 +90,7 @@ function clampPrice(value: unknown, fallback: number): number {
 }
 
 function hasRuntimeOverride(key: string): boolean {
-  return typeof ENV[key] === 'string' && ENV[key]!.trim().length > 0;
+  return hasEnvOverride(key);
 }
 
 function applyRuntimeOverrides(

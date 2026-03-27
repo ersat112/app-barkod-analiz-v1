@@ -22,8 +22,8 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
+import { useAppState } from '../../hooks/useAppState';
 import { adService } from '../../services/adService';
-import { entitlementService } from '../../services/entitlement.service';
 import { freeScanPolicyService } from '../../services/freeScanPolicy.service';
 import { enqueueRemoteHistorySync } from '../../services/historyRemoteSync.service';
 import {
@@ -38,6 +38,7 @@ import {
   unloadScanBeep,
 } from '../../services/scanFeedback.service';
 import { useScanStore } from '../../store/useScanStore';
+import type { FreeScanAccessSnapshot } from '../../types/monetization';
 import { analyzeProduct, type AnalysisResult, type Product } from '../../utils/analysis';
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
@@ -105,6 +106,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const isFocused = useIsFocused();
+  const { isActive: isAppActive } = useAppState();
 
   const layout = useAppScreenLayout({
     topInsetExtra: 8,
@@ -137,52 +139,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const scanResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
   const recentScanMapRef = useRef<Record<string, number>>({});
+  const hasPreviewSurface = previewItems.length > 0 || Boolean(activeLookupBarcode);
   const scanMode: ProductLookupMode =
     route?.name === 'MedicineScanner' ? 'medicine' : initialMode;
-
-  useEffect(() => {
-    let disposed = false;
-
-    const setupInterstitial = async () => {
-      try {
-        const entitlement = await entitlementService.getSnapshot();
-
-        if (disposed) {
-          return;
-        }
-
-        if (entitlement.isPremium) {
-          console.log('[Interstitial] premium entitlement active, preload skipped');
-          return;
-        }
-
-        const policy = await adService.getCurrentPolicy();
-
-        if (disposed) {
-          return;
-        }
-
-        if (!policy.enabled || !policy.interstitialEnabled) {
-          console.log('[Interstitial] policy disabled, preload skipped');
-          return;
-        }
-        await adService.prepareRewardedAd();
-      } catch (error) {
-        console.log('[Interstitial] setup failed', error);
-
-        void adService.trackInterstitialShowFailure(error, {
-          stage: 'setup',
-          screen: 'Scanner',
-        });
-      }
-    };
-
-    void setupInterstitial();
-
-    return () => {
-      disposed = true;
-    };
-  }, []);
+  const shouldRenderCamera =
+    isFocused && isAppActive && !isManualMode && !hasPreviewSurface;
 
   useEffect(() => {
     void prepareScanBeep();
@@ -201,7 +162,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   }, [initialMode, route?.name, scanMode]);
 
   useEffect(() => {
-    if (isFocused && !isManualMode) {
+    if (shouldRenderCamera) {
       lineAnim.setValue(0);
 
       animationRef.current = Animated.loop(
@@ -229,7 +190,15 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       animationRef.current?.stop();
       animationRef.current = null;
     };
-  }, [isFocused, isManualMode, lineAnim]);
+  }, [lineAnim, shouldRenderCamera]);
+
+  useEffect(() => {
+    if (shouldRenderCamera) {
+      return;
+    }
+
+    setTorch(false);
+  }, [shouldRenderCamera]);
 
   useEffect(() => {
     return () => {
@@ -244,7 +213,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
     const prewarm = async () => {
       try {
-        if (scanMode === 'medicine') {
+        if (scanMode === 'medicine' && isFocused && isAppActive) {
           await prewarmMedicineCatalog();
         }
       } catch (error) {
@@ -259,7 +228,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [scanMode]);
+  }, [isAppActive, isFocused, scanMode]);
 
   const closeManualMode = useCallback(() => {
     setIsManualMode(false);
@@ -281,6 +250,12 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     setIsManualMode(false);
     setManualBarcode('');
     setManualError('');
+  }, []);
+
+  const clearPreviewSurface = useCallback(() => {
+    setPreviewItems([]);
+    setActiveLookupBarcode(null);
+    setScanned(false);
   }, []);
 
   const pushLoadingPreview = useCallback((barcode: string, lookupMode: ProductLookupMode) => {
@@ -334,9 +309,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     async (validBarcodeData: string) => {
       setScanned(true);
       setActiveLookupBarcode(validBarcodeData);
+      let freeScanSnapshot: FreeScanAccessSnapshot | null = null;
       try {
         try {
           const freeScanResult = await freeScanPolicyService.registerSuccessfulScan();
+          freeScanSnapshot = freeScanResult.snapshot;
 
           if (!freeScanResult.allowed) {
             resetTransientState();
@@ -360,6 +337,28 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
           console.error('Free scan policy failed, allowing scan:', error);
         }
 
+        void (async () => {
+          try {
+            if (
+              !freeScanSnapshot ||
+              freeScanSnapshot.entitlementPlan === 'premium' ||
+              freeScanSnapshot.usedCount < 3
+            ) {
+              return;
+            }
+
+            const policy = await adService.getCurrentPolicy();
+
+            if (!policy.enabled || !policy.interstitialEnabled) {
+              return;
+            }
+
+            await adService.prepareRewardedAd();
+          } catch (error) {
+            console.log('[Interstitial] deferred preload failed', error);
+          }
+        })();
+
         Vibration.vibrate(18);
         void playScanBeep();
         resetTransientState();
@@ -367,10 +366,6 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         const cachedPreview = previewCacheByBarcode[validBarcodeData];
 
         if (cachedPreview) {
-          if (cachedPreview.product.image_url) {
-            void Image.prefetch(cachedPreview.product.image_url);
-          }
-
           setAnalysis(cachedPreview.product, cachedPreview.analysis);
           updatePreviewItem(previewId, (current) => ({
             ...current,
@@ -413,10 +408,6 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
           const product = result.product;
           const analysis = analyzeProduct(product);
           setAnalysis(product, analysis);
-
-          if (product.image_url) {
-            void Image.prefetch(product.image_url);
-          }
 
           try {
             await Promise.resolve(
@@ -535,7 +526,6 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     void processBarcode(decoded.normalizedData);
   }, [manualBarcode, processBarcode, tt]);
 
-  const hasPreviewSurface = previewItems.length > 0 || Boolean(activeLookupBarcode);
   const latestPreview = previewItems[0] ?? null;
   const previewHistory = previewItems.slice(1);
 
@@ -598,19 +588,20 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   }
 
   const topInsetPadding = layout.headerTopPadding;
+  const cameraLayer = shouldRenderCamera ? (
+    <CameraView
+      style={styles.cameraLayer}
+      onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+      enableTorch={torch}
+      barcodeScannerSettings={{
+        barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'],
+      }}
+    />
+  ) : null;
 
   return (
     <View style={styles.container}>
-      {isFocused && (
-        <CameraView
-          style={StyleSheet.absoluteFillObject}
-          onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-          enableTorch={torch}
-          barcodeScannerSettings={{
-            barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'],
-          }}
-        />
-      )}
+      {cameraLayer}
 
       <View style={styles.overlay} pointerEvents="box-none">
         <View style={[styles.topDarkArea, { paddingTop: topInsetPadding }]}>
@@ -642,7 +633,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
                 <TouchableOpacity
                   style={styles.topIconButton}
-                  onPress={() => setScanned(false)}
+                  onPress={clearPreviewSurface}
                   activeOpacity={0.85}
                 >
                   <Ionicons name="refresh-outline" size={17} color="#FFFFFF" />
@@ -813,8 +804,8 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               ) : latestPreview.status === 'found' ? (
                 <Text style={styles.previewHintText}>
                   {tt(
-                    'scanner_open_detail_hint',
-                    'Detay ekranını açmak için karta dokunun, kamera taramaya devam eder.'
+                    'scanner_preview_resume_hint',
+                    'Detay icin karta dokunun. Yeni tarama icin ustte yenileye basin.'
                   )}
                 </Text>
               ) : null}
@@ -946,6 +937,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
+  },
+  cameraLayer: {
+    ...StyleSheet.absoluteFillObject,
   },
   permissionContainer: {
     flex: 1,

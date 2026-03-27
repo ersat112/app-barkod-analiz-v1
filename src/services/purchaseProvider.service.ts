@@ -158,6 +158,14 @@ function formatRevenueCatUserMessage(
   }
 
   if (
+    details.code === 'ConfigurationError' &&
+    (normalized.includes('issue with your configuration') ||
+      normalized.includes('check the underlying error for more details'))
+  ) {
+    return 'RevenueCat dashboard veya Google Play urun eslesmesi eksik. Offering, annual package, product ve entitlement baglantilarini kontrol et.';
+  }
+
+  if (
     details.code === 'PurchaseNotAllowedError' &&
     (normalized.includes('billing is not available in this device') ||
       normalized.includes('billing_unavailable'))
@@ -263,10 +271,20 @@ function matchesAnnualProductId(
   pkg: RevenueCatPackage,
   annualProductId: string
 ): boolean {
+  const normalizedAnnualProductId = annualProductId.trim();
+  const annualProductIdPrefix = normalizedAnnualProductId.split(':')[0];
+  const candidateIdentifiers = [
+    pkg.productIdentifier,
+    pkg.storeProduct?.identifier,
+    pkg.storeProduct?.productIdentifier,
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim());
+
   return (
-    pkg.productIdentifier === annualProductId ||
-    pkg.storeProduct?.identifier === annualProductId ||
-    pkg.storeProduct?.productIdentifier === annualProductId
+    candidateIdentifiers.includes(normalizedAnnualProductId) ||
+    candidateIdentifiers.includes(annualProductIdPrefix) ||
+    candidateIdentifiers.some((value) => value.split(':')[0] === annualProductIdPrefix)
   );
 }
 

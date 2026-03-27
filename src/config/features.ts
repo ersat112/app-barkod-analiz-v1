@@ -109,7 +109,7 @@ export const AD_POLICY = Object.freeze({
   scansBetweenInterstitials: 4,
   minInterstitialCooldownMs: 1000 * 60 * 2,
   maxDailyInterstitials: 6,
-  remoteFetchTtlMs: 1000 * 60 * 10,
+  remoteFetchTtlMs: 1000 * 60 * 30,
   remoteFetchTimeoutMs: 1000 * 6,
 });
 
@@ -122,7 +122,7 @@ export const MONETIZATION_POLICY = Object.freeze({
   paywallEnabled: true,
   freeScanLimitEnabled: true,
   freeDailyScanLimit: 20,
-  remoteFetchTtlMs: 1000 * 60 * 10,
+  remoteFetchTtlMs: 1000 * 60 * 30,
   remoteFetchTimeoutMs: 1000 * 6,
 });
 

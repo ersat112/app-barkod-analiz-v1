@@ -116,6 +116,7 @@ type LiveInsightCardProps = {
   badgeLabel: string;
   helperText?: string;
   colors: ThemeColors;
+  isActive?: boolean;
 };
 
 const FALLBACK_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
@@ -656,11 +657,12 @@ export const LiveInsightCard: React.FC<LiveInsightCardProps> = ({
   badgeLabel,
   helperText,
   colors,
+  isActive = true,
 }) => {
   const [activeIndex, setActiveIndex] = useState(0);
 
   useEffect(() => {
-    if (items.length <= 1) {
+    if (!isActive || items.length <= 1) {
       return undefined;
     }
 
@@ -669,7 +671,7 @@ export const LiveInsightCard: React.FC<LiveInsightCardProps> = ({
     }, 5500);
 
     return () => clearInterval(timer);
-  }, [items.length]);
+  }, [isActive, items.length]);
 
   if (!items.length) {
     return null;

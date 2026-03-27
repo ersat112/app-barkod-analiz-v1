@@ -27,7 +27,7 @@ import {
   signInWithEmailAndPassword,
 } from 'firebase/auth';
 
-import { AUTH_RUNTIME } from '../../config/authRuntime';
+import { AUTH_RUNTIME, getGoogleAuthRedirectUri } from '../../config/authRuntime';
 import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
@@ -109,14 +109,17 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
   providerDisabledMessage,
 }) => {
   const [loading, setLoading] = useState(false);
+  const redirectUri = useMemo(() => getGoogleAuthRedirectUri(), []);
 
   const config = useMemo(
     () => ({
       androidClientId: AUTH_RUNTIME.google.androidClientId || undefined,
       iosClientId: AUTH_RUNTIME.google.iosClientId || undefined,
       webClientId: AUTH_RUNTIME.google.webClientId || undefined,
+      redirectUri,
+      scopes: ['profile', 'email'],
     }),
-    []
+    [redirectUri]
   );
 
   const [request, response, promptAsync] = Google.useAuthRequest(config);
@@ -191,7 +194,11 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
     <SocialButton
       icon="logo-google"
       label={label}
-      onPress={() => promptAsync()}
+      onPress={() =>
+        promptAsync({
+          showInRecents: true,
+        })
+      }
       disabled={!request}
       loading={loading}
       backgroundColor="#FFFFFF"

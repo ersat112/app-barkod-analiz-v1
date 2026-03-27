@@ -83,11 +83,14 @@ const QUEUE_VERSION = 1;
 const MAX_BATCH_SIZE = 10;
 const BASE_RETRY_DELAY_MS = 5_000;
 const MAX_RETRY_DELAY_MS = 15 * 60 * 1000;
+const ENQUEUE_FLUSH_DELAY_MS = 12_000;
+const ACTIVE_FLUSH_DELAY_MS = 4_000;
 
 let hydrationPromise: Promise<RemoteWriteQueueItem[]> | null = null;
 let flushPromise: Promise<number> | null = null;
 let inMemoryQueue: RemoteWriteQueueItem[] | null = null;
 let appStateSubscription: NativeEventSubscription | null = null;
+let scheduledFlushTimeout: ReturnType<typeof setTimeout> | null = null;
 let lifecycleAttached = false;
 
 let lastFlushAt: string | null = null;
@@ -138,6 +141,26 @@ const stripUndefinedDeep = <T>(value: T): T => {
 const getRetryDelayMs = (attemptCount: number): number => {
   const safeAttempts = Math.max(1, attemptCount);
   return Math.min(BASE_RETRY_DELAY_MS * 2 ** (safeAttempts - 1), MAX_RETRY_DELAY_MS);
+};
+
+const clearScheduledFlush = (): void => {
+  if (!scheduledFlushTimeout) {
+    return;
+  }
+
+  clearTimeout(scheduledFlushTimeout);
+  scheduledFlushTimeout = null;
+};
+
+const scheduleFlush = (reason: QueueFlushReason, delayMs: number): void => {
+  if (scheduledFlushTimeout) {
+    return;
+  }
+
+  scheduledFlushTimeout = setTimeout(() => {
+    scheduledFlushTimeout = null;
+    void flushRemoteProductCacheWriteQueue({ reason });
+  }, delayMs);
 };
 
 const persistQueue = async (items: RemoteWriteQueueItem[]): Promise<void> => {
@@ -452,16 +475,12 @@ const flushInternal = async (reason: QueueFlushReason): Promise<number> => {
 
 const onAppStateChange = (nextState: AppStateStatus): void => {
   if (nextState === 'active') {
-    void flushRemoteProductCacheWriteQueue({ reason: 'app_active' });
-    return;
-  }
-
-  if (nextState === 'inactive') {
-    void flushRemoteProductCacheWriteQueue({ reason: 'app_inactive' });
+    scheduleFlush('app_active', ACTIVE_FLUSH_DELAY_MS);
     return;
   }
 
   if (nextState === 'background') {
+    clearScheduledFlush();
     void flushRemoteProductCacheWriteQueue({ reason: 'app_background' });
   }
 };
@@ -477,6 +496,8 @@ export const initializeRemoteProductCacheWriteQueue = (): void => {
 };
 
 export const teardownRemoteProductCacheWriteQueue = (): void => {
+  clearScheduledFlush();
+
   if (!appStateSubscription) {
     lifecycleAttached = false;
     return;
@@ -520,7 +541,7 @@ export const enqueueRemoteProductCacheFoundWrite = async ({
 
   await persistQueue(upsertQueueItem(queue, item));
   trackEnqueued(item);
-  void flushRemoteProductCacheWriteQueue({ reason: 'enqueue' });
+  scheduleFlush('enqueue', ENQUEUE_FLUSH_DELAY_MS);
   return true;
 };
 
@@ -554,7 +575,7 @@ export const enqueueRemoteProductCacheNotFoundWrite = async ({
 
   await persistQueue(upsertQueueItem(queue, item));
   trackEnqueued(item);
-  void flushRemoteProductCacheWriteQueue({ reason: 'enqueue' });
+  scheduleFlush('enqueue', ENQUEUE_FLUSH_DELAY_MS);
   return true;
 };
 
@@ -563,6 +584,8 @@ export const flushRemoteProductCacheWriteQueue = async ({
 }: {
   reason?: QueueFlushReason;
 } = {}): Promise<number> => {
+  clearScheduledFlush();
+
   if (flushPromise) {
     return flushPromise;
   }

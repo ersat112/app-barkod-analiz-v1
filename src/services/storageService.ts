@@ -5,7 +5,7 @@ import {
   uploadBytes,
   type UploadMetadata,
 } from 'firebase/storage';
-import { storage } from '../config/firebase';
+import { auth, storage } from '../config/firebase';
 
 /**
  * ErEnesAl® v1 - Firebase Storage Yönetim Servisi
@@ -36,6 +36,11 @@ const buildTimestampedPath = (
   const safeFolder = sanitizePathPart(folder);
   const safeIdentifier = sanitizePathPart(identifier) || 'file';
   return `${safeFolder}/${safeIdentifier}_${Date.now()}.${extension}`;
+};
+
+const resolveAuthenticatedUserId = (): string | null => {
+  const userId = auth.currentUser?.uid;
+  return typeof userId === 'string' && userId.trim() ? userId.trim() : null;
 };
 
 const resolveExtensionFromUri = (uri: string): string => {
@@ -96,11 +101,18 @@ export const storageService = {
    * Barkod ürün görselini yükler.
    */
   uploadProductImage: async (uri: string, barcode: string): Promise<string | null> => {
+    const userId = resolveAuthenticatedUserId();
+
+    if (!userId) {
+      return null;
+    }
+
     const ext = resolveExtensionFromUri(uri);
-    const path = buildTimestampedPath('products', barcode, ext);
+    const path = buildTimestampedPath(`products/${sanitizePathPart(userId)}`, barcode, ext);
 
     return await storageService.uploadImage(uri, path, {
       customMetadata: {
+        userId: sanitizePathPart(userId),
         barcode: sanitizePathPart(barcode),
         source: 'product',
       },
@@ -114,11 +126,22 @@ export const storageService = {
     uri: string,
     barcode: string
   ): Promise<string | null> => {
+    const userId = resolveAuthenticatedUserId();
+
+    if (!userId) {
+      return null;
+    }
+
     const ext = resolveExtensionFromUri(uri);
-    const path = buildTimestampedPath('missing-products', barcode, ext);
+    const path = buildTimestampedPath(
+      `missing-products/${sanitizePathPart(userId)}`,
+      barcode,
+      ext
+    );
 
     return await storageService.uploadImage(uri, path, {
       customMetadata: {
+        userId: sanitizePathPart(userId),
         barcode: sanitizePathPart(barcode),
         source: 'missing-product',
       },
@@ -129,12 +152,19 @@ export const storageService = {
    * Kullanıcı avatarı / profil görseli yüklemek için yardımcı fonksiyon.
    */
   uploadUserImage: async (uri: string, userId: string): Promise<string | null> => {
+    const currentUserId = resolveAuthenticatedUserId();
+    const safeUserId = sanitizePathPart(userId);
+
+    if (!currentUserId || currentUserId !== userId) {
+      return null;
+    }
+
     const ext = resolveExtensionFromUri(uri);
-    const path = buildTimestampedPath('users', userId, ext);
+    const path = buildTimestampedPath(`users/${safeUserId}`, safeUserId, ext);
 
     return await storageService.uploadImage(uri, path, {
       customMetadata: {
-        userId: sanitizePathPart(userId),
+        userId: safeUserId,
         source: 'user-profile',
       },
     });

@@ -11,7 +11,9 @@ import {
 } from './db/history.repository';
 
 const PREFERENCES_STORAGE_KEY = 'erenesal-preferences';
+const ENGAGEMENT_NOTIFICATION_SYNC_META_KEY = 'erenesal-engagement-notification-sync';
 const ANDROID_CHANNEL_ID = 'engagement-reminders';
+const NOTIFICATION_SYNC_THROTTLE_MS = 1000 * 60 * 60 * 6;
 const MANAGED_NOTIFICATION_KINDS = new Set([
   'daily_scan_reminder',
   'daily_score_summary',
@@ -32,6 +34,11 @@ type PreferenceSnapshot = {
   };
 };
 
+type NotificationSyncMeta = {
+  fingerprint?: string;
+  syncedAt?: number;
+};
+
 async function isNotificationsEnabledInPreferences(): Promise<boolean> {
   try {
     const rawValue = await AsyncStorage.getItem(PREFERENCES_STORAGE_KEY);
@@ -45,6 +52,36 @@ async function isNotificationsEnabledInPreferences(): Promise<boolean> {
   } catch (error) {
     console.warn('[EngagementNotifications] preference read failed:', error);
     return true;
+  }
+}
+
+async function readNotificationSyncMeta(): Promise<NotificationSyncMeta> {
+  try {
+    const rawValue = await AsyncStorage.getItem(
+      ENGAGEMENT_NOTIFICATION_SYNC_META_KEY
+    );
+
+    if (!rawValue) {
+      return {};
+    }
+
+    return (JSON.parse(rawValue) as NotificationSyncMeta) ?? {};
+  } catch (error) {
+    console.warn('[EngagementNotifications] sync meta read failed:', error);
+    return {};
+  }
+}
+
+async function writeNotificationSyncMeta(
+  meta: NotificationSyncMeta
+): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      ENGAGEMENT_NOTIFICATION_SYNC_META_KEY,
+      JSON.stringify(meta)
+    );
+  } catch (error) {
+    console.warn('[EngagementNotifications] sync meta write failed:', error);
   }
 }
 
@@ -178,9 +215,13 @@ export async function disableEngagementNotifications(): Promise<void> {
   }
 
   await cancelManagedNotifications();
+  await AsyncStorage.removeItem(ENGAGEMENT_NOTIFICATION_SYNC_META_KEY);
 }
 
-export async function syncEngagementNotifications(): Promise<void> {
+export async function syncEngagementNotifications(options?: {
+  force?: boolean;
+  reason?: string;
+}): Promise<void> {
   if (Platform.OS === 'web') {
     return;
   }
@@ -199,8 +240,33 @@ export async function syncEngagementNotifications(): Promise<void> {
   }
 
   await ensureAndroidChannel();
-  await cancelManagedNotifications();
   const schedule = getPersonalizedEngagementSchedule();
+  const lastProduct = getLastScannedProduct();
+  const fingerprint = [
+    i18n.language,
+    schedule.preferredHour ?? 'none',
+    schedule.reminderHour,
+    schedule.reminderMinute,
+    schedule.summaryHour,
+    schedule.summaryMinute,
+    getTodayScanCount(),
+    getBestScoreToday() ?? 'none',
+    lastProduct?.barcode ?? 'none',
+    lastProduct?.updated_at ?? 'none',
+  ].join('|');
+  const syncMeta = await readNotificationSyncMeta();
+  const now = Date.now();
+
+  if (
+    !options?.force &&
+    syncMeta.fingerprint === fingerprint &&
+    typeof syncMeta.syncedAt === 'number' &&
+    now - syncMeta.syncedAt < NOTIFICATION_SYNC_THROTTLE_MS
+  ) {
+    return;
+  }
+
+  await cancelManagedNotifications();
 
   await Notifications.scheduleNotificationAsync({
     content: {
@@ -237,5 +303,10 @@ export async function syncEngagementNotifications(): Promise<void> {
       minute: schedule.summaryMinute,
       channelId: ANDROID_CHANNEL_ID,
     },
+  });
+
+  await writeNotificationSyncMeta({
+    fingerprint,
+    syncedAt: now,
   });
 }

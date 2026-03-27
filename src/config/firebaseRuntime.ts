@@ -1,6 +1,6 @@
 import type { FirebaseOptions } from 'firebase/app';
 
-import { getEnvString } from './appRuntime';
+import { getEnvString, hasEnvOverride } from './appRuntime';
 
 export type FirebaseRuntimeSource = 'env_override' | 'fallback';
 export type FirebaseRuntimeEffectiveSource =
@@ -72,7 +72,7 @@ const hasRuntimeOverrides = [
   'EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET',
   'EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID',
   'EXPO_PUBLIC_FIREBASE_APP_ID',
-].some((key) => Boolean(process.env[key]?.trim()));
+].some((key) => hasEnvOverride(key));
 
 const configPresence = Object.freeze({
   apiKey: Boolean(runtimeConfig.apiKey?.trim()),

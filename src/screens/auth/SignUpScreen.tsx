@@ -32,6 +32,7 @@ import {
 
 import {
   AUTH_RUNTIME,
+  getGoogleAuthRedirectUri,
   getEmailVerificationActionSettings,
 } from '../../config/authRuntime';
 import { auth } from '../../config/firebase';
@@ -181,14 +182,17 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
   providerDisabledMessage,
 }) => {
   const [loading, setLoading] = useState(false);
+  const redirectUri = useMemo(() => getGoogleAuthRedirectUri(), []);
 
   const config = useMemo(
     () => ({
       androidClientId: AUTH_RUNTIME.google.androidClientId || undefined,
       iosClientId: AUTH_RUNTIME.google.iosClientId || undefined,
       webClientId: AUTH_RUNTIME.google.webClientId || undefined,
+      redirectUri,
+      scopes: ['profile', 'email'],
     }),
-    []
+    [redirectUri]
   );
 
   const [request, response, promptAsync] = Google.useAuthRequest(config);
@@ -264,7 +268,11 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
     <SocialButton
       icon="logo-google"
       label={label}
-      onPress={() => promptAsync()}
+      onPress={() =>
+        promptAsync({
+          showInRecents: true,
+        })
+      }
       disabled={!request}
       loading={loading}
       backgroundColor="#FFFFFF"

@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, getDoc } from 'firebase/firestore';
 
-import { getEnvBoolean } from '../config/appRuntime';
+import { getEnvBoolean, hasEnvOverride } from '../config/appRuntime';
 import { auth, db } from '../config/firebase';
 import {
   FEATURES,
@@ -44,9 +44,7 @@ type RemoteFirestoreRolloutDocument = Partial<{
 }>;
 
 const SCHEMA_VERSION = 1;
-const RUNTIME_CONFIG_TTL_MS = 1000 * 60 * 10;
-const ENV = process.env as Record<string, string | undefined>;
-
+const RUNTIME_CONFIG_TTL_MS = 1000 * 60 * 30;
 let inMemoryConfig: FirestoreRuntimeConfigSnapshot | null = null;
 let refreshPromise: Promise<FirestoreRuntimeConfigSnapshot> | null = null;
 
@@ -80,7 +78,7 @@ function clampInteger(
 }
 
 function hasRuntimeOverride(key: string): boolean {
-  return typeof ENV[key] === 'string' && ENV[key]!.trim().length > 0;
+  return hasEnvOverride(key);
 }
 
 function applyRuntimeOverrides(

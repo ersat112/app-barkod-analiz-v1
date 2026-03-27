@@ -17,7 +17,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
-import { PERSISTENT_BOTTOM_NAV_HEIGHT } from './navigationLayout';
+import {
+  resolvePersistentBottomNavHeight,
+  resolvePersistentBottomNavInset,
+} from './navigationLayout';
 
 import { SplashScreen } from '../screens/auth/SplashScreen';
 import { LoginScreen } from '../screens/auth/LoginScreen';
@@ -91,9 +94,13 @@ const CenterScanTabButton: React.FC<{
   colors: ReturnType<typeof useTheme>['colors'];
   label: string;
   onPress?: () => void;
-}> = ({ colors, label, onPress }) => {
+  bottomOffset: number;
+}> = ({ colors, label, onPress, bottomOffset }) => {
   return (
-    <View pointerEvents="box-none" style={styles.centerScanButtonOverlay}>
+    <View
+      pointerEvents="box-none"
+      style={[styles.centerScanButtonOverlay, { bottom: bottomOffset }]}
+    >
       <TouchableOpacity
         style={styles.centerScanButtonWrap}
         onPress={onPress}
@@ -108,7 +115,7 @@ const CenterScanTabButton: React.FC<{
             },
           ]}
         >
-          <Ionicons name="scan-outline" size={24} color={colors.primaryContrast} />
+          <Ionicons name="scan-outline" size={22} color={colors.primaryContrast} />
         </View>
         <Text style={[styles.centerScanLabel, { color: colors.primary }]}>{label}</Text>
       </TouchableOpacity>
@@ -131,7 +138,7 @@ const TabBarItem: React.FC<{
     >
       <Ionicons
         name={iconName}
-        size={22}
+        size={20}
         color={active ? colors.primary : colors.border}
       />
       <Text
@@ -172,11 +179,14 @@ const PersistentBottomNav: React.FC<{
     return value === key ? fallback : value;
   };
 
+  const resolvedBottomInset = resolvePersistentBottomNavInset(insets.bottom);
   const tabBarBottomPadding = Math.max(
-    insets.bottom,
-    Platform.OS === 'ios' ? 24 : 12
+    resolvedBottomInset,
+    Platform.OS === 'ios' ? 18 : 30
   );
-  const tabBarTopPadding = 10;
+  const tabBarTopPadding = Platform.OS === 'ios' ? 8 : 10;
+  const tabBarHeight = resolvePersistentBottomNavHeight(insets.bottom);
+  const centerButtonBottomOffset = tabBarBottomPadding + 6;
   const activeSection =
     activeRouteName === 'Home' ||
     activeRouteName === 'History' ||
@@ -192,6 +202,7 @@ const PersistentBottomNav: React.FC<{
         {
           backgroundColor: colors.background,
           borderTopColor: colors.border,
+          minHeight: tabBarHeight,
           paddingBottom: tabBarBottomPadding,
           paddingTop: tabBarTopPadding,
         },
@@ -243,6 +254,7 @@ const PersistentBottomNav: React.FC<{
         colors={colors}
         label={tt('scan_now', 'Şimdi Tara')}
         onPress={onOpenScanner}
+        bottomOffset={centerButtonBottomOffset}
       />
     </View>
   );
@@ -448,15 +460,14 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     borderTopWidth: 1,
-    paddingHorizontal: 10,
-    minHeight: PERSISTENT_BOTTOM_NAV_HEIGHT,
+    paddingHorizontal: 12,
     zIndex: 30,
   },
   customTabBarGrid: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    minHeight: 62,
+    minHeight: 56,
   },
   tabBarSlot: {
     flex: 1,
@@ -465,18 +476,18 @@ const styles = StyleSheet.create({
   },
   centerTabSpacer: {
     flex: 1,
-    minWidth: 76,
+    minWidth: 70,
   },
   tabBarItem: {
     width: '100%',
     minWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 4,
+    paddingVertical: 2,
   },
   tabBarItemLabel: {
-    marginTop: 4,
-    fontSize: 11,
+    marginTop: 3,
+    fontSize: 10,
     fontWeight: '700',
     textAlign: 'center',
   },
@@ -484,21 +495,20 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    width: 88,
+    width: 80,
   },
   centerScanButtonOverlay: {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 6,
     alignItems: 'center',
     justifyContent: 'flex-start',
     zIndex: 3,
   },
   centerScanButton: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
+    width: 62,
+    height: 62,
+    borderRadius: 31,
     alignItems: 'center',
     justifyContent: 'center',
     shadowOpacity: 0.24,
@@ -510,8 +520,8 @@ const styles = StyleSheet.create({
     elevation: 10,
   },
   centerScanLabel: {
-    marginTop: 4,
-    fontSize: 10,
+    marginTop: 3,
+    fontSize: 9,
     fontWeight: '900',
   },
 });

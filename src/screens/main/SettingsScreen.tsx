@@ -677,7 +677,7 @@ export const SettingsScreen: React.FC = () => {
 
       void (async () => {
         await changeLanguage(selectedLanguage.code);
-        await syncEngagementNotifications();
+        await syncEngagementNotifications({ force: true, reason: 'language_change' });
       })();
     },
     [changeLanguage, languageOptions]
@@ -691,7 +691,10 @@ export const SettingsScreen: React.FC = () => {
       void (async () => {
         try {
           if (value) {
-            await syncEngagementNotifications();
+            await syncEngagementNotifications({
+              force: true,
+              reason: 'notifications_enabled',
+            });
           } else {
             await disableEngagementNotifications();
           }

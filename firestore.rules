@@ -315,7 +315,8 @@ service cloud.firestore {
 
       allow create, update: if isSignedIn()
         && isValidBarcodeId(barcode)
-        && allowClientSharedCacheWrites();
+        && allowClientSharedCacheWrites()
+        && isValidSharedCachePayload(request.resource.data, barcode);
 
       allow delete: if false;
     }

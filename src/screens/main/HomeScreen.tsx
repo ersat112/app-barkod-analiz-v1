@@ -12,12 +12,14 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useIsFocused } from '@react-navigation/native';
 
 import { useLanguage } from '../../context/LanguageContext';
 import { useTheme } from '../../context/ThemeContext';
 import { AdBanner } from '../../components/AdBanner';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
+import { useAppState } from '../../hooks/useAppState';
 import { useHomeScreenController } from '../../hooks/useHomeScreenController';
 import { useWhoNews } from '../../hooks/useWhoNews';
 import { withAlpha } from '../../utils/color';
@@ -35,6 +37,8 @@ const FALLBACK_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
 export const HomeScreen: React.FC = () => {
   const { colors, isDark } = useTheme();
   const { locale } = useLanguage();
+  const isFocused = useIsFocused();
+  const { isActive: isAppActive } = useAppState();
   const layout = useAppScreenLayout({
     topInsetExtra: 18,
     topInsetMin: 70,
@@ -279,6 +283,7 @@ export const HomeScreen: React.FC = () => {
         items={liveCardItems}
         badgeLabel={liveCardBadgeLabel}
         colors={colors}
+        isActive={isFocused && isAppActive}
       />
 
       <AdBanner

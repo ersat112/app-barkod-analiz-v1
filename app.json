@@ -17,7 +17,7 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.ersat.erenesalv1",
+      "bundleIdentifier": "com.ersat.barkodanaliz",
       "buildNumber": "1.0.1",
       "usesAppleSignIn": true,
       "infoPlist": {

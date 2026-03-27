@@ -1,4 +1,4 @@
-import { APP_RUNTIME, getEnvString } from './appRuntime';
+import { APP_RUNTIME, getEnvString, hasEnvOverride } from './appRuntime';
 
 export type RevenueCatRuntimeSource = 'env_override' | 'fallback';
 export type RevenueCatRuntimePlatform = 'ios' | 'android' | 'web';
@@ -30,7 +30,7 @@ const hasRuntimeOverrides = [
   'EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY',
   'EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID',
   'EXPO_PUBLIC_REVENUECAT_OFFERING_ID',
-].some((key) => Boolean(process.env[key]?.trim()));
+].some((key) => hasEnvOverride(key));
 
 const platform: RevenueCatRuntimePlatform =
   APP_RUNTIME.platform === 'ios' || APP_RUNTIME.platform === 'android'

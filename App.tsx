@@ -9,30 +9,27 @@ import { LanguageProvider } from './src/context/LanguageContext';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { AppNavigator } from './src/navigation/AppNavigator';
 import { auth } from './src/config/firebase';
+import { ensureAppBootstrap } from './src/services/appBootstrap.service';
 import { bootstrapOperabilitySurface } from './src/services/operability.service';
 import { adService } from './src/services/adService';
 import { entitlementService } from './src/services/entitlement.service';
 import { syncEngagementNotifications } from './src/services/engagementNotifications.service';
 import { syncPurchaseProviderIdentity } from './src/services/purchaseProvider.service';
-import { refreshCurrentUserProfile } from './src/services/userProfile.service';
 
 const AppContent: React.FC = () => {
   const { isDark } = useTheme();
   const { loading, isAuthenticated } = useAuth();
   const appOpenAttemptedRef = useRef(false);
+  const lastPurchaseIdentitySyncAtRef = useRef(0);
 
   useEffect(() => {
     let mounted = true;
 
     const bootstrap = async () => {
-      if (auth.currentUser?.uid) {
-        void refreshCurrentUserProfile();
-      }
-
-      const snapshot = await bootstrapOperabilitySurface();
+      const snapshot = await ensureAppBootstrap();
 
       if (mounted) {
-        console.log('App operability bootstrap:', snapshot);
+        console.log('App local bootstrap:', snapshot);
       }
     };
 
@@ -48,7 +45,13 @@ const AppContent: React.FC = () => {
       return;
     }
 
-    void syncEngagementNotifications();
+    const timeoutId = setTimeout(() => {
+      void syncEngagementNotifications();
+    }, 1800);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
   }, [loading]);
 
   useEffect(() => {
@@ -59,9 +62,7 @@ const AppContent: React.FC = () => {
     let mounted = true;
 
     const bootstrapAuthenticatedSurface = async () => {
-      const snapshot = await bootstrapOperabilitySurface({
-        forceRefresh: true,
-      });
+      const snapshot = await bootstrapOperabilitySurface();
 
       if (mounted) {
         console.log('Authenticated operability bootstrap:', {
@@ -134,6 +135,13 @@ const AppContent: React.FC = () => {
         return;
       }
 
+      const now = Date.now();
+
+      if (now - lastPurchaseIdentitySyncAtRef.current < 1000 * 60 * 5) {
+        return;
+      }
+
+      lastPurchaseIdentitySyncAtRef.current = now;
       void syncPurchaseProviderIdentity(
         isAuthenticated ? (auth.currentUser?.uid ?? null) : null
       );

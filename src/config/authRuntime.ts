@@ -1,3 +1,4 @@
+import * as AuthSession from 'expo-auth-session';
 import type { ActionCodeSettings } from 'firebase/auth';
 
 import { APP_RUNTIME, getEnvString } from './appRuntime';
@@ -60,6 +61,14 @@ export const AUTH_RUNTIME = Object.freeze({
   },
 });
 
+export function getGoogleAuthRedirectUri(): string {
+  return AuthSession.makeRedirectUri({
+    scheme: 'erenesal',
+    path: 'oauthredirect',
+    native: 'erenesal://oauthredirect',
+  });
+}
+
 export function getEmailVerificationActionSettings(): ActionCodeSettings | undefined {
   if (!AUTH_RUNTIME.emailVerification.hasContinueUrl) {
     return undefined;
@@ -69,7 +78,7 @@ export function getEmailVerificationActionSettings(): ActionCodeSettings | undef
     url: AUTH_RUNTIME.emailVerification.continueUrl,
     handleCodeInApp: false,
     iOS: {
-      bundleId: 'com.ersat.erenesalv1',
+      bundleId: 'com.ersat.barkodanaliz',
     },
     android: {
       packageName: 'com.ersat.erenesalv1',
