@@ -51,6 +51,11 @@ import {
   searchCities,
 } from '../../services/locationData';
 import { locationService } from '../../services/locationService';
+import {
+  isGoogleNativePlayServicesError,
+  isGoogleNativeSignInReady,
+  signInWithGoogleNativeFirebase,
+} from '../../services/googleNativeAuth.service';
 import { withAlpha } from '../../utils/color';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -174,7 +179,79 @@ type GoogleAuthSectionProps = {
   providerDisabledMessage: string;
 };
 
-const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
+const NativeGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
+  label,
+  errorTitle,
+  missingCredentialMessage,
+  failureFallbackMessage,
+  providerDisabledMessage,
+}) => {
+  const [loading, setLoading] = useState(false);
+
+  const handlePress = useCallback(async () => {
+    try {
+      setLoading(true);
+      const result = await signInWithGoogleNativeFirebase();
+
+      if (result.type === 'cancelled') {
+        return;
+      }
+
+      await ensureUserProfileDocument(result.userCredential.user, {
+        trackLogin: true,
+      });
+
+      await authAnalyticsService.trackSignupSucceeded({
+        method: 'google',
+        surface: 'signup',
+        emailVerified: result.userCredential.user.emailVerified,
+        hasProfileSeed: false,
+      });
+    } catch (error: any) {
+      console.error('Google signup/login failed:', error);
+
+      await authAnalyticsService.trackSignupFailed({
+        method: 'google',
+        surface: 'signup',
+        error,
+        errorCode: error?.code,
+      });
+
+      const message =
+        error?.code === 'auth/operation-not-allowed'
+          ? providerDisabledMessage
+          : error?.message === 'google_credential_missing'
+            ? missingCredentialMessage
+            : isGoogleNativePlayServicesError(error)
+              ? 'Google Play Hizmetleri bu cihazda kullanılamıyor.'
+              : error?.message || failureFallbackMessage;
+
+      Alert.alert(errorTitle, message);
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    errorTitle,
+    failureFallbackMessage,
+    missingCredentialMessage,
+    providerDisabledMessage,
+  ]);
+
+  return (
+    <SocialButton
+      icon="logo-google"
+      label={label}
+      onPress={handlePress}
+      disabled={!isGoogleNativeSignInReady()}
+      loading={loading}
+      backgroundColor="#FFFFFF"
+      borderColor="#E5E5E5"
+      textColor="#111111"
+    />
+  );
+};
+
+const BrowserGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
   label,
   errorTitle,
   missingCredentialMessage,
@@ -282,6 +359,14 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
   );
 };
 
+const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = (props) => {
+  if (Platform.OS === 'android') {
+    return <NativeGoogleAuthSection {...props} />;
+  }
+
+  return <BrowserGoogleAuthSection {...props} />;
+};
+
 export const SignUpScreen: React.FC = () => {
   const { t } = useTranslation();
   const { colors, isDark } = useTheme();
@@ -321,7 +406,10 @@ export const SignUpScreen: React.FC = () => {
   const [appleAvailable, setAppleAvailable] = useState(Platform.OS === 'ios');
 
   const isGoogleEnabled = useMemo(
-    () => AUTH_RUNTIME.google.hasActivePlatformClientId,
+    () =>
+      Platform.OS === 'android'
+        ? AUTH_RUNTIME.google.isSignInReady
+        : AUTH_RUNTIME.google.hasActivePlatformClientId,
     []
   );
   const resolvedCity = useMemo(() => resolveCanonicalCity(city), [city]);

@@ -16,7 +16,12 @@ type RevenueCatPurchasesApi = {
   logIn?: (appUserId: string) => Promise<unknown>;
   logOut?: () => Promise<unknown>;
   getOfferings?: () => Promise<RevenueCatOfferings>;
+  getProducts?: (
+    productIdentifiers: string[],
+    type?: string
+  ) => Promise<RevenueCatStoreProduct[]>;
   purchasePackage?: (pkg: unknown) => Promise<RevenueCatPurchaseResponse>;
+  purchaseStoreProduct?: (product: unknown) => Promise<RevenueCatPurchaseResponse>;
   restorePurchases?: () => Promise<RevenueCatCustomerInfo>;
 };
 
@@ -45,6 +50,11 @@ type RevenueCatPackage = {
     identifier?: string;
     productIdentifier?: string;
   };
+};
+
+type RevenueCatStoreProduct = {
+  identifier?: string;
+  productIdentifier?: string;
 };
 
 type RevenueCatOffering = {
@@ -206,7 +216,7 @@ function getRevenueCatApi(): {
 } {
   const api =
     typeof Purchases === 'function' || typeof Purchases === 'object'
-      ? (Purchases as RevenueCatPurchasesApi)
+      ? (Purchases as unknown as RevenueCatPurchasesApi)
       : null;
 
   return {
@@ -347,6 +357,115 @@ function resolvePackageProductIdentifier(pkg: RevenueCatPackage | null): string 
   }
 
   return pkg.productIdentifier ?? pkg.storeProduct?.identifier ?? pkg.storeProduct?.productIdentifier ?? null;
+}
+
+function buildAnnualProductIdentifierCandidates(annualProductId: string): string[] {
+  const trimmed = annualProductId.trim();
+
+  if (!trimmed) {
+    return [];
+  }
+
+  const prefix = trimmed.split(':')[0]?.trim();
+
+  return Array.from(new Set([trimmed, prefix].filter(Boolean))) as string[];
+}
+
+function matchesStoreProductIdentifier(
+  product: RevenueCatStoreProduct,
+  annualProductId: string
+): boolean {
+  const candidateIdentifiers = [product.identifier, product.productIdentifier]
+    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    .map((value) => value.trim());
+
+  const normalizedAnnualProductId = annualProductId.trim();
+  const annualProductIdPrefix = normalizedAnnualProductId.split(':')[0];
+
+  return (
+    candidateIdentifiers.includes(normalizedAnnualProductId) ||
+    candidateIdentifiers.includes(annualProductIdPrefix) ||
+    candidateIdentifiers.some((value) => value.split(':')[0] === annualProductIdPrefix)
+  );
+}
+
+async function purchaseAnnualPlanDirectly(
+  api: RevenueCatPurchasesApi,
+  annualProductId: string
+): Promise<PurchaseProviderPurchaseResult | null> {
+  if (!api.getProducts || !api.purchaseStoreProduct) {
+    return null;
+  }
+
+  const productIdentifiers = buildAnnualProductIdentifierCandidates(annualProductId);
+
+  if (productIdentifiers.length === 0) {
+    return {
+      status: 'error',
+      providerName: 'revenuecat',
+      message: 'Yıllık store urun kimligi bos veya gecersiz.',
+      activatedAt: null,
+      expiresAt: null,
+      lastValidatedAt: null,
+      transactionId: null,
+      customerId: null,
+    };
+  }
+
+  try {
+    const products = await api.getProducts(productIdentifiers);
+    const exactMatch =
+      products.find((product) => matchesStoreProductIdentifier(product, annualProductId)) ??
+      products[0];
+
+    if (!exactMatch) {
+      return {
+        status: 'error',
+        providerName: 'revenuecat',
+        message:
+          'RevenueCat store urunu bulunamadi. Product id ve Google Play basic/base plan eslesmesini kontrol et.',
+        activatedAt: null,
+        expiresAt: null,
+        lastValidatedAt: null,
+        transactionId: null,
+        customerId: null,
+      };
+    }
+
+    const purchaseResult = await api.purchaseStoreProduct(exactMatch);
+
+    if (purchaseResult?.userCancelled) {
+      return {
+        status: 'cancelled',
+        providerName: 'revenuecat',
+        message: 'Satın alma işlemi kullanıcı tarafından iptal edildi.',
+        activatedAt: null,
+        expiresAt: null,
+        lastValidatedAt: null,
+        transactionId: null,
+        customerId: null,
+      };
+    }
+
+    return buildPurchaseSuccessResult(
+      purchaseResult?.customerInfo,
+      'Satın alma işlemi tamamlandı.'
+    );
+  } catch (error) {
+    return {
+      status: 'error',
+      providerName: 'revenuecat',
+      message: formatRevenueCatUserMessage(
+        error,
+        'RevenueCat store product satın alma akisi hata verdi.'
+      ),
+      activatedAt: null,
+      expiresAt: null,
+      lastValidatedAt: null,
+      transactionId: null,
+      customerId: null,
+    };
+  }
 }
 
 async function runOfferingsSmokeCheck(
@@ -600,6 +719,15 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
       const { api } = getRevenueCatApi();
 
       if (!api?.getOfferings || !api.purchasePackage) {
+        const directPurchaseFallback = await purchaseAnnualPlanDirectly(
+          api ?? {},
+          params.annualProductId
+        );
+
+        if (directPurchaseFallback) {
+          return directPurchaseFallback;
+        }
+
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
@@ -622,6 +750,15 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
         const selectedPackage = packageSelection.pkg;
 
         if (!selectedPackage) {
+          const directPurchaseFallback = await purchaseAnnualPlanDirectly(
+            api,
+            params.annualProductId
+          );
+
+          if (directPurchaseFallback) {
+            return directPurchaseFallback;
+          }
+
           return {
             status: 'error',
             providerName: 'revenuecat',
@@ -654,6 +791,16 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
           'Satın alma işlemi tamamlandı.'
         );
       } catch (error) {
+        const details = getRevenueCatErrorDetails(error);
+        const configurationErrorFallback =
+          details.code === 'ConfigurationError'
+            ? await purchaseAnnualPlanDirectly(api, params.annualProductId)
+            : null;
+
+        if (configurationErrorFallback) {
+          return configurationErrorFallback;
+        }
+
         return {
           status: 'error',
           providerName: 'revenuecat',

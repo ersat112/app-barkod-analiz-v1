@@ -11,6 +11,7 @@ type GoogleRuntimeSnapshot = {
   webClientId: string;
   activePlatformClientId: string;
   hasActivePlatformClientId: boolean;
+  isSignInReady: boolean;
   missingKeys: string[];
 };
 
@@ -26,19 +27,20 @@ const emailContinueUrl = getEnvString('EXPO_PUBLIC_AUTH_EMAIL_CONTINUE_URL', '')
 
 const activePlatformClientId =
   platform === 'ios'
-    ? iosClientId
+    ? iosClientId || webClientId
     : platform === 'android'
-      ? androidClientId
+      ? webClientId || androidClientId
       : webClientId;
 
 const missingGoogleKeys: string[] = [];
 
-if (platform === 'android' && !androidClientId) {
-  missingGoogleKeys.push('EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID');
+if (platform === 'android' && !webClientId) {
+  missingGoogleKeys.push('EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID');
 }
 
-if (platform === 'ios' && !iosClientId) {
+if (platform === 'ios' && !iosClientId && !webClientId) {
   missingGoogleKeys.push('EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID');
+  missingGoogleKeys.push('EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID');
 }
 
 if (platform === 'web' && !webClientId) {
@@ -53,6 +55,7 @@ export const AUTH_RUNTIME = Object.freeze({
     webClientId,
     activePlatformClientId,
     hasActivePlatformClientId: Boolean(activePlatformClientId),
+    isSignInReady: Boolean(activePlatformClientId),
     missingKeys: missingGoogleKeys,
   } satisfies GoogleRuntimeSnapshot,
   emailVerification: {
