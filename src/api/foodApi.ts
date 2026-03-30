@@ -50,7 +50,7 @@ export const fetchFoodProduct = async (barcode: string): Promise<Product | null>
     const response = await foodClient.get(`/product/${barcode}.json`, {
       params: {
         fields:
-          'code,product_name,product_name_tr,product_name_en,generic_name,generic_name_tr,generic_name_en,brands,image_url,image_front_url,ingredients_text,ingredients_text_tr,ingredients_text_en,nutriscore_grade,nutriscore_score,ecoscore_grade,nova_group,nutrient_levels,nutriments,additives_tags,countries,countries_tags,origins,origins_tags,manufacturing_places',
+          'code,product_name,product_name_tr,product_name_en,generic_name,generic_name_tr,generic_name_en,brands,image_url,image_front_url,ingredients_text,ingredients_text_tr,ingredients_text_en,nutriscore_grade,nutriscore_score,ecoscore_grade,nova_group,nutrient_levels,nutriments,additives_tags,labels_tags,allergens_tags,traces_tags,ingredients_analysis_tags,countries,countries_tags,origins,origins_tags,manufacturing_places',
       },
     });
 
@@ -77,11 +77,23 @@ export const fetchFoodProduct = async (barcode: string): Promise<Product | null>
         type: 'food',
         score: resolvedScore,
         grade: safeText(p?.nutriscore_grade || p?.ecoscore_grade || 'unknown'),
+        nova_group:
+          typeof p?.nova_group === 'number'
+            ? p.nova_group
+            : Number.isFinite(Number(p?.nova_group))
+              ? Number(p.nova_group)
+              : undefined,
         ingredients_text:
           safeText(p?.ingredients_text) ||
           safeText(p?.ingredients_text_tr) ||
           safeText(p?.ingredients_text_en),
         additives: Array.isArray(p?.additives_tags) ? p.additives_tags : [],
+        labels_tags: Array.isArray(p?.labels_tags) ? p.labels_tags : [],
+        allergens_tags: Array.isArray(p?.allergens_tags) ? p.allergens_tags : [],
+        traces_tags: Array.isArray(p?.traces_tags) ? p.traces_tags : [],
+        ingredients_analysis_tags: Array.isArray(p?.ingredients_analysis_tags)
+          ? p.ingredients_analysis_tags
+          : [],
         nutriments: p?.nutriments || {},
         nutrient_levels: p?.nutrient_levels || {},
         sourceName: 'openfoodfacts',

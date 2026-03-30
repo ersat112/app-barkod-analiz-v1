@@ -109,20 +109,20 @@ export const AD_POLICY = Object.freeze({
   scansBetweenInterstitials: 4,
   minInterstitialCooldownMs: 1000 * 60 * 2,
   maxDailyInterstitials: 6,
-  remoteFetchTtlMs: 1000 * 60 * 30,
+  remoteFetchTtlMs: 1000 * 60 * 10,
   remoteFetchTimeoutMs: 1000 * 6,
 });
 
 export const MONETIZATION_POLICY = Object.freeze({
   annualPlanEnabled: true,
   annualPriceTry: 39.99,
-  annualProductId: 'premium_annual_39_99_try',
-  purchaseProviderEnabled: false,
+  annualProductId: 'premium_annual_39_99_try:annual',
+  purchaseProviderEnabled: true,
   restoreEnabled: true,
   paywallEnabled: true,
   freeScanLimitEnabled: true,
   freeDailyScanLimit: 20,
-  remoteFetchTtlMs: 1000 * 60 * 30,
+  remoteFetchTtlMs: 1000 * 60 * 10,
   remoteFetchTimeoutMs: 1000 * 6,
 });
 

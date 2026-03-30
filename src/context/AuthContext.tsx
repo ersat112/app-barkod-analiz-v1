@@ -14,8 +14,11 @@ import { auth } from '../config/firebase';
 import {
   ensureUserProfileDocument,
   refreshCurrentUserProfile,
+  updateCurrentUserNutritionPreferences,
 } from '../services/userProfile.service';
 import { syncPurchaseProviderIdentity } from '../services/purchaseProvider.service';
+import { DEFAULT_NUTRITION_PREFERENCES } from '../services/nutritionPreferences.service';
+import { usePreferenceStore } from '../store/usePreferenceStore';
 import type { AppUserProfile } from '../types/userProfile';
 
 type AuthContextValue = {
@@ -50,10 +53,13 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [profile, setProfile] = useState<AppUserProfile | null>(null);
   const [loading, setLoading] = useState(Boolean(auth.currentUser));
   const [profileError, setProfileError] = useState<string | null>(null);
+  const nutritionPreferences = usePreferenceStore((state) => state.nutritionPreferences);
+  const setNutritionPreferences = usePreferenceStore((state) => state.setNutritionPreferences);
 
   const isMountedRef = useRef(true);
   const syncSequenceRef = useRef(0);
   const preloadedUserUidRef = useRef<string | null>(auth.currentUser?.uid ?? null);
+  const lastSyncedNutritionPreferencesRef = useRef<string>('');
 
   const syncProfileForUser = useCallback(
     async (nextUser: User, options?: { trackLogin?: boolean }) => {
@@ -72,6 +78,17 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
         setProfile(nextProfile);
         setProfileError(null);
+
+        if (nextProfile.nutritionPreferences) {
+          setNutritionPreferences(nextProfile.nutritionPreferences);
+          lastSyncedNutritionPreferencesRef.current = JSON.stringify(
+            nextProfile.nutritionPreferences
+          );
+        } else {
+          lastSyncedNutritionPreferencesRef.current = JSON.stringify(
+            DEFAULT_NUTRITION_PREFERENCES
+          );
+        }
       } catch (error) {
         console.error('[AuthContext] profile reconcile failed:', error);
 
@@ -88,7 +105,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         setLoading(false);
       }
     },
-    []
+    [setNutritionPreferences]
   );
 
   const refreshProfile = useCallback(async () => {
@@ -164,6 +181,56 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       unsubscribe();
     };
   }, [syncProfileForUser]);
+
+  useEffect(() => {
+    const currentUser = auth.currentUser;
+
+    if (!currentUser?.uid) {
+      return;
+    }
+
+    const serializedPreferences = JSON.stringify(nutritionPreferences);
+
+    if (serializedPreferences === lastSyncedNutritionPreferencesRef.current) {
+      return;
+    }
+
+    if (
+      !profile?.nutritionPreferences &&
+      serializedPreferences === JSON.stringify(DEFAULT_NUTRITION_PREFERENCES)
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const syncNutritionPreferences = async () => {
+      try {
+        const nextProfile = await updateCurrentUserNutritionPreferences(nutritionPreferences);
+
+        if (cancelled) {
+          return;
+        }
+
+        lastSyncedNutritionPreferencesRef.current = serializedPreferences;
+
+        if (nextProfile) {
+          setProfile((current) => ({
+            ...(current ?? {}),
+            ...nextProfile,
+          }));
+        }
+      } catch (error) {
+        console.error('[AuthContext] nutrition preference sync failed:', error);
+      }
+    };
+
+    void syncNutritionPreferences();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [nutritionPreferences, profile?.nutritionPreferences]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

@@ -1,5 +1,8 @@
 import Purchases, { LOG_LEVEL as REVENUECAT_LOG_LEVEL } from 'react-native-purchases';
-import { REVENUECAT_RUNTIME, getRevenueCatRuntimeDiagnosticsSnapshot } from '../config/revenueCatRuntime';
+import {
+  REVENUECAT_RUNTIME,
+  getRevenueCatRuntimeDiagnosticsSnapshot,
+} from '../config/revenueCatRuntime';
 import type {
   PurchaseProviderAdapter,
   PurchaseProviderDiagnosticsSnapshot,
@@ -16,12 +19,7 @@ type RevenueCatPurchasesApi = {
   logIn?: (appUserId: string) => Promise<unknown>;
   logOut?: () => Promise<unknown>;
   getOfferings?: () => Promise<RevenueCatOfferings>;
-  getProducts?: (
-    productIdentifiers: string[],
-    type?: string
-  ) => Promise<RevenueCatStoreProduct[]>;
   purchasePackage?: (pkg: unknown) => Promise<RevenueCatPurchaseResponse>;
-  purchaseStoreProduct?: (product: unknown) => Promise<RevenueCatPurchaseResponse>;
   restorePurchases?: () => Promise<RevenueCatCustomerInfo>;
 };
 
@@ -52,11 +50,6 @@ type RevenueCatPackage = {
   };
 };
 
-type RevenueCatStoreProduct = {
-  identifier?: string;
-  productIdentifier?: string;
-};
-
 type RevenueCatOffering = {
   identifier?: string;
   annual?: RevenueCatPackage;
@@ -73,6 +66,7 @@ type PackageSelectionSource =
   | 'annual_exact'
   | 'available_exact'
   | 'annual_fallback'
+  | 'available_annual_hint'
   | 'available_fallback'
   | 'none';
 
@@ -88,18 +82,35 @@ type OfferingsSmokeCheckResult = {
   error: string | null;
 };
 
-let providerConfigured = false;
-let configuredAppUserId: string | null = null;
-let lastKnownAuthUid: string | null = null;
-let registeredAdapter: PurchaseProviderAdapter | null = null;
-let lastConfigurationError: string | null = null;
-
 type RevenueCatErrorLike = {
   code?: unknown;
   message?: unknown;
   underlyingErrorMessage?: unknown;
   userCancelled?: unknown;
 };
+
+const DEFAULT_ANNUAL_PACKAGE_IDENTIFIERS = ['$rc_annual', 'annual'] as const;
+
+let providerConfigured = false;
+let configuredAppUserId: string | null = null;
+let lastKnownAuthUid: string | null = null;
+let registeredAdapter: PurchaseProviderAdapter | null = null;
+let lastConfigurationError: string | null = null;
+
+function log(...args: unknown[]) {
+  if (__DEV__) {
+    console.log('[PurchaseProvider]', ...args);
+  }
+}
+
+function normalizeIdentifier(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
 
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -161,18 +172,16 @@ function formatRevenueCatUserMessage(
 
   if (
     details.code === 'ConfigurationError' &&
-    normalized.includes('no products registered') &&
-    normalized.includes('offerings')
+    normalized.includes('no products registered')
   ) {
-    return 'RevenueCat offering içinde store urunu bagli degil. Dashboard tarafinda offering, package ve product eslesmesini tamamla.';
+    return 'RevenueCat offering içinde mağaza ürünü çözümlenemedi. Offering, package ve product eşleşmesini kontrol et.';
   }
 
   if (
-    details.code === 'ConfigurationError' &&
-    (normalized.includes('issue with your configuration') ||
-      normalized.includes('check the underlying error for more details'))
+    normalized.includes('could not be fetched from the play store') ||
+    normalized.includes('none of the products registered')
   ) {
-    return 'RevenueCat dashboard veya Google Play urun eslesmesi eksik. Offering, annual package, product ve entitlement baglantilarini kontrol et.';
+    return 'RevenueCat ürünleri Google Play tarafından çözümlenemedi. Subscription, base plan, tester hesabı ve closed test opt-in zincirini kontrol et.';
   }
 
   if (
@@ -180,7 +189,7 @@ function formatRevenueCatUserMessage(
     (normalized.includes('billing is not available in this device') ||
       normalized.includes('billing_unavailable'))
   ) {
-    return 'Google Play Billing bu cihazda kullanilamiyor. Smoke test icin Play Store destekli gercek Android cihaz ve tester hesabi kullan.';
+    return 'Google Play Billing bu cihazda kullanılamıyor. Gerçek Android cihaz, doğru Play hesabı ve tester kullan.';
   }
 
   if (details.underlyingMessage) {
@@ -216,7 +225,7 @@ function getRevenueCatApi(): {
 } {
   const api =
     typeof Purchases === 'function' || typeof Purchases === 'object'
-      ? (Purchases as unknown as RevenueCatPurchasesApi)
+      ? (Purchases as RevenueCatPurchasesApi)
       : null;
 
   return {
@@ -225,10 +234,9 @@ function getRevenueCatApi(): {
   };
 }
 
-function log(...args: unknown[]) {
-  if (__DEV__) {
-    console.log('[PurchaseProvider]', ...args);
-  }
+function setConfigurationIssue(code: string, detail?: string): false {
+  lastConfigurationError = detail ? `${code}:${detail}` : code;
+  return false;
 }
 
 function resolveActiveEntitlement(
@@ -277,25 +285,76 @@ function selectOffering(
   };
 }
 
+function getPackageIdentifiers(pkg: RevenueCatPackage | null): string[] {
+  if (!pkg) {
+    return [];
+  }
+
+  return [
+    normalizeIdentifier(pkg.identifier),
+    normalizeIdentifier(pkg.productIdentifier),
+    normalizeIdentifier(pkg.storeProduct?.identifier),
+    normalizeIdentifier(pkg.storeProduct?.productIdentifier),
+  ].filter((value): value is string => Boolean(value));
+}
+
 function matchesAnnualProductId(
   pkg: RevenueCatPackage,
   annualProductId: string
 ): boolean {
-  const normalizedAnnualProductId = annualProductId.trim();
-  const annualProductIdPrefix = normalizedAnnualProductId.split(':')[0];
-  const candidateIdentifiers = [
-    pkg.productIdentifier,
-    pkg.storeProduct?.identifier,
-    pkg.storeProduct?.productIdentifier,
-  ]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => value.trim());
+  const normalizedAnnualProductId = normalizeIdentifier(annualProductId);
 
-  return (
-    candidateIdentifiers.includes(normalizedAnnualProductId) ||
-    candidateIdentifiers.includes(annualProductIdPrefix) ||
-    candidateIdentifiers.some((value) => value.split(':')[0] === annualProductIdPrefix)
+  if (!normalizedAnnualProductId) {
+    return false;
+  }
+
+  return getPackageIdentifiers(pkg).some(
+    (identifier) => identifier === normalizedAnnualProductId
   );
+}
+
+function matchesAnnualPackageHint(pkg: RevenueCatPackage): boolean {
+  const packageIdentifier = normalizeIdentifier(pkg.identifier)?.toLowerCase();
+
+  if (!packageIdentifier) {
+    return false;
+  }
+
+  return DEFAULT_ANNUAL_PACKAGE_IDENTIFIERS.includes(
+    packageIdentifier as (typeof DEFAULT_ANNUAL_PACKAGE_IDENTIFIERS)[number]
+  );
+}
+
+function listUniquePackages(offering: RevenueCatOffering | null): RevenueCatPackage[] {
+  if (!offering) {
+    return [];
+  }
+
+  const rawPackages = [
+    offering.annual ?? null,
+    ...(Array.isArray(offering.availablePackages) ? offering.availablePackages : []),
+  ].filter((value): value is RevenueCatPackage => Boolean(value));
+
+  const uniquePackages: RevenueCatPackage[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const pkg of rawPackages) {
+    const key = getPackageIdentifiers(pkg).join('|');
+
+    if (!key) {
+      uniquePackages.push(pkg);
+      continue;
+    }
+
+    if (seenKeys.has(key)) {
+      continue;
+    }
+
+    seenKeys.add(key);
+    uniquePackages.push(pkg);
+  }
+
+  return uniquePackages;
 }
 
 function selectPackage(
@@ -309,9 +368,7 @@ function selectPackage(
     };
   }
 
-  const availablePackages = Array.isArray(offering.availablePackages)
-    ? offering.availablePackages
-    : [];
+  const candidates = listUniquePackages(offering);
 
   if (offering.annual && matchesAnnualProductId(offering.annual, annualProductId)) {
     return {
@@ -320,7 +377,7 @@ function selectPackage(
     };
   }
 
-  const exactMatch = availablePackages.find((pkg) =>
+  const exactMatch = candidates.find((pkg) =>
     matchesAnnualProductId(pkg, annualProductId)
   );
 
@@ -338,9 +395,18 @@ function selectPackage(
     };
   }
 
-  if (availablePackages[0]) {
+  const hintedAnnualPackage = candidates.find((pkg) => matchesAnnualPackageHint(pkg));
+
+  if (hintedAnnualPackage) {
     return {
-      pkg: availablePackages[0],
+      pkg: hintedAnnualPackage,
+      source: 'available_annual_hint',
+    };
+  }
+
+  if (candidates[0]) {
+    return {
+      pkg: candidates[0],
       source: 'available_fallback',
     };
   }
@@ -356,116 +422,12 @@ function resolvePackageProductIdentifier(pkg: RevenueCatPackage | null): string 
     return null;
   }
 
-  return pkg.productIdentifier ?? pkg.storeProduct?.identifier ?? pkg.storeProduct?.productIdentifier ?? null;
-}
-
-function buildAnnualProductIdentifierCandidates(annualProductId: string): string[] {
-  const trimmed = annualProductId.trim();
-
-  if (!trimmed) {
-    return [];
-  }
-
-  const prefix = trimmed.split(':')[0]?.trim();
-
-  return Array.from(new Set([trimmed, prefix].filter(Boolean))) as string[];
-}
-
-function matchesStoreProductIdentifier(
-  product: RevenueCatStoreProduct,
-  annualProductId: string
-): boolean {
-  const candidateIdentifiers = [product.identifier, product.productIdentifier]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map((value) => value.trim());
-
-  const normalizedAnnualProductId = annualProductId.trim();
-  const annualProductIdPrefix = normalizedAnnualProductId.split(':')[0];
-
   return (
-    candidateIdentifiers.includes(normalizedAnnualProductId) ||
-    candidateIdentifiers.includes(annualProductIdPrefix) ||
-    candidateIdentifiers.some((value) => value.split(':')[0] === annualProductIdPrefix)
+    normalizeIdentifier(pkg.productIdentifier) ??
+    normalizeIdentifier(pkg.storeProduct?.identifier) ??
+    normalizeIdentifier(pkg.storeProduct?.productIdentifier) ??
+    null
   );
-}
-
-async function purchaseAnnualPlanDirectly(
-  api: RevenueCatPurchasesApi,
-  annualProductId: string
-): Promise<PurchaseProviderPurchaseResult | null> {
-  if (!api.getProducts || !api.purchaseStoreProduct) {
-    return null;
-  }
-
-  const productIdentifiers = buildAnnualProductIdentifierCandidates(annualProductId);
-
-  if (productIdentifiers.length === 0) {
-    return {
-      status: 'error',
-      providerName: 'revenuecat',
-      message: 'Yıllık store urun kimligi bos veya gecersiz.',
-      activatedAt: null,
-      expiresAt: null,
-      lastValidatedAt: null,
-      transactionId: null,
-      customerId: null,
-    };
-  }
-
-  try {
-    const products = await api.getProducts(productIdentifiers);
-    const exactMatch =
-      products.find((product) => matchesStoreProductIdentifier(product, annualProductId)) ??
-      products[0];
-
-    if (!exactMatch) {
-      return {
-        status: 'error',
-        providerName: 'revenuecat',
-        message:
-          'RevenueCat store urunu bulunamadi. Product id ve Google Play basic/base plan eslesmesini kontrol et.',
-        activatedAt: null,
-        expiresAt: null,
-        lastValidatedAt: null,
-        transactionId: null,
-        customerId: null,
-      };
-    }
-
-    const purchaseResult = await api.purchaseStoreProduct(exactMatch);
-
-    if (purchaseResult?.userCancelled) {
-      return {
-        status: 'cancelled',
-        providerName: 'revenuecat',
-        message: 'Satın alma işlemi kullanıcı tarafından iptal edildi.',
-        activatedAt: null,
-        expiresAt: null,
-        lastValidatedAt: null,
-        transactionId: null,
-        customerId: null,
-      };
-    }
-
-    return buildPurchaseSuccessResult(
-      purchaseResult?.customerInfo,
-      'Satın alma işlemi tamamlandı.'
-    );
-  } catch (error) {
-    return {
-      status: 'error',
-      providerName: 'revenuecat',
-      message: formatRevenueCatUserMessage(
-        error,
-        'RevenueCat store product satın alma akisi hata verdi.'
-      ),
-      activatedAt: null,
-      expiresAt: null,
-      lastValidatedAt: null,
-      transactionId: null,
-      customerId: null,
-    };
-  }
 }
 
 async function runOfferingsSmokeCheck(
@@ -491,12 +453,14 @@ async function runOfferingsSmokeCheck(
     const offerings = await api.getOfferings();
     const selection = selectOffering(offerings);
     const availablePackagesCount = Array.isArray(selection.offering?.availablePackages)
-      ? selection.offering?.availablePackages.length
+      ? selection.offering.availablePackages.length
       : 0;
     const packageSelection = selectPackage(selection.offering, annualProductId);
     const resolvedProductIdentifier = resolvePackageProductIdentifier(packageSelection.pkg);
     const matchedAnnualProductId =
-      resolvedProductIdentifier === annualProductId && annualProductId.trim().length > 0;
+      Boolean(normalizeIdentifier(annualProductId)) &&
+      resolvedProductIdentifier === normalizeIdentifier(annualProductId);
+
     const summary =
       selection.offering && packageSelection.pkg
         ? `offering:${selection.source} package:${packageSelection.source}`
@@ -506,8 +470,8 @@ async function runOfferingsSmokeCheck(
       attempted: true,
       success: Boolean(selection.offering && packageSelection.pkg),
       summary,
-      offeringIdentifier: selection.offering?.identifier ?? null,
-      packageIdentifier: packageSelection.pkg?.identifier ?? null,
+      offeringIdentifier: normalizeIdentifier(selection.offering?.identifier) ?? null,
+      packageIdentifier: normalizeIdentifier(packageSelection.pkg?.identifier) ?? null,
       productIdentifier: resolvedProductIdentifier,
       matchedAnnualProductId,
       availablePackagesCount,
@@ -535,16 +499,25 @@ async function ensureConfigured(authUid: string | null): Promise<boolean> {
   lastKnownAuthUid = authUid;
   lastConfigurationError = null;
 
+  if (!REVENUECAT_RUNTIME.supportsNativePurchases) {
+    return setConfigurationIssue(
+      'revenuecat_native_purchases_not_supported',
+      `platform=${REVENUECAT_RUNTIME.platform},expoGo=${String(REVENUECAT_RUNTIME.isExpoGo)}`
+    );
+  }
+
   if (!REVENUECAT_RUNTIME.isReady) {
-    lastConfigurationError = 'revenuecat_runtime_not_ready';
-    return false;
+    const missing = REVENUECAT_RUNTIME.missingKeys.join(',');
+    return setConfigurationIssue(
+      'revenuecat_runtime_not_ready',
+      missing || 'missing_runtime_requirements'
+    );
   }
 
   const { api, verboseLogLevel } = getRevenueCatApi();
 
   if (!api?.configure) {
-    lastConfigurationError = 'revenuecat_configure_api_unavailable';
-    return false;
+    return setConfigurationIssue('revenuecat_configure_api_unavailable');
   }
 
   if (!providerConfigured) {
@@ -564,34 +537,32 @@ async function ensureConfigured(authUid: string | null): Promise<boolean> {
       });
     } catch (error) {
       providerConfigured = false;
-      lastConfigurationError = `revenuecat_configure_failed:${toErrorMessage(error)}`;
-      return false;
+      return setConfigurationIssue(
+        'revenuecat_configure_failed',
+        toErrorMessage(error)
+      );
     }
   }
 
-  if (!REVENUECAT_RUNTIME.supportsNativePurchases) {
-    configuredAppUserId = authUid;
+  if (authUid && configuredAppUserId === authUid) {
     return true;
   }
 
-  if (authUid && configuredAppUserId !== authUid) {
+  if (authUid) {
     if (!api.logIn) {
-      lastConfigurationError = 'revenuecat_login_api_unavailable';
-      return false;
+      return setConfigurationIssue('revenuecat_login_api_unavailable');
     }
 
     try {
       await api.logIn(authUid);
       configuredAppUserId = authUid;
-    } catch {
-      lastConfigurationError = 'revenuecat_login_failed';
-      return false;
+      return true;
+    } catch (error) {
+      return setConfigurationIssue('revenuecat_login_failed', toErrorMessage(error));
     }
-
-    return true;
   }
 
-  if (!authUid && configuredAppUserId) {
+  if (!authUid && configuredAppUserId !== null) {
     if (!api.logOut) {
       configuredAppUserId = null;
       return true;
@@ -599,32 +570,43 @@ async function ensureConfigured(authUid: string | null): Promise<boolean> {
 
     try {
       await api.logOut();
-    } catch {
-      lastConfigurationError = 'revenuecat_logout_failed';
-      return false;
+      configuredAppUserId = null;
+      return true;
+    } catch (error) {
+      return setConfigurationIssue('revenuecat_logout_failed', toErrorMessage(error));
     }
-
-    configuredAppUserId = null;
-    return true;
   }
 
+  configuredAppUserId = null;
   return true;
 }
 
 function buildPurchaseSuccessResult(
-  customerInfo: RevenueCatCustomerInfo | null | undefined,
-  message: string
+  customerInfo: RevenueCatCustomerInfo | null | undefined
 ): PurchaseProviderPurchaseResult {
   const entitlement = resolveActiveEntitlement(customerInfo);
 
+  if (!entitlement) {
+    return {
+      status: 'error',
+      providerName: 'revenuecat',
+      message: `Satın alma tamamlandı ancak ${REVENUECAT_RUNTIME.entitlementIdentifier} entitlement aktif görünmüyor.`,
+      activatedAt: null,
+      expiresAt: null,
+      lastValidatedAt: new Date().toISOString(),
+      transactionId: null,
+      customerId: customerInfo?.originalAppUserId ?? null,
+    };
+  }
+
   return {
-    status: entitlement ? 'purchased' : 'error',
+    status: 'purchased',
     providerName: 'revenuecat',
-    message,
+    message: 'Satın alma işlemi tamamlandı.',
     activatedAt:
-      normalizeNullableDate(entitlement?.latestPurchaseDate) ??
-      normalizeNullableDate(entitlement?.originalPurchaseDate),
-    expiresAt: normalizeNullableDate(entitlement?.expirationDate),
+      normalizeNullableDate(entitlement.latestPurchaseDate) ??
+      normalizeNullableDate(entitlement.originalPurchaseDate),
+    expiresAt: normalizeNullableDate(entitlement.expirationDate),
     lastValidatedAt: new Date().toISOString(),
     transactionId: null,
     customerId: customerInfo?.originalAppUserId ?? null,
@@ -633,13 +615,12 @@ function buildPurchaseSuccessResult(
 
 function buildRestoreResult(
   customerInfo: RevenueCatCustomerInfo | null | undefined,
-  status: 'restored' | 'no_active_purchase',
   message: string
 ): PurchaseProviderRestoreResult {
   const entitlement = resolveActiveEntitlement(customerInfo);
 
   return {
-    status: entitlement ? 'restored' : status,
+    status: entitlement ? 'restored' : 'no_active_purchase',
     providerName: 'revenuecat',
     message,
     activatedAt:
@@ -675,11 +656,11 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
     async purchaseAnnualPlan(
       params: PurchaseProviderPurchaseParams
     ): Promise<PurchaseProviderPurchaseResult> {
-      if (!REVENUECAT_RUNTIME.isReady) {
+      if (!REVENUECAT_RUNTIME.supportsNativePurchases) {
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
-          message: 'RevenueCat runtime hazır değil.',
+          message: 'Expo Go yerine native dev build veya release build kullan.',
           activatedAt: null,
           expiresAt: null,
           lastValidatedAt: null,
@@ -688,11 +669,11 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
         };
       }
 
-      if (!REVENUECAT_RUNTIME.supportsNativePurchases) {
+      if (!REVENUECAT_RUNTIME.isReady) {
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
-          message: 'Expo Go preview modunda gerçek satın alma desteklenmez.',
+          message: `RevenueCat runtime hazır değil. Eksik alanlar: ${REVENUECAT_RUNTIME.missingKeys.join(', ') || 'bilinmiyor'}`,
           activatedAt: null,
           expiresAt: null,
           lastValidatedAt: null,
@@ -707,7 +688,8 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
-          message: 'RevenueCat SDK kurulu değil veya provider identity senkronu hazır değil.',
+          message:
+            'RevenueCat SDK kurulu değil veya provider identity senkronu hazır değil.',
           activatedAt: null,
           expiresAt: null,
           lastValidatedAt: null,
@@ -719,15 +701,6 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
       const { api } = getRevenueCatApi();
 
       if (!api?.getOfferings || !api.purchasePackage) {
-        const directPurchaseFallback = await purchaseAnnualPlanDirectly(
-          api ?? {},
-          params.annualProductId
-        );
-
-        if (directPurchaseFallback) {
-          return directPurchaseFallback;
-        }
-
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
@@ -750,19 +723,11 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
         const selectedPackage = packageSelection.pkg;
 
         if (!selectedPackage) {
-          const directPurchaseFallback = await purchaseAnnualPlanDirectly(
-            api,
-            params.annualProductId
-          );
-
-          if (directPurchaseFallback) {
-            return directPurchaseFallback;
-          }
-
           return {
             status: 'error',
             providerName: 'revenuecat',
-            message: 'RevenueCat offering/package çözümlenemedi.',
+            message:
+              'RevenueCat offering/package çözümlenemedi. Dashboard tarafında annual package ve product mapping kontrol edilmeli.',
             activatedAt: null,
             expiresAt: null,
             lastValidatedAt: null,
@@ -786,27 +751,14 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
           };
         }
 
-        return buildPurchaseSuccessResult(
-          purchaseResult?.customerInfo,
-          'Satın alma işlemi tamamlandı.'
-        );
+        return buildPurchaseSuccessResult(purchaseResult?.customerInfo);
       } catch (error) {
-        const details = getRevenueCatErrorDetails(error);
-        const configurationErrorFallback =
-          details.code === 'ConfigurationError'
-            ? await purchaseAnnualPlanDirectly(api, params.annualProductId)
-            : null;
-
-        if (configurationErrorFallback) {
-          return configurationErrorFallback;
-        }
-
         return {
           status: 'error',
           providerName: 'revenuecat',
           message: formatRevenueCatUserMessage(
             error,
-            'RevenueCat satin alma akisi hata verdi.'
+            'RevenueCat satın alma akışı hata verdi.'
           ),
           activatedAt: null,
           expiresAt: null,
@@ -820,11 +772,24 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
     async restorePurchases(
       params: PurchaseProviderRestoreParams
     ): Promise<PurchaseProviderRestoreResult> {
+      if (!REVENUECAT_RUNTIME.supportsNativePurchases) {
+        return {
+          status: 'not_supported',
+          providerName: 'revenuecat',
+          message: 'Expo Go yerine native dev build veya release build kullan.',
+          activatedAt: null,
+          expiresAt: null,
+          lastValidatedAt: null,
+          transactionId: null,
+          customerId: null,
+        };
+      }
+
       if (!REVENUECAT_RUNTIME.isReady) {
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
-          message: 'RevenueCat runtime hazır değil.',
+          message: `RevenueCat runtime hazır değil. Eksik alanlar: ${REVENUECAT_RUNTIME.missingKeys.join(', ') || 'bilinmiyor'}`,
           activatedAt: null,
           expiresAt: null,
           lastValidatedAt: null,
@@ -839,7 +804,8 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
         return {
           status: 'not_supported',
           providerName: 'revenuecat',
-          message: 'RevenueCat SDK kurulu değil veya provider identity senkronu hazır değil.',
+          message:
+            'RevenueCat SDK kurulu değil veya provider identity senkronu hazır değil.',
           activatedAt: null,
           expiresAt: null,
           lastValidatedAt: null,
@@ -869,7 +835,6 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
 
         return buildRestoreResult(
           customerInfo,
-          entitlement ? 'restored' : 'no_active_purchase',
           entitlement
             ? 'Satın alma başarıyla geri yüklendi.'
             : 'Aktif premium satın alma bulunamadı.'
@@ -880,7 +845,7 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
           providerName: 'revenuecat',
           message: formatRevenueCatUserMessage(
             error,
-            'RevenueCat restore akisi hata verdi.'
+            'RevenueCat restore akışı hata verdi.'
           ),
           activatedAt: null,
           expiresAt: null,

@@ -22,8 +22,8 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
-import { useAppState } from '../../hooks/useAppState';
 import { adService } from '../../services/adService';
+import { entitlementService } from '../../services/entitlement.service';
 import { freeScanPolicyService } from '../../services/freeScanPolicy.service';
 import { enqueueRemoteHistorySync } from '../../services/historyRemoteSync.service';
 import {
@@ -38,7 +38,6 @@ import {
   unloadScanBeep,
 } from '../../services/scanFeedback.service';
 import { useScanStore } from '../../store/useScanStore';
-import type { FreeScanAccessSnapshot } from '../../types/monetization';
 import { analyzeProduct, type AnalysisResult, type Product } from '../../utils/analysis';
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
@@ -106,7 +105,6 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const isFocused = useIsFocused();
-  const { isActive: isAppActive } = useAppState();
 
   const layout = useAppScreenLayout({
     topInsetExtra: 8,
@@ -139,11 +137,56 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const scanResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
   const recentScanMapRef = useRef<Record<string, number>>({});
-  const hasPreviewSurface = previewItems.length > 0 || Boolean(activeLookupBarcode);
   const scanMode: ProductLookupMode =
     route?.name === 'MedicineScanner' ? 'medicine' : initialMode;
-  const shouldRenderCamera =
-    isFocused && isAppActive && !isManualMode && !hasPreviewSurface;
+
+  useEffect(() => {
+    let disposed = false;
+
+    const setupAds = async () => {
+      try {
+        const entitlement = await entitlementService.getSnapshot();
+
+        if (disposed) {
+          return;
+        }
+
+        if (entitlement.isPremium) {
+          console.log('[ScannerAds] premium entitlement active, preload skipped');
+          return;
+        }
+
+        const policy = await adService.getCurrentPolicy();
+
+        if (disposed) {
+          return;
+        }
+
+        if (!policy.enabled || !policy.interstitialEnabled) {
+          console.log('[ScannerAds] interstitial policy disabled, preload skipped');
+          return;
+        }
+
+        await Promise.all([
+          adService.prepareInterstitial(),
+          adService.prepareRewardedAd(),
+        ]);
+      } catch (error) {
+        console.log('[ScannerAds] setup failed', error);
+
+        void adService.trackInterstitialShowFailure(error, {
+          stage: 'setup',
+          screen: 'Scanner',
+        });
+      }
+    };
+
+    void setupAds();
+
+    return () => {
+      disposed = true;
+    };
+  }, []);
 
   useEffect(() => {
     void prepareScanBeep();
@@ -162,7 +205,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   }, [initialMode, route?.name, scanMode]);
 
   useEffect(() => {
-    if (shouldRenderCamera) {
+    if (isFocused && !isManualMode) {
       lineAnim.setValue(0);
 
       animationRef.current = Animated.loop(
@@ -190,15 +233,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       animationRef.current?.stop();
       animationRef.current = null;
     };
-  }, [lineAnim, shouldRenderCamera]);
-
-  useEffect(() => {
-    if (shouldRenderCamera) {
-      return;
-    }
-
-    setTorch(false);
-  }, [shouldRenderCamera]);
+  }, [isFocused, isManualMode, lineAnim]);
 
   useEffect(() => {
     return () => {
@@ -213,7 +248,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
     const prewarm = async () => {
       try {
-        if (scanMode === 'medicine' && isFocused && isAppActive) {
+        if (scanMode === 'medicine') {
           await prewarmMedicineCatalog();
         }
       } catch (error) {
@@ -228,7 +263,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isAppActive, isFocused, scanMode]);
+  }, [scanMode]);
 
   const closeManualMode = useCallback(() => {
     setIsManualMode(false);
@@ -252,25 +287,22 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     setManualError('');
   }, []);
 
-  const clearPreviewSurface = useCallback(() => {
-    setPreviewItems([]);
-    setActiveLookupBarcode(null);
-    setScanned(false);
-  }, []);
+  const pushLoadingPreview = useCallback(
+    (barcode: string, lookupMode: ProductLookupMode) => {
+      const item: ScanPreviewItem = {
+        id: buildPreviewId(),
+        barcode,
+        lookupMode,
+        status: 'loading',
+        createdAt: Date.now(),
+        message: tt('scanner_lookup_loading', 'Urun bilgileri getiriliyor...'),
+      };
 
-  const pushLoadingPreview = useCallback((barcode: string, lookupMode: ProductLookupMode) => {
-    const item: ScanPreviewItem = {
-      id: buildPreviewId(),
-      barcode,
-      lookupMode,
-      status: 'loading',
-      createdAt: Date.now(),
-      message: tt('scanner_lookup_loading', 'Urun bilgileri getiriliyor...'),
-    };
-
-    setPreviewItems((current) => [item, ...current].slice(0, PREVIEW_QUEUE_LIMIT));
-    return item.id;
-  }, [tt]);
+      setPreviewItems((current) => [item, ...current].slice(0, PREVIEW_QUEUE_LIMIT));
+      return item.id;
+    },
+    [tt]
+  );
 
   const updatePreviewItem = useCallback(
     (previewId: string, updater: (current: ScanPreviewItem) => ScanPreviewItem) => {
@@ -280,6 +312,14 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     },
     []
   );
+
+  const dismissPreviewItem = useCallback((previewId: string) => {
+    setPreviewItems((current) => current.filter((item) => item.id !== previewId));
+  }, []);
+
+  const dismissPreviewByBarcode = useCallback((barcode: string) => {
+    setPreviewItems((current) => current.filter((item) => item.barcode !== barcode));
+  }, []);
 
   const handleOpenPreviewDetail = useCallback(
     (item: ScanPreviewItem) => {
@@ -300,20 +340,93 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
   const handleOpenMissingProduct = useCallback(
     (barcode: string) => {
+      dismissPreviewByBarcode(barcode);
       navigation.navigate('MissingProduct', { barcode });
     },
-    [navigation]
+    [dismissPreviewByBarcode, navigation]
+  );
+
+  const maybeShowScanInterstitial = useCallback(
+    async (params: { barcode: string; outcome: 'found' | 'not_found' }) => {
+      try {
+        const entitlement = await entitlementService.getSnapshot();
+
+        if (entitlement.isPremium) {
+          return;
+        }
+
+        const decision = await adService.evaluateScanInterstitialOpportunity();
+
+        if (!decision.shouldShow) {
+          return;
+        }
+
+        if (!adService.isInterstitialReady()) {
+          await adService.prepareInterstitial();
+          await new Promise((resolve) => setTimeout(resolve, 320));
+        }
+
+        if (!adService.isInterstitialReady()) {
+          await adService.trackInterstitialShowFailure(
+            'scan_interstitial_not_ready',
+            {
+              stage: 'scan_interstitial_show_gate',
+              screen: 'Scanner',
+              barcode: params.barcode,
+              outcome: params.outcome,
+              reason: decision.reason,
+              successfulScanCount: decision.successfulScanCount,
+              dailyInterstitialCount: decision.dailyInterstitialCount,
+            }
+          );
+          return;
+        }
+
+        const shown = await adService.showPreparedInterstitial();
+
+        if (!shown) {
+          await adService.trackInterstitialShowFailure(
+            'scan_interstitial_show_returned_false',
+            {
+              stage: 'scan_interstitial_show',
+              screen: 'Scanner',
+              barcode: params.barcode,
+              outcome: params.outcome,
+              reason: decision.reason,
+              successfulScanCount: decision.successfulScanCount,
+              dailyInterstitialCount: decision.dailyInterstitialCount,
+            }
+          );
+          return;
+        }
+
+        await adService.recordInterstitialShown({
+          successfulScanCount: decision.successfulScanCount,
+        });
+
+        void adService.prepareInterstitial();
+      } catch (error) {
+        console.log('[ScannerAds] interstitial show failed', error);
+
+        await adService.trackInterstitialShowFailure(error, {
+          stage: 'scan_interstitial_show_exception',
+          screen: 'Scanner',
+          barcode: params.barcode,
+          outcome: params.outcome,
+        });
+      }
+    },
+    []
   );
 
   const processBarcode = useCallback(
     async (validBarcodeData: string) => {
       setScanned(true);
       setActiveLookupBarcode(validBarcodeData);
-      let freeScanSnapshot: FreeScanAccessSnapshot | null = null;
+
       try {
         try {
           const freeScanResult = await freeScanPolicyService.registerSuccessfulScan();
-          freeScanSnapshot = freeScanResult.snapshot;
 
           if (!freeScanResult.allowed) {
             resetTransientState();
@@ -337,28 +450,6 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
           console.error('Free scan policy failed, allowing scan:', error);
         }
 
-        void (async () => {
-          try {
-            if (
-              !freeScanSnapshot ||
-              freeScanSnapshot.entitlementPlan === 'premium' ||
-              freeScanSnapshot.usedCount < 3
-            ) {
-              return;
-            }
-
-            const policy = await adService.getCurrentPolicy();
-
-            if (!policy.enabled || !policy.interstitialEnabled) {
-              return;
-            }
-
-            await adService.prepareRewardedAd();
-          } catch (error) {
-            console.log('[Interstitial] deferred preload failed', error);
-          }
-        })();
-
         Vibration.vibrate(18);
         void playScanBeep();
         resetTransientState();
@@ -366,6 +457,10 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         const cachedPreview = previewCacheByBarcode[validBarcodeData];
 
         if (cachedPreview) {
+          if (cachedPreview.product.image_url) {
+            void Image.prefetch(cachedPreview.product.image_url);
+          }
+
           setAnalysis(cachedPreview.product, cachedPreview.analysis);
           updatePreviewItem(previewId, (current) => ({
             ...current,
@@ -402,12 +497,23 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                   : tt('product_not_found', 'Ürün verisi bulunamadı'),
             }));
 
+            if (result.reason !== 'invalid_barcode') {
+              await maybeShowScanInterstitial({
+                barcode: validBarcodeData,
+                outcome: 'not_found',
+              });
+            }
+
             return;
           }
 
           const product = result.product;
           const analysis = analyzeProduct(product);
           setAnalysis(product, analysis);
+
+          if (product.image_url) {
+            void Image.prefetch(product.image_url);
+          }
 
           try {
             await Promise.resolve(
@@ -444,6 +550,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                     'Hizli sonuc hazir. Detay icin karta dokunun.'
                   ),
           }));
+
+          await maybeShowScanInterstitial({
+            barcode: validBarcodeData,
+            outcome: 'found',
+          });
         } catch (lookupError) {
           console.error('[ScannerScreen] lookup failed:', lookupError);
 
@@ -466,8 +577,9 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       }
     },
     [
-      navigation,
       markNotFound,
+      maybeShowScanInterstitial,
+      navigation,
       previewCacheByBarcode,
       pushLoadingPreview,
       resetTransientState,
@@ -526,6 +638,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     void processBarcode(decoded.normalizedData);
   }, [manualBarcode, processBarcode, tt]);
 
+  const hasPreviewSurface = previewItems.length > 0 || Boolean(activeLookupBarcode);
   const latestPreview = previewItems[0] ?? null;
   const previewHistory = previewItems.slice(1);
 
@@ -588,20 +701,19 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   }
 
   const topInsetPadding = layout.headerTopPadding;
-  const cameraLayer = shouldRenderCamera ? (
-    <CameraView
-      style={styles.cameraLayer}
-      onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
-      enableTorch={torch}
-      barcodeScannerSettings={{
-        barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'],
-      }}
-    />
-  ) : null;
 
   return (
     <View style={styles.container}>
-      {cameraLayer}
+      {isFocused && (
+        <CameraView
+          style={StyleSheet.absoluteFillObject}
+          onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+          enableTorch={torch}
+          barcodeScannerSettings={{
+            barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'],
+          }}
+        />
+      )}
 
       <View style={styles.overlay} pointerEvents="box-none">
         <View style={[styles.topDarkArea, { paddingTop: topInsetPadding }]}>
@@ -633,7 +745,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
                 <TouchableOpacity
                   style={styles.topIconButton}
-                  onPress={clearPreviewSurface}
+                  onPress={() => setScanned(false)}
                   activeOpacity={0.85}
                 >
                   <Ionicons name="refresh-outline" size={17} color="#FFFFFF" />
@@ -696,12 +808,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
           ]}
         >
           {latestPreview ? (
-            <TouchableOpacity
-              activeOpacity={latestPreview.status === 'found' ? 0.9 : 1}
-              disabled={latestPreview.status !== 'found'}
-              onPress={() => handleOpenPreviewDetail(latestPreview)}
-              style={styles.previewPrimaryCard}
-            >
+            <View style={styles.previewPrimaryCard}>
               <View style={styles.previewCardTopRow}>
                 <View style={styles.previewBadgeRow}>
                   <View
@@ -733,62 +840,77 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                   </View>
                   <Text style={styles.previewBarcodeText}>{latestPreview.barcode}</Text>
                 </View>
-                {latestPreview.status === 'loading' ? (
-                  <ActivityIndicator size="small" color="#7DD3FC" />
-                ) : (
-                  <Ionicons
-                    name={latestPreview.status === 'found' ? 'chevron-up' : 'alert-circle-outline'}
-                    size={20}
-                    color="#FFFFFF"
-                  />
-                )}
+
+                <View style={styles.previewTopActions}>
+                  {latestPreview.status === 'loading' ? (
+                    <ActivityIndicator size="small" color="#7DD3FC" />
+                  ) : null}
+
+                  <TouchableOpacity
+                    style={styles.previewDismissButton}
+                    onPress={() => dismissPreviewItem(latestPreview.id)}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="close" size={16} color="#FFFFFF" />
+                  </TouchableOpacity>
+                </View>
               </View>
 
-              <View style={styles.previewBody}>
-                <Image
-                  source={{
-                    uri: latestPreview.product?.image_url || FALLBACK_IMAGE,
-                  }}
-                  style={styles.previewImage}
-                />
-                <View style={styles.previewTextWrap}>
-                  <Text style={styles.previewBrand} numberOfLines={1}>
-                    {latestPreview.product?.brand ||
-                      tt('unknown_brand', 'Bilinmeyen Marka')}
-                  </Text>
-                  <Text style={styles.previewName} numberOfLines={2}>
-                    {latestPreview.product?.name ||
-                      (latestPreview.status === 'not_found'
-                        ? tt('scanner_not_found_title', 'Ürün bulunamadı')
-                        : tt('scanner_lookup_loading', 'Urun bilgileri getiriliyor...'))}
-                  </Text>
-                  <Text style={styles.previewMessage} numberOfLines={2}>
-                    {latestPreview.message ||
-                      tt('scanner_preview_ready', 'Hizli sonuc hazir. Detay icin karta dokunun.')}
-                  </Text>
-                </View>
-                {latestPreview.status === 'found' ? (
-                  <View
-                    style={[
-                      styles.previewScoreBubble,
-                      {
-                        backgroundColor: getScoreTone(latestPreview.analysis?.score),
-                      },
-                    ]}
-                  >
-                    <Text style={styles.previewScoreValue}>
-                      {latestPreview.product?.type === 'medicine'
-                        ? tt('medicine_short_label', 'ILAC')
-                        : Math.round(latestPreview.analysis?.score ?? 0)}
+              <TouchableOpacity
+                activeOpacity={latestPreview.status === 'found' ? 0.9 : 1}
+                disabled={latestPreview.status !== 'found'}
+                onPress={() => handleOpenPreviewDetail(latestPreview)}
+                style={styles.previewBodyTouchable}
+              >
+                <View style={styles.previewBody}>
+                  <Image
+                    source={{
+                      uri: latestPreview.product?.image_url || FALLBACK_IMAGE,
+                    }}
+                    style={styles.previewImage}
+                  />
+                  <View style={styles.previewTextWrap}>
+                    <Text style={styles.previewBrand} numberOfLines={1}>
+                      {latestPreview.product?.brand ||
+                        tt('unknown_brand', 'Bilinmeyen Marka')}
                     </Text>
-                    <Text style={styles.previewScoreCaption}>
-                      {latestPreview.product?.type === 'medicine'
-                        ? tt('medicine_label', 'İlaç')
-                        : tt('score_short', 'Skor')}
+                    <Text style={styles.previewName} numberOfLines={2}>
+                      {latestPreview.product?.name ||
+                        (latestPreview.status === 'not_found'
+                          ? tt('scanner_not_found_title', 'Ürün bulunamadı')
+                          : tt('scanner_lookup_loading', 'Urun bilgileri getiriliyor...'))}
+                    </Text>
+                    <Text style={styles.previewMessage} numberOfLines={2}>
+                      {latestPreview.message ||
+                        tt(
+                          'scanner_preview_ready',
+                          'Hizli sonuc hazir. Detay icin karta dokunun.'
+                        )}
                     </Text>
                   </View>
-                ) : null}
-              </View>
+                  {latestPreview.status === 'found' ? (
+                    <View
+                      style={[
+                        styles.previewScoreBubble,
+                        {
+                          backgroundColor: getScoreTone(latestPreview.analysis?.score),
+                        },
+                      ]}
+                    >
+                      <Text style={styles.previewScoreValue}>
+                        {latestPreview.product?.type === 'medicine'
+                          ? tt('medicine_short_label', 'ILAC')
+                          : Math.round(latestPreview.analysis?.score ?? 0)}
+                      </Text>
+                      <Text style={styles.previewScoreCaption}>
+                        {latestPreview.product?.type === 'medicine'
+                          ? tt('medicine_label', 'İlaç')
+                          : tt('score_short', 'Skor')}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+              </TouchableOpacity>
 
               {latestPreview.status === 'not_found' ? (
                 <TouchableOpacity
@@ -804,12 +926,12 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               ) : latestPreview.status === 'found' ? (
                 <Text style={styles.previewHintText}>
                   {tt(
-                    'scanner_preview_resume_hint',
-                    'Detay icin karta dokunun. Yeni tarama icin ustte yenileye basin.'
+                    'scanner_open_detail_hint',
+                    'Detay ekranını açmak için karta dokunun, kamera taramaya devam eder.'
                   )}
                 </Text>
               ) : null}
-            </TouchableOpacity>
+            </View>
           ) : null}
 
           {previewHistory.length ? (
@@ -937,9 +1059,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#000',
-  },
-  cameraLayer: {
-    ...StyleSheet.absoluteFillObject,
   },
   permissionContainer: {
     flex: 1,
@@ -1127,6 +1246,21 @@ const styles = StyleSheet.create({
     gap: 8,
     flex: 1,
   },
+  previewTopActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  previewDismissButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   previewStatusPill: {
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -1143,10 +1277,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     flexShrink: 1,
   },
+  previewBodyTouchable: {
+    marginTop: 14,
+  },
   previewBody: {
     flexDirection: 'row',
     gap: 12,
-    marginTop: 14,
     alignItems: 'center',
   },
   previewImage: {

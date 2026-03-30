@@ -31,7 +31,7 @@ const REAL_AD_UNITS = Object.freeze({
   INTERSTITIAL: Object.freeze({
     android: getEnvString(
       'EXPO_PUBLIC_ADMOB_INTERSTITIAL_ANDROID',
-      'ca-app-pub-9503865696579023/3089173355'
+      'ca-app-pub-9503865696579023/2717914905'
     ),
     ios: getEnvString(
       'EXPO_PUBLIC_ADMOB_INTERSTITIAL_IOS',
@@ -61,7 +61,7 @@ const REAL_AD_UNITS = Object.freeze({
   APP_OPEN: Object.freeze({
     android: getEnvString(
       'EXPO_PUBLIC_ADMOB_APP_OPEN_ANDROID',
-      'ca-app-pub-9503865696579023/4501449060'
+      'ca-app-pub-9503865696579023/7491631372'
     ),
     ios: getEnvString(
       'EXPO_PUBLIC_ADMOB_APP_OPEN_IOS',

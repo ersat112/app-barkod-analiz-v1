@@ -19,10 +19,15 @@ export interface Product {
   score?: number;
   grade?: string;
   ingredients_text?: string;
+  nova_group?: number;
 
   additives?: string[];
   nutriments?: Record<string, unknown>;
   nutrient_levels?: Record<string, unknown>;
+  labels_tags?: string[];
+  allergens_tags?: string[];
+  traces_tags?: string[];
+  ingredients_analysis_tags?: string[];
 
   usage_instructions?: string;
 
@@ -43,6 +48,8 @@ export interface Product {
   prospectus_approval_date?: string;
   short_text_approval_date?: string;
   catalog_updated_at?: string;
+  intended_use_summary?: string;
+  intended_use_source?: string;
 }
 
 export interface ECodeMatch {
@@ -53,6 +60,9 @@ export interface ECodeMatch {
   [key: string]: unknown;
 }
 
+export type AnalysisSignalKey = 'nutrition' | 'processing' | 'additives';
+export type AnalysisCoverage = 'full' | 'partial' | 'limited';
+
 export interface AnalysisResult {
   riskLevel: 'Düşük' | 'Orta' | 'Yüksek';
   foundECodes: ECodeMatch[];
@@ -60,6 +70,13 @@ export interface AnalysisResult {
   color: string;
   recommendation: string;
   score: number;
+  nutritionScore: number | null;
+  processingScore: number | null;
+  additiveRiskScore: number | null;
+  novaGroup: number | null;
+  highRiskAdditiveCount: number;
+  signalCoverage: AnalysisCoverage;
+  missingSignals: AnalysisSignalKey[];
 }
 
 const RISK_COLORS = {
@@ -181,6 +198,27 @@ const getRecommendation = (
     : 'İçerik temiz ve güvenle değerlendirilebilir görünüyor.';
 };
 
+const normalizeNovaGroup = (value: unknown): number | null => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    return null;
+  }
+
+  const rounded = Math.round(value);
+  if (rounded >= 1 && rounded <= 4) {
+    return rounded;
+  }
+
+  return null;
+};
+
+const getProcessingScore = (novaGroup: number | null): number | null => {
+  if (novaGroup === 1) return 96;
+  if (novaGroup === 2) return 76;
+  if (novaGroup === 3) return 52;
+  if (novaGroup === 4) return 18;
+  return null;
+};
+
 export const analyzeProduct = (product: Product): AnalysisResult => {
   if (product.type === 'medicine') {
     return {
@@ -192,6 +230,13 @@ export const analyzeProduct = (product: Product): AnalysisResult => {
       recommendation:
         'İlaçları yalnızca prospektüs, doktor veya eczacı önerisine uygun şekilde kullanın.',
       score: 0,
+      nutritionScore: null,
+      processingScore: null,
+      additiveRiskScore: null,
+      novaGroup: null,
+      highRiskAdditiveCount: 0,
+      signalCoverage: 'limited',
+      missingSignals: ['nutrition', 'processing', 'additives'],
     };
   }
 
@@ -261,6 +306,17 @@ export const analyzeProduct = (product: Product): AnalysisResult => {
 
   const cappedPenalty = Math.min(additivePenalty, 35);
   healthScore = clamp(healthScore - cappedPenalty);
+  const additiveRiskScore =
+    text || (Array.isArray(product.additives) && product.additives.length > 0)
+      ? clamp(
+          foundECodes.length === 0
+            ? 92
+            : 100 - Math.min(additivePenalty * 2.4, 84)
+        )
+      : null;
+
+  const novaGroup = normalizeNovaGroup(product.nova_group);
+  const processingScore = getProcessingScore(novaGroup);
 
   /**
    * 5) Son risk seviyesi
@@ -277,6 +333,30 @@ export const analyzeProduct = (product: Product): AnalysisResult => {
   }
 
   const hasApiScore = normalizedApiScore !== null || gradeFallbackScore !== null;
+  const nutritionScore = normalizedApiScore ?? gradeFallbackScore;
+  const highRiskAdditiveCount = foundECodes.filter((item) => {
+    const normalizedRisk = String(item.risk || '')
+      .trim()
+      .toLowerCase();
+    return normalizedRisk === 'yüksek' || normalizedRisk === 'high';
+  }).length;
+
+  const missingSignals: AnalysisSignalKey[] = [];
+  if (nutritionScore === null) {
+    missingSignals.push('nutrition');
+  }
+
+  if (processingScore === null) {
+    missingSignals.push('processing');
+  }
+
+  if (additiveRiskScore === null) {
+    missingSignals.push('additives');
+  }
+
+  const signalCount = 3 - missingSignals.length;
+  const signalCoverage: AnalysisCoverage =
+    signalCount === 3 ? 'full' : signalCount >= 2 ? 'partial' : 'limited';
 
   const recommendation = getRecommendation(
     product.type,
@@ -299,5 +379,12 @@ export const analyzeProduct = (product: Product): AnalysisResult => {
     color,
     recommendation,
     score: healthScore,
+    nutritionScore,
+    processingScore,
+    additiveRiskScore,
+    novaGroup,
+    highRiskAdditiveCount,
+    signalCoverage,
+    missingSignals,
   };
-};  
+};

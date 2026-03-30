@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as XLSX from 'xlsx';
 
 import type { Product } from '../utils/analysis';
@@ -11,6 +12,8 @@ const TITCK_KUBKT_DATA_URL = 'https://www.titck.gov.tr/getkubktviewdatatable';
 
 const CATALOG_TTL_MS = 1000 * 60 * 60 * 12;
 const PROSPECTUS_TTL_MS = 1000 * 60 * 60 * 6;
+const INTENDED_USE_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+const INTENDED_USE_STORAGE_KEY = 'erenesal_medicine_intended_use_cache_v1';
 
 type TitckMedicineCatalogEntry = {
   barcode: string;
@@ -64,6 +67,12 @@ type ProspectusCacheEntry = {
   result: TitckProspectusLookup | null;
 };
 
+type IntendedUseCacheEntry = {
+  fetchedAt: number;
+  summary: string | null;
+  source: 'summary_pdf' | 'prospectus_pdf' | null;
+};
+
 type TitckProspectusResponse = {
   data?: TitckProspectusRecord[];
   recordsFiltered?: number;
@@ -75,6 +84,8 @@ let catalogSnapshot: TitckMedicineCatalogSnapshot | null = null;
 let catalogPromise: Promise<TitckMedicineCatalogSnapshot> | null = null;
 let remoteCatalogRefreshPromise: Promise<void> | null = null;
 const prospectusCache = new Map<string, ProspectusCacheEntry>();
+const intendedUseCache = new Map<string, IntendedUseCacheEntry>();
+let intendedUseStoragePromise: Promise<Map<string, IntendedUseCacheEntry>> | null = null;
 
 const DATATABLE_COLUMNS = [
   'name',
@@ -199,6 +210,244 @@ const createAjaxHeaders = (): HeadersInit => ({
   Referer: TITCK_KUBKT_PAGE_URL,
   'X-Requested-With': 'XMLHttpRequest',
 });
+
+const decodePdfLiteral = (value: string): string => {
+  return value
+    .replace(/\\([\\()])/g, '$1')
+    .replace(/\\n/g, ' ')
+    .replace(/\\r/g, ' ')
+    .replace(/\\t/g, ' ')
+    .replace(/\\f/g, ' ')
+    .replace(/\\b/g, ' ')
+    .replace(/\\([0-7]{1,3})/g, (_, octal: string) =>
+      String.fromCharCode(parseInt(octal, 8))
+    );
+};
+
+const decodePdfBytes = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+
+  try {
+    return new TextDecoder('latin1').decode(bytes);
+  } catch {
+    let result = '';
+
+    for (let index = 0; index < bytes.length; index += 1) {
+      result += String.fromCharCode(bytes[index]);
+    }
+
+    return result;
+  }
+};
+
+const extractPdfText = (rawPdf: string): string => {
+  const textParts: string[] = [];
+
+  const singleTextRegex = /\((?:\\.|[^\\()])+\)\s*Tj/g;
+  const arrayTextRegex = /\[(.*?)\]\s*TJ/gs;
+  const innerTextRegex = /\((?:\\.|[^\\()])+\)/g;
+
+  const singleMatches = rawPdf.match(singleTextRegex) ?? [];
+
+  singleMatches.forEach((match) => {
+    const literal = match.replace(/\)\s*Tj$/, '').replace(/^\(/, '');
+    textParts.push(decodePdfLiteral(literal));
+  });
+
+  for (const block of rawPdf.matchAll(arrayTextRegex)) {
+    const content = block[1];
+    const innerMatches = content.match(innerTextRegex) ?? [];
+
+    innerMatches.forEach((literal) => {
+      textParts.push(
+        decodePdfLiteral(literal.replace(/^\(/, '').replace(/\)$/, ''))
+      );
+    });
+  }
+
+  return textParts
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const normalizeSectionSearchText = (value: string): string => {
+  return value
+    .toLocaleUpperCase('tr-TR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s.:]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const toReadableSummary = (value: string): string => {
+  const compact = value.replace(/\s+/g, ' ').trim();
+
+  if (!compact) {
+    return '';
+  }
+
+  const lowered = compact.toLocaleLowerCase('tr-TR');
+  return `${lowered.charAt(0).toLocaleUpperCase('tr-TR')}${lowered.slice(1)}`;
+};
+
+const extractSectionByMarkers = (
+  text: string,
+  startMarkers: string[],
+  endMarkers: string[]
+): string | null => {
+  const normalizedText = normalizeSectionSearchText(text);
+
+  let startIndex = -1;
+  let matchedMarkerLength = 0;
+
+  startMarkers.forEach((marker) => {
+    const index = normalizedText.indexOf(marker);
+
+    if (index >= 0 && (startIndex === -1 || index < startIndex)) {
+      startIndex = index;
+      matchedMarkerLength = marker.length;
+    }
+  });
+
+  if (startIndex < 0) {
+    return null;
+  }
+
+  const searchStart = startIndex + matchedMarkerLength;
+  let endIndex = normalizedText.length;
+
+  endMarkers.forEach((marker) => {
+    const index = normalizedText.indexOf(marker, searchStart);
+
+    if (index >= 0 && index < endIndex) {
+      endIndex = index;
+    }
+  });
+
+  const rawSegment = normalizedText.slice(searchStart, endIndex).trim();
+
+  if (!rawSegment) {
+    return null;
+  }
+
+  const cleaned = rawSegment
+    .replace(/^[\s:.-]+/, '')
+    .replace(/\bKISA URUN BILGISI\b/gi, '')
+    .replace(/\bKULLANMA TALIMATI\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!cleaned || cleaned.length < 40) {
+    return null;
+  }
+
+  const shortened = cleaned.length > 520
+    ? `${cleaned.slice(0, cleaned.lastIndexOf('.', 500) > 220 ? cleaned.lastIndexOf('.', 500) + 1 : 500).trim()}`
+    : cleaned;
+
+  return toReadableSummary(shortened);
+};
+
+const extractMedicineIntendedUseSummary = (pdfText: string): string | null => {
+  const fromPatientLeaflet = extractSectionByMarkers(
+    pdfText,
+    [
+      '1 BU ILAC NE ICIN KULLANILIR',
+      '1. BU ILAC NE ICIN KULLANILIR',
+      'BU ILAC NE ICIN KULLANILIR',
+    ],
+    [
+      '2 BU ILACI KULLANMADAN ONCE DIKKAT EDILMESI GEREKENLER',
+      '2. BU ILACI KULLANMADAN ONCE DIKKAT EDILMESI GEREKENLER',
+      '2 KULLANMADAN ONCE DIKKAT EDILMESI GEREKENLER',
+    ]
+  );
+
+  if (fromPatientLeaflet) {
+    return fromPatientLeaflet;
+  }
+
+  return extractSectionByMarkers(
+    pdfText,
+    [
+      '4.1 TERAPOTIK ENDIKASYONLAR',
+      '4 1 TERAPOTIK ENDIKASYONLAR',
+      'TERAPOTIK ENDIKASYONLAR',
+    ],
+    [
+      '4.2 POZOLOJI VE UYGULAMA SEKLI',
+      '4 2 POZOLOJI VE UYGULAMA SEKLI',
+      '4.3 KONTRENDIKASYONLAR',
+      '4 3 KONTRENDIKASYONLAR',
+    ]
+  );
+};
+
+const readStoredIntendedUseCache = async (): Promise<Map<string, IntendedUseCacheEntry>> => {
+  if (intendedUseStoragePromise) {
+    return intendedUseStoragePromise;
+  }
+
+  intendedUseStoragePromise = (async () => {
+    try {
+      const raw = await AsyncStorage.getItem(INTENDED_USE_STORAGE_KEY);
+
+      if (!raw) {
+        return new Map<string, IntendedUseCacheEntry>();
+      }
+
+      const parsed = JSON.parse(raw) as Record<string, IntendedUseCacheEntry>;
+      return new Map(Object.entries(parsed));
+    } catch {
+      return new Map<string, IntendedUseCacheEntry>();
+    } finally {
+      intendedUseStoragePromise = null;
+    }
+  })();
+
+  return intendedUseStoragePromise;
+};
+
+const persistIntendedUseCache = async (): Promise<void> => {
+  try {
+    const serialized = Object.fromEntries(
+      Array.from(intendedUseCache.entries()).slice(-120)
+    );
+    await AsyncStorage.setItem(INTENDED_USE_STORAGE_KEY, JSON.stringify(serialized));
+  } catch {
+    // best effort cache
+  }
+};
+
+const getCachedIntendedUseEntry = async (
+  key: string
+): Promise<IntendedUseCacheEntry | null> => {
+  const memoryEntry = intendedUseCache.get(key);
+
+  if (memoryEntry && Date.now() - memoryEntry.fetchedAt < INTENDED_USE_TTL_MS) {
+    return memoryEntry;
+  }
+
+  const storedCache = await readStoredIntendedUseCache();
+  const storedEntry = storedCache.get(key) ?? null;
+
+  if (storedEntry && Date.now() - storedEntry.fetchedAt < INTENDED_USE_TTL_MS) {
+    intendedUseCache.set(key, storedEntry);
+    return storedEntry;
+  }
+
+  return null;
+};
+
+const setCachedIntendedUseEntry = async (
+  key: string,
+  entry: IntendedUseCacheEntry
+): Promise<void> => {
+  intendedUseCache.set(key, entry);
+  await persistIntendedUseCache();
+};
 
 const createCatalogSnapshotFromEntries = (
   entries: TitckMedicineCatalogEntry[],
@@ -619,4 +868,90 @@ export const enrichMedicineProductWithProspectus = async (
 
     return product;
   }
+};
+
+export const enrichMedicineProductWithIntendedUseSummary = async (
+  product: Product
+): Promise<Product> => {
+  if (product.type !== 'medicine' || product.intended_use_summary) {
+    return product;
+  }
+
+  const documentCandidates: {
+    url?: string;
+    source: 'summary_pdf' | 'prospectus_pdf';
+  }[] = [
+    {
+      url: product.summary_pdf_url,
+      source: 'summary_pdf',
+    },
+    {
+      url: product.prospectus_pdf_url,
+      source: 'prospectus_pdf',
+    },
+  ];
+
+  for (const candidate of documentCandidates) {
+    const documentUrl = safeText(candidate.url);
+
+    if (!documentUrl) {
+      continue;
+    }
+
+    const cacheKey = `${normalizeBarcode(product.barcode)}::${candidate.source}::${documentUrl}`;
+    const cachedEntry = await getCachedIntendedUseEntry(cacheKey);
+
+    if (cachedEntry) {
+      if (!cachedEntry.summary) {
+        continue;
+      }
+
+      return {
+        ...product,
+        intended_use_summary: cachedEntry.summary,
+        intended_use_source: cachedEntry.source ?? candidate.source,
+      };
+    }
+
+    try {
+      const response = await fetch(documentUrl, {
+        headers: createWorkbookHeaders(),
+      });
+
+      if (!response.ok) {
+        await setCachedIntendedUseEntry(cacheKey, {
+          fetchedAt: Date.now(),
+          summary: null,
+          source: candidate.source,
+        });
+        continue;
+      }
+
+      const rawPdf = decodePdfBytes(await response.arrayBuffer());
+      const pdfText = extractPdfText(rawPdf);
+      const summary = extractMedicineIntendedUseSummary(pdfText);
+
+      await setCachedIntendedUseEntry(cacheKey, {
+        fetchedAt: Date.now(),
+        summary,
+        source: candidate.source,
+      });
+
+      if (summary) {
+        return {
+          ...product,
+          intended_use_summary: summary,
+          intended_use_source: candidate.source,
+        };
+      }
+    } catch (error) {
+      console.warn('[TitckMedicine] intended use enrichment failed:', {
+        barcode: product.barcode,
+        source: candidate.source,
+        error,
+      });
+    }
+  }
+
+  return product;
 };

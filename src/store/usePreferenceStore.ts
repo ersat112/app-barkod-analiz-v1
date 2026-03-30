@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  DEFAULT_NUTRITION_PREFERENCES,
+  type NutritionPreferenceKey,
+  type NutritionPreferences,
+} from '../services/nutritionPreferences.service';
 
 export type AppLanguage = 'tr' | 'en' | 'de' | 'fr';
 
@@ -9,6 +14,7 @@ type PreferenceState = {
   language: AppLanguage;
   isFirstLaunch: boolean;
   notificationsEnabled: boolean;
+  nutritionPreferences: NutritionPreferences;
 };
 
 type PreferenceActions = {
@@ -16,6 +22,9 @@ type PreferenceActions = {
   setTheme: (value: boolean) => void;
   setLanguage: (lang: AppLanguage) => void;
   setNotificationsEnabled: (value: boolean) => void;
+  setNutritionPreference: (key: NutritionPreferenceKey, value: boolean) => void;
+  setNutritionPreferences: (value: NutritionPreferences) => void;
+  resetNutritionPreferences: () => void;
   completeOnboarding: () => void;
   resetOnboarding: () => void;
   setFirstLaunch: (value: boolean) => void;
@@ -29,6 +38,7 @@ const DEFAULT_PREFERENCES: PreferenceState = {
   language: 'tr',
   isFirstLaunch: true,
   notificationsEnabled: true,
+  nutritionPreferences: DEFAULT_NUTRITION_PREFERENCES,
 };
 
 export const usePreferenceStore = create<PreferenceStore>()(
@@ -54,6 +64,27 @@ export const usePreferenceStore = create<PreferenceStore>()(
       setNotificationsEnabled: (value) =>
         set({
           notificationsEnabled: value,
+        }),
+
+      setNutritionPreference: (key, value) =>
+        set((state) => ({
+          nutritionPreferences: {
+            ...state.nutritionPreferences,
+            [key]: value,
+          },
+        })),
+
+      setNutritionPreferences: (value) =>
+        set({
+          nutritionPreferences: {
+            ...DEFAULT_NUTRITION_PREFERENCES,
+            ...value,
+          },
+        }),
+
+      resetNutritionPreferences: () =>
+        set({
+          nutritionPreferences: DEFAULT_NUTRITION_PREFERENCES,
         }),
 
       completeOnboarding: () =>
@@ -85,6 +116,7 @@ export const usePreferenceStore = create<PreferenceStore>()(
         language: state.language,
         isFirstLaunch: state.isFirstLaunch,
         notificationsEnabled: state.notificationsEnabled,
+        nutritionPreferences: state.nutritionPreferences,
       }),
     }
   )

@@ -1,12 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, getDoc } from 'firebase/firestore';
 
-import {
-  getEnvBoolean,
-  getEnvNumber,
-  getEnvString,
-  hasEnvOverride,
-} from '../config/appRuntime';
+import { getEnvBoolean, getEnvNumber, getEnvString } from '../config/appRuntime';
 import { auth, db } from '../config/firebase';
 import {
   FEATURES,
@@ -43,6 +38,8 @@ const SCHEMA_VERSION = 1;
 let inMemoryPolicy: MonetizationPolicySnapshot | null = null;
 let refreshPromise: Promise<MonetizationPolicySnapshot> | null = null;
 
+const ENV = process.env as Record<string, string | undefined>;
+
 function log(...args: unknown[]) {
   if (FEATURES.monetization.diagnosticsLoggingEnabled) {
     console.log('[MonetizationPolicy]', ...args);
@@ -68,6 +65,25 @@ function toNonEmptyString(value: unknown, fallback: string): string {
   return normalized.length ? normalized : fallback;
 }
 
+function normalizeAnnualProductIdValue(value: unknown, fallback: string): string {
+  const normalized = toNonEmptyString(value, fallback).trim();
+  const fallbackNormalized = fallback.trim();
+
+  if (!normalized) {
+    return fallbackNormalized;
+  }
+
+  if (normalized.includes(':')) {
+    return normalized;
+  }
+
+  if (fallbackNormalized.includes(':')) {
+    return fallbackNormalized;
+  }
+
+  return normalized;
+}
+
 function clampInteger(
   value: unknown,
   fallback: number,
@@ -90,7 +106,7 @@ function clampPrice(value: unknown, fallback: number): number {
 }
 
 function hasRuntimeOverride(key: string): boolean {
-  return hasEnvOverride(key);
+  return typeof ENV[key] === 'string' && ENV[key]!.trim().length > 0;
 }
 
 function applyRuntimeOverrides(
@@ -141,10 +157,13 @@ function applyRuntimeOverrides(
   if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_ANNUAL_PRODUCT_ID')) {
     nextPolicy = {
       ...nextPolicy,
-      annualProductId: getEnvString(
-        'EXPO_PUBLIC_MONETIZATION_ANNUAL_PRODUCT_ID',
+      annualProductId: normalizeAnnualProductIdValue(
+        getEnvString(
+          'EXPO_PUBLIC_MONETIZATION_ANNUAL_PRODUCT_ID',
+          nextPolicy.annualProductId
+        ).trim(),
         nextPolicy.annualProductId
-      ).trim(),
+      ),
     };
   }
 
@@ -206,7 +225,7 @@ function normalizePolicy(
       fallback.annualPlanEnabled
     ),
     annualPriceTry: clampPrice(raw.annualPriceTry, fallback.annualPriceTry),
-    annualProductId: toNonEmptyString(
+    annualProductId: normalizeAnnualProductIdValue(
       raw.annualProductId,
       fallback.annualProductId
     ),

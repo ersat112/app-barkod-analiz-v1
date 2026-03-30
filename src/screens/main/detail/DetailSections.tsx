@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Image,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -37,6 +38,21 @@ type ActionLinkItem = {
   label: string;
   helper?: string;
   onPress: () => void;
+};
+
+export type ScoreBreakdownItem = {
+  key: string;
+  title: string;
+  helper: string;
+  detail: string;
+  score: number | null;
+  accentColor: string;
+};
+
+export type MethodologySectionItem = {
+  key: string;
+  title: string;
+  body: string;
 };
 
 export const DetailLoadingState: React.FC<{
@@ -222,6 +238,85 @@ export const NoticeCard: React.FC<{
   );
 };
 
+export const InfoActionCard: React.FC<{
+  title: string;
+  subtitle: string;
+  onPress: () => void;
+  colors: ThemeColors;
+}> = ({ title, subtitle, onPress, colors }) => {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.infoActionCard,
+        { backgroundColor: colors.card, borderColor: colors.border },
+      ]}
+      onPress={onPress}
+      activeOpacity={0.88}
+    >
+      <View
+        style={[
+          styles.infoActionIconWrap,
+          { backgroundColor: withAlpha(colors.primary, '14') },
+        ]}
+      >
+        <Ionicons name="information-circle-outline" size={20} color={colors.primary} />
+      </View>
+
+      <View style={styles.infoActionTextWrap}>
+        <Text style={[styles.infoActionTitle, { color: colors.text }]}>{title}</Text>
+        <Text style={[styles.infoActionSubtitle, { color: colors.mutedText }]}>
+          {subtitle}
+        </Text>
+      </View>
+
+      <Ionicons name="chevron-forward" size={20} color={colors.primary} />
+    </TouchableOpacity>
+  );
+};
+
+export const EvidenceSection: React.FC<{
+  title: string;
+  summary: string;
+  tags: string[];
+  colors: ThemeColors;
+}> = ({ title, summary, tags, colors }) => {
+  return (
+    <>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
+
+      <View
+        style={[
+          styles.evidenceCard,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+      >
+        <Text style={[styles.evidenceSummary, { color: colors.text }]}>{summary}</Text>
+
+        {tags.length ? (
+          <View style={styles.methodologyTagsWrap}>
+            {tags.map((tag) => (
+              <View
+                key={tag}
+                style={[
+                  styles.methodologyTag,
+                  {
+                    backgroundColor: withAlpha(colors.primary, '10'),
+                    borderColor: withAlpha(colors.primary, '2A'),
+                  },
+                ]}
+              >
+                <Text style={[styles.methodologyTagText, { color: colors.primary }]}>
+                  {tag}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </View>
+    </>
+  );
+};
+
 export const ScoreOverviewCard: React.FC<{
   score: number;
   grade: string;
@@ -287,6 +382,63 @@ export const SummarySection: React.FC<{
       <Text style={[styles.summaryTitle, { color: colors.text }]}>{title}</Text>
       <Text style={[styles.summaryText, { color: colors.text }]}>{text}</Text>
     </View>
+  );
+};
+
+export const ScoreBreakdownSection: React.FC<{
+  title: string;
+  items: ScoreBreakdownItem[];
+  colors: ThemeColors;
+}> = ({ title, items, colors }) => {
+  if (!items.length) {
+    return null;
+  }
+
+  return (
+    <>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
+
+      <View style={styles.breakdownList}>
+        {items.map((item) => (
+          <View
+            key={item.key}
+            style={[
+              styles.breakdownCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.breakdownCardHeader}>
+              <View style={styles.breakdownHeadingWrap}>
+                <Text style={[styles.breakdownTitle, { color: colors.text }]}>
+                  {item.title}
+                </Text>
+                <Text style={[styles.breakdownHelper, { color: colors.mutedText }]}>
+                  {item.helper}
+                </Text>
+              </View>
+
+              <View
+                style={[
+                  styles.breakdownScoreBadge,
+                  { backgroundColor: withAlpha(item.accentColor, '16') },
+                ]}
+              >
+                <Text style={[styles.breakdownScoreValue, { color: item.accentColor }]}>
+                  {typeof item.score === 'number' ? item.score : '--'}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={[styles.breakdownDetail, { color: colors.text }]}>
+              {item.detail}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </>
   );
 };
 
@@ -501,6 +653,133 @@ export const ShareSheet: React.FC<{
   );
 };
 
+export const MethodologySheet: React.FC<{
+  title: string;
+  subtitle: string;
+  sourcesLabel: string;
+  sourceTags: string[];
+  sections: MethodologySectionItem[];
+  closeLabel: string;
+  onClose: () => void;
+  colors: ThemeColors;
+}> = ({
+  title,
+  subtitle,
+  sourcesLabel,
+  sourceTags,
+  sections,
+  closeLabel,
+  onClose,
+  colors,
+}) => {
+  return (
+    <View
+      style={[
+        styles.shareSheetCard,
+        styles.methodologySheetCard,
+        {
+          backgroundColor: colors.cardElevated,
+          borderColor: withAlpha(colors.border, 'C8'),
+          shadowColor: colors.shadow,
+        },
+      ]}
+    >
+      <View style={styles.shareSheetHeader}>
+        <View style={styles.shareSheetHeaderTextWrap}>
+          <Text style={[styles.shareSheetTitle, { color: colors.text }]}>{title}</Text>
+          <Text style={[styles.shareSheetSubtitle, { color: colors.mutedText }]}>
+            {subtitle}
+          </Text>
+        </View>
+
+        <TouchableOpacity
+          style={[
+            styles.shareSheetCloseButton,
+            {
+              backgroundColor: withAlpha(colors.background, 'CC'),
+              borderColor: withAlpha(colors.border, 'B8'),
+            },
+          ]}
+          onPress={onClose}
+          activeOpacity={0.86}
+        >
+          <Ionicons name="close" size={18} color={colors.text} />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView
+        style={styles.methodologyScroll}
+        contentContainerStyle={styles.methodologyScrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        {sourceTags.length ? (
+          <View style={styles.methodologyGroup}>
+            <Text style={[styles.methodologyGroupTitle, { color: colors.text }]}>
+              {sourcesLabel}
+            </Text>
+
+            <View style={styles.methodologyTagsWrap}>
+              {sourceTags.map((tag) => (
+                <View
+                  key={tag}
+                  style={[
+                    styles.methodologyTag,
+                    {
+                      backgroundColor: withAlpha(colors.primary, '10'),
+                      borderColor: withAlpha(colors.primary, '2A'),
+                    },
+                  ]}
+                >
+                  <Text style={[styles.methodologyTagText, { color: colors.primary }]}>
+                    {tag}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        <View style={styles.methodologySectionsWrap}>
+          {sections.map((section) => (
+            <View
+              key={section.key}
+              style={[
+                styles.methodologySectionCard,
+                { backgroundColor: withAlpha(colors.background, 'D8') },
+              ]}
+            >
+              <Text style={[styles.methodologySectionTitle, { color: colors.text }]}>
+                {section.title}
+              </Text>
+              <Text
+                style={[styles.methodologySectionBody, { color: colors.mutedText }]}
+              >
+                {section.body}
+              </Text>
+            </View>
+          ))}
+        </View>
+      </ScrollView>
+
+      <TouchableOpacity
+        style={[
+          styles.shareCloseCta,
+          {
+            backgroundColor: withAlpha(colors.primary, '12'),
+            borderColor: withAlpha(colors.primary, '2C'),
+          },
+        ]}
+        onPress={onClose}
+        activeOpacity={0.88}
+      >
+        <Text style={[styles.shareCloseCtaText, { color: colors.primary }]}>
+          {closeLabel}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
 export const TextSection: React.FC<{
   title: string;
   text: string;
@@ -687,6 +966,47 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     opacity: 0.8,
   },
+  infoActionCard: {
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  infoActionIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoActionTextWrap: {
+    flex: 1,
+  },
+  infoActionTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  infoActionSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  evidenceCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 16,
+    marginTop: 18,
+    marginBottom: 24,
+    gap: 14,
+  },
+  evidenceSummary: {
+    fontSize: 13,
+    lineHeight: 20,
+    opacity: 0.84,
+  },
   scoreCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -756,6 +1076,51 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 21,
     opacity: 0.75,
+  },
+  breakdownList: {
+    gap: 12,
+    marginTop: 18,
+    marginBottom: 24,
+  },
+  breakdownCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 16,
+  },
+  breakdownCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 14,
+  },
+  breakdownHeadingWrap: {
+    flex: 1,
+  },
+  breakdownTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  breakdownHelper: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  breakdownScoreBadge: {
+    minWidth: 58,
+    height: 42,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+  },
+  breakdownScoreValue: {
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  breakdownDetail: {
+    marginTop: 14,
+    fontSize: 13,
+    lineHeight: 20,
+    opacity: 0.84,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -867,6 +1232,9 @@ const styles = StyleSheet.create({
     },
     elevation: 14,
   },
+  methodologySheetCard: {
+    maxHeight: '82%',
+  },
   shareSheetHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -957,6 +1325,51 @@ const styles = StyleSheet.create({
   shareCloseCtaText: {
     fontSize: 14,
     fontWeight: '900',
+  },
+  methodologyScroll: {
+    marginTop: 18,
+  },
+  methodologyScrollContent: {
+    paddingBottom: 8,
+  },
+  methodologyGroup: {
+    marginBottom: 18,
+  },
+  methodologyGroupTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  methodologyTagsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  methodologyTag: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  methodologyTagText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  methodologySectionsWrap: {
+    gap: 12,
+  },
+  methodologySectionCard: {
+    borderRadius: 20,
+    padding: 16,
+  },
+  methodologySectionTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  methodologySectionBody: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 20,
   },
   textBoxText: {
     fontSize: 14,

@@ -6,6 +6,7 @@ import {
   ScrollView,
   Share,
   StyleSheet,
+  Text,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -26,8 +27,22 @@ import { analyticsService } from '../../services/analytics.service';
 import { saveProductToHistory } from '../../services/db';
 import { entitlementService } from '../../services/entitlement.service';
 import { freeScanPolicyService } from '../../services/freeScanPolicy.service';
-import { enrichMedicineProductWithProspectus } from '../../services/titckMedicine.service';
+import {
+  getProductAlternativeSuggestions,
+  type ProductAlternativeSuggestion,
+} from '../../services/productAlternatives.service';
+import {
+  enrichMedicineProductWithIntendedUseSummary,
+  enrichMedicineProductWithProspectus,
+} from '../../services/titckMedicine.service';
 import { enqueueRemoteHistorySync } from '../../services/historyRemoteSync.service';
+import {
+  evaluateNutritionPreferences,
+  hasActiveNutritionPreferences,
+  type NutritionPreferenceEvaluation,
+  type NutritionPreferenceKey,
+} from '../../services/nutritionPreferences.service';
+import { usePreferenceStore } from '../../store/usePreferenceStore';
 import { useScanStore } from '../../store/useScanStore';
 import {
   analyzeProduct,
@@ -46,14 +61,19 @@ import {
   DetailErrorState,
   DetailHeroSection,
   DetailLoadingState,
+  EvidenceSection,
+  InfoActionCard,
   MetaChipsSection,
+  MethodologySheet,
   NoticeCard,
   ProductHeadingSection,
+  ScoreBreakdownSection,
   ScoreOverviewCard,
   ShareSheet,
   SummarySection,
   TextSection,
 } from './detail/DetailSections';
+import type { MethodologySectionItem, ScoreBreakdownItem } from './detail/DetailSections';
 import type { ProductRepositoryCacheTier, ProductRepositoryLookupMeta } from '../../types/productRepository';
 
 type DetailRoute = RouteProp<RootStackParamList, 'Detail'>;
@@ -72,6 +92,111 @@ type DetailLookupContext = {
 
 type RiskLevelKey = 'low' | 'medium' | 'high';
 type TranslateFn = (key: string, fallback: string) => string;
+
+const getNutritionPreferenceLabel = (
+  tt: TranslateFn,
+  key: NutritionPreferenceKey
+): string => {
+  switch (key) {
+    case 'glutenFree':
+      return tt('preference_gluten_free', 'Glutensiz');
+    case 'lactoseFree':
+      return tt('preference_lactose_free', 'Laktozsuz');
+    case 'palmOilFree':
+      return tt('preference_palm_oil_free', 'Palmiye yağı uyarısı');
+    case 'vegetarian':
+      return tt('preference_vegetarian', 'Vejetaryen');
+    case 'vegan':
+      return tt('preference_vegan', 'Vegan');
+    default:
+      return key;
+  }
+};
+
+const getNutritionStatusLabel = (
+  tt: TranslateFn,
+  status: NutritionPreferenceEvaluation['status']
+): string => {
+  switch (status) {
+    case 'compatible':
+      return tt('dietary_status_compatible', 'Uygun');
+    case 'warning':
+      return tt('dietary_status_warning', 'Dikkat');
+    default:
+      return tt('dietary_status_unknown', 'Belirsiz');
+  }
+};
+
+const getNutritionEvaluationDetail = (
+  tt: TranslateFn,
+  evaluation: NutritionPreferenceEvaluation
+): string => {
+  const matchedValue = String(evaluation.matchedValue || '').replace(/^en:/i, '').trim();
+
+  if (evaluation.status === 'compatible') {
+    switch (evaluation.evidence) {
+      case 'label':
+        return tt(
+          'dietary_detail_label_compatible',
+          'Ürün etiketinde bu tercih için uyumlu bir işaret bulunuyor.'
+        );
+      case 'analysis':
+        return tt(
+          'dietary_detail_analysis_compatible',
+          'İçerik analizi bu tercih için uyumlu bir sinyal veriyor.'
+        );
+      default:
+        return tt(
+          'dietary_detail_generic_compatible',
+          'Bu tercih için olumlu bir uyumluluk sinyali bulundu.'
+        );
+    }
+  }
+
+  if (evaluation.status === 'warning') {
+    switch (evaluation.evidence) {
+      case 'allergen':
+        return applyTemplate(
+          tt(
+            'dietary_detail_allergen_warning',
+            'Alerjen bilgisinde {{value}} sinyali bulundu.'
+          ),
+          { value: matchedValue || tt('unknown', 'bilinmeyen içerik') }
+        );
+      case 'trace':
+        return applyTemplate(
+          tt(
+            'dietary_detail_trace_warning',
+            'İz içeriğinde {{value}} sinyali bulundu.'
+          ),
+          { value: matchedValue || tt('unknown', 'bilinmeyen içerik') }
+        );
+      case 'analysis':
+        return tt(
+          'dietary_detail_analysis_warning',
+          'İçerik analizi bu tercih ile uyumsuz bir sinyal veriyor.'
+        );
+      case 'ingredient':
+        return applyTemplate(
+          tt(
+            'dietary_detail_ingredient_warning',
+            'İçerik metninde {{value}} ifadesi tespit edildi.'
+          ),
+          { value: matchedValue || tt('unknown', 'bilinmeyen içerik') }
+        );
+      default:
+        return tt(
+          'dietary_detail_generic_warning',
+          'Bu tercih için dikkat gerektiren bir sinyal tespit edildi.'
+        );
+    }
+  }
+
+  return tt(
+    'dietary_detail_unknown',
+    'Bu tercih için yeterli veri bulunamadı.'
+  );
+};
 
 const scoreToGrade = (score: number): 'A' | 'B' | 'C' | 'D' | 'E' => {
   if (score >= 85) return 'A';
@@ -137,6 +262,12 @@ const buildProductShareUrl = (
     : `https://world.openfoodfacts.org/product/${normalizedBarcode}`;
 };
 
+const NUTRI_SCORE_OVERVIEW_URL =
+  'https://yuka.io/wp-content/uploads/QR_Nutri-Score_EN.pdf';
+const WHO_FOPNL_GUIDANCE_URL =
+  'https://apps.who.int/iris/bitstream/handle/10665/336988/WHO-EURO-2020-1569-41320-56234-eng.pdf?sequence=1&isAllowed=y';
+const TITCK_PORTAL_URL = 'https://www.titck.gov.tr/kubkt';
+
 const applyTemplate = (
   template: string,
   replacements: Record<string, string | number>
@@ -182,6 +313,206 @@ const translateRiskCompound = (tt: TranslateFn, value?: string | null): string =
     default:
       return tt('risk_low_compound', 'Düşük risk');
   }
+};
+
+const getScoreAccentColor = (score: number | null): string => {
+  if (typeof score !== 'number') {
+    return '#8892A6';
+  }
+
+  if (score >= 85) return '#18B56A';
+  if (score >= 70) return '#74C947';
+  if (score >= 55) return '#E3B341';
+  if (score >= 35) return '#F08A24';
+  return '#D94B45';
+};
+
+const translateSignalKey = (tt: TranslateFn, key: 'nutrition' | 'processing' | 'additives'): string => {
+  switch (key) {
+    case 'nutrition':
+      return tt('food_signal_nutrition_title', 'Besinsel kalite');
+    case 'processing':
+      return tt('food_signal_processing_title', 'İşlenme seviyesi');
+    case 'additives':
+      return tt('food_signal_additives_title', 'Katkı riski');
+    default:
+      return key;
+  }
+};
+
+const translateNovaDetail = (tt: TranslateFn, novaGroup: number | null): string => {
+  switch (novaGroup) {
+    case 1:
+      return tt('food_signal_processing_nova_1', 'NOVA 1: İşlenmemiş veya çok az işlenmiş ürün.');
+    case 2:
+      return tt('food_signal_processing_nova_2', 'NOVA 2: Mutfak bileşeni veya sınırlı işlenmiş ürün.');
+    case 3:
+      return tt('food_signal_processing_nova_3', 'NOVA 3: İşlenmiş ürün.');
+    case 4:
+      return tt('food_signal_processing_nova_4', 'NOVA 4: Ultra işlenmiş ürün.');
+    default:
+      return tt(
+        'food_signal_processing_missing',
+        'İşlenme seviyesi verisi bulunmadığı için NOVA sinyali sınırlı.'
+      );
+  }
+};
+
+const getMedicineTherapeuticAreaSummary = (
+  tt: TranslateFn,
+  atcCode?: string | null
+): string | null => {
+  const normalizedCode = String(atcCode || '').trim().toUpperCase();
+
+  if (!normalizedCode) {
+    return null;
+  }
+
+  const groupMap: Record<string, string> = {
+    A: tt(
+      'medicine_atc_group_a',
+      'Sindirim sistemi ve metabolizma ile ilişkili bir tedavi grubunda yer alır.'
+    ),
+    B: tt(
+      'medicine_atc_group_b',
+      'Kan ve kan yapıcı organlarla ilişkili bir tedavi grubunda yer alır.'
+    ),
+    C: tt(
+      'medicine_atc_group_c',
+      'Kalp ve damar sistemiyle ilişkili bir tedavi grubunda yer alır.'
+    ),
+    D: tt(
+      'medicine_atc_group_d',
+      'Dermatolojik kullanım alanına yakın bir tedavi grubunda yer alır.'
+    ),
+    G: tt(
+      'medicine_atc_group_g',
+      'Genitoüriner sistem ve ilgili hormonal kullanım alanlarına yakın bir tedavi grubunda yer alır.'
+    ),
+    H: tt(
+      'medicine_atc_group_h',
+      'Sistemik hormonal preparatlar grubunda yer alır.'
+    ),
+    J: tt(
+      'medicine_atc_group_j',
+      'Sistemik anti-enfektif tedavi grubunda yer alır.'
+    ),
+    L: tt(
+      'medicine_atc_group_l',
+      'Onkoloji veya immün düzenleyici tedavi grubunda yer alır.'
+    ),
+    M: tt(
+      'medicine_atc_group_m',
+      'Kas-iskelet sistemiyle ilişkili bir tedavi grubunda yer alır.'
+    ),
+    N: tt(
+      'medicine_atc_group_n',
+      'Sinir sistemiyle ilişkili bir tedavi grubunda yer alır.'
+    ),
+    P: tt(
+      'medicine_atc_group_p',
+      'Antiparaziter veya benzeri koruyucu kullanım alanlarına yakın bir tedavi grubunda yer alır.'
+    ),
+    R: tt(
+      'medicine_atc_group_r',
+      'Solunum sistemiyle ilişkili bir tedavi grubunda yer alır.'
+    ),
+    S: tt(
+      'medicine_atc_group_s',
+      'Duyu organlarıyla ilişkili bir tedavi grubunda yer alır.'
+    ),
+    V: tt(
+      'medicine_atc_group_v',
+      'Çeşitli tıbbi kullanım alanlarını kapsayan bir tedavi grubunda yer alır.'
+    ),
+  };
+
+  const groupSummary = groupMap[normalizedCode.charAt(0)];
+
+  if (!groupSummary) {
+    return null;
+  }
+
+  return applyTemplate(
+    tt(
+      'medicine_atc_summary_template',
+      'ATC sınıfı {{code}}. {{summary}}'
+    ),
+    {
+      code: normalizedCode,
+      summary: groupSummary,
+    }
+  );
+};
+
+const buildAlternativeSubtitle = (
+  tt: TranslateFn,
+  productType: Product['type'],
+  suggestion: ProductAlternativeSuggestion
+): string => {
+  const parts: string[] = [];
+
+  if (suggestion.scoreDelta > 0) {
+    parts.push(
+      applyTemplate(
+        tt(
+          'alternative_reason_score_delta',
+          '+{{count}} puan daha yüksek analiz skoru sundu.'
+        ),
+        { count: suggestion.scoreDelta }
+      )
+    );
+  }
+
+  if (productType === 'food' && suggestion.novaImprovement > 0) {
+    parts.push(
+      tt(
+        'alternative_reason_food_processing',
+        'Daha düşük işlenme seviyesiyle öne çıkıyor.'
+      )
+    );
+  }
+
+  if (suggestion.additiveImprovement > 0) {
+    parts.push(
+      productType === 'food'
+        ? tt(
+            'alternative_reason_food_additives',
+            'Katkı sinyali daha sade görünüyor.'
+          )
+        : tt(
+            'alternative_reason_beauty_additives',
+            'İçerik sinyali daha sade görünüyor.'
+          )
+    );
+  }
+
+  if (!parts.length && suggestion.sharedTokenCount > 0) {
+    parts.push(
+      tt(
+        'alternative_reason_similarity',
+        'Benzer kullanım amacı için daha iyi bir seçenek olabilir.'
+      )
+    );
+  }
+
+  return parts.join(' ');
+};
+
+const buildAlternativeBadge = (
+  tt: TranslateFn,
+  suggestion: ProductAlternativeSuggestion,
+  index: number
+): string => {
+  if (index === 0) {
+    return tt('alternative_best_badge', 'En iyi eşleşme');
+  }
+
+  if (suggestion.candidateSource === 'favorite') {
+    return tt('alternative_favorite_badge', 'Favorilerden');
+  }
+
+  return tt('alternative_badge', 'Öneri');
 };
 
 const buildLocalizedAnalysisSummary = (params: {
@@ -309,6 +640,7 @@ const buildLocalizedRecommendation = (params: {
 
 export const DetailScreen: React.FC = () => {
   const { t } = useTranslation();
+  const nutritionPreferences = usePreferenceStore((state) => state.nutritionPreferences);
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<any>();
   const route = useRoute<DetailRoute>();
@@ -373,6 +705,7 @@ export const DetailScreen: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
   const [shareSheetVisible, setShareSheetVisible] = useState(false);
+  const [methodologySheetVisible, setMethodologySheetVisible] = useState(false);
   const [notFoundReason, setNotFoundReason] = useState<'not_found' | 'invalid_barcode' | 'unknown' | null>(null);
 
   const [localProduct, setLocalProduct] = useState<Product | null>(
@@ -573,6 +906,380 @@ export const DetailScreen: React.FC = () => {
     });
   }, [displayedAnalysis, displayedProduct?.type, hasApiScoreSignal, tt]);
 
+  const foodScoreBreakdownItems = useMemo<ScoreBreakdownItem[]>(() => {
+    if (!displayedAnalysis || displayedProduct?.type !== 'food') {
+      return [];
+    }
+
+    const normalizedGrade = String(displayedProduct?.grade || '')
+      .trim()
+      .toUpperCase();
+    const hasDisplayGrade = ['A', 'B', 'C', 'D', 'E'].includes(normalizedGrade);
+
+    const nutritionDetail =
+      typeof displayedAnalysis.nutritionScore === 'number'
+        ? hasDisplayGrade
+          ? applyTemplate(
+              tt(
+                'food_signal_nutrition_detail_with_grade',
+                'Resmi besin puanı ve derece sinyali birlikte değerlendirildi. Mevcut harf notu: {{grade}}.'
+              ),
+              { grade: normalizedGrade }
+            )
+          : tt(
+              'food_signal_nutrition_detail',
+              'Resmi besin puanı mevcut; toplam skora besinsel kalite sinyali eklendi.'
+            )
+        : tt(
+            'food_signal_nutrition_missing',
+            'Besin puanı verisi bulunmadığı için bu katman sınırlı kaldı.'
+          );
+
+    const additiveDetail =
+      typeof displayedAnalysis.additiveRiskScore === 'number'
+        ? displayedAnalysis.foundECodes.length > 0
+          ? applyTemplate(
+              tt(
+                'food_signal_additives_detail_detected',
+                '{{count}} katkı sinyali bulundu. Yüksek riskli bileşen sayısı: {{highCount}}.'
+              ),
+              {
+                count: displayedAnalysis.foundECodes.length,
+                highCount: displayedAnalysis.highRiskAdditiveCount,
+              }
+            )
+          : tt(
+              'food_signal_additives_detail_clean',
+              'İçerik ve katkı sinyallerinde belirgin bir risk işareti bulunmadı.'
+            )
+        : tt(
+            'food_signal_additives_missing',
+            'Katkı veya içerik verisi eksik olduğu için bu katman sınırlı kaldı.'
+          );
+
+    return [
+      {
+        key: 'nutrition',
+        title: tt('food_signal_nutrition_title', 'Besinsel kalite'),
+        helper: tt('food_signal_nutrition_helper', 'Nutri-Score / API besin sinyali'),
+        detail: nutritionDetail,
+        score: displayedAnalysis.nutritionScore,
+        accentColor: getScoreAccentColor(displayedAnalysis.nutritionScore),
+      },
+      {
+        key: 'processing',
+        title: tt('food_signal_processing_title', 'İşlenme seviyesi'),
+        helper: tt('food_signal_processing_helper', 'NOVA işlenme sınıfı'),
+        detail: translateNovaDetail(tt, displayedAnalysis.novaGroup),
+        score: displayedAnalysis.processingScore,
+        accentColor: getScoreAccentColor(displayedAnalysis.processingScore),
+      },
+      {
+        key: 'additives',
+        title: tt('food_signal_additives_title', 'Katkı riski'),
+        helper: tt('food_signal_additives_helper', 'E-kod ve içerik sinyali'),
+        detail: additiveDetail,
+        score: displayedAnalysis.additiveRiskScore,
+        accentColor: getScoreAccentColor(displayedAnalysis.additiveRiskScore),
+      },
+    ];
+  }, [
+    displayedAnalysis,
+    displayedProduct?.grade,
+    displayedProduct?.type,
+    tt,
+  ]);
+
+  const foodDataTransparencyText = useMemo(() => {
+    if (!displayedAnalysis || displayedProduct?.type !== 'food') {
+      return null;
+    }
+
+    if (displayedAnalysis.signalCoverage === 'full') {
+      return tt(
+        'food_signal_transparency_full',
+        'Bu skor besinsel kalite, işlenme seviyesi ve katkı sinyalleri birlikte değerlendirilerek üretildi.'
+      );
+    }
+
+    const missingLabels = displayedAnalysis.missingSignals
+      .map((key) => translateSignalKey(tt, key))
+      .join(', ');
+
+    if (displayedAnalysis.signalCoverage === 'partial') {
+      return applyTemplate(
+        tt(
+          'food_signal_transparency_partial',
+          'Bu skor mevcut verilerle üretildi. Eksik kalan sinyaller: {{missing}}.'
+        ),
+        { missing: missingLabels }
+      );
+    }
+
+    return applyTemplate(
+      tt(
+        'food_signal_transparency_limited',
+        'Bu ürün için veri sınırlı. Skor yalnızca eldeki sinyallerle üretildi; eksik alanlar: {{missing}}.'
+      ),
+      { missing: missingLabels || tt('unknown', 'Bilinmiyor') }
+    );
+  }, [displayedAnalysis, displayedProduct?.type, tt]);
+
+  const methodologySignalLabels = useMemo(() => {
+    if (!displayedProduct || !displayedAnalysis || displayedProduct.type === 'medicine') {
+      return [];
+    }
+
+    const labels: string[] = [];
+    const normalizedGrade = String(displayedProduct.grade || '')
+      .trim()
+      .toUpperCase();
+
+    if (typeof displayedProduct.score === 'number') {
+      labels.push(tt('methodology_signal_api_score', 'API skoru'));
+    }
+
+    if (['A', 'B', 'C', 'D', 'E'].includes(normalizedGrade)) {
+      labels.push(tt('methodology_signal_grade', 'ürün derecesi'));
+    }
+
+    if (displayedProduct.type === 'food' && displayedAnalysis.novaGroup) {
+      labels.push(tt('methodology_signal_nova', 'NOVA sınıfı'));
+    }
+
+    if (displayedProduct.ingredients_text?.trim()) {
+      labels.push(tt('ingredients', 'İçerik'));
+    }
+
+    if (displayedAnalysis.foundECodes.length > 0) {
+      labels.push(tt('methodology_signal_additive_matches', 'eşleşen katkı maddeleri'));
+    }
+
+    if (displayedProduct.type === 'beauty' && displayedProduct.usage_instructions?.trim()) {
+      labels.push(tt('methodology_signal_usage', 'kullanım bilgisi'));
+    }
+
+    return labels;
+  }, [displayedAnalysis, displayedProduct, tt]);
+
+  const methodologySourceTags = useMemo(() => {
+    if (!displayedProduct || displayedProduct.type === 'medicine') {
+      return [];
+    }
+
+    if (displayedProduct.type === 'food') {
+      return [
+        tt('source_tag_community', 'Topluluk veritabanı'),
+        tt('source_tag_processing_model', 'Besin / NOVA modeli'),
+        tt('source_tag_ingredient_scan', 'İçerik taraması'),
+      ];
+    }
+
+    return [
+      tt('source_tag_community', 'Topluluk veritabanı'),
+      tt('source_tag_ingredient_scan', 'İçerik taraması'),
+      tt('source_tag_precautionary', 'İhtiyat ilkesi'),
+    ];
+  }, [displayedProduct, tt]);
+
+  const methodologySections = useMemo<MethodologySectionItem[]>(() => {
+    if (!displayedProduct || !displayedAnalysis || displayedProduct.type === 'medicine') {
+      return [];
+    }
+
+    const signalsText = methodologySignalLabels.length
+      ? applyTemplate(
+          tt(
+            'methodology_signals_available',
+            'Bu ürün için şu sinyaller kullanıldı: {{signals}}.'
+          ),
+          { signals: methodologySignalLabels.join(', ') }
+        )
+      : tt(
+          'methodology_signals_missing',
+          'Bu ürün için yalnızca temel kayıt bilgileri mevcut; sinyal verisi sınırlı.'
+        );
+
+    if (displayedProduct.type === 'food') {
+      const missingLabels = displayedAnalysis.missingSignals
+        .map((key) => translateSignalKey(tt, key))
+        .join(', ');
+
+      const coverageBody =
+        displayedAnalysis.signalCoverage === 'full'
+          ? tt(
+              'methodology_coverage_full',
+              'Üç sinyal de mevcut. Genel skor, besinsel kalite, işlenme seviyesi ve katkı riskinin birlikte yorumlanmasıyla oluştu.'
+            )
+          : displayedAnalysis.signalCoverage === 'partial'
+            ? applyTemplate(
+                tt(
+                  'methodology_coverage_partial',
+                  'Bazı sinyaller eksik: {{missing}}. Genel skor yalnızca eldeki verilerle üretildi.'
+                ),
+                { missing: missingLabels }
+              )
+            : applyTemplate(
+                tt(
+                  'methodology_coverage_limited',
+                  'Veri sınırlı: {{missing}}. Bu sonuç yönlendirici bir sinyal olarak görülmeli.'
+                ),
+                { missing: missingLabels || tt('unknown', 'Bilinmiyor') }
+              );
+
+      return [
+        {
+          key: 'how',
+          title: tt('score_methodology_section_how', 'Skor nasıl oluştu?'),
+          body: tt(
+            'methodology_food_how_body',
+            'Gıda skoru; resmi besin puanı, NOVA işlenme seviyesi ve içerikteki katkı sinyallerinin birlikte yorumlanmasıyla oluşur.'
+          ),
+        },
+        {
+          key: 'signals',
+          title: tt('score_methodology_section_signals', 'Kullanılan sinyaller'),
+          body: signalsText,
+        },
+        {
+          key: 'coverage',
+          title: tt('score_methodology_section_coverage', 'Veri kapsamı'),
+          body: coverageBody,
+        },
+      ];
+    }
+
+    const beautyMissingParts: string[] = [];
+
+    if (!displayedProduct.ingredients_text?.trim()) {
+      beautyMissingParts.push(tt('ingredients', 'İçerik'));
+    }
+
+    if (
+      typeof displayedProduct.score !== 'number' &&
+      !String(displayedProduct.grade || '').trim()
+    ) {
+      beautyMissingParts.push(tt('methodology_signal_api_score', 'API skoru'));
+    }
+
+    if (!displayedProduct.usage_instructions?.trim()) {
+      beautyMissingParts.push(tt('methodology_signal_usage', 'kullanım bilgisi'));
+    }
+
+    const beautyLimitsBody = beautyMissingParts.length
+      ? applyTemplate(
+          tt(
+            'methodology_beauty_limits_missing',
+            'Bazı kozmetik sinyalleri eksik: {{missing}}. Bu yorum ihtiyatlı bir özet olarak görülmeli.'
+          ),
+          { missing: beautyMissingParts.join(', ') }
+        )
+      : tt(
+          'methodology_beauty_limits_full',
+          'Temel kozmetik sinyalleri mevcut. Yorum, içerik verisi ve mevcut kaynak kaydıyla birlikte okunmalıdır.'
+        );
+
+    return [
+      {
+        key: 'how',
+        title: tt('score_methodology_section_how', 'Skor nasıl oluştu?'),
+        body: tt(
+          'methodology_beauty_how_body',
+          'Kozmetik yorumu; mevcut kaynak skoru, içerik metni ve tespit edilen bileşen sinyallerinin birlikte değerlendirilmesiyle oluşur.'
+        ),
+      },
+      {
+        key: 'signals',
+        title: tt('score_methodology_section_signals', 'Kullanılan sinyaller'),
+        body: signalsText,
+      },
+      {
+        key: 'limits',
+        title: tt('score_methodology_section_limits', 'Yorum sınırları'),
+        body: beautyLimitsBody,
+      },
+    ];
+  }, [
+    displayedAnalysis,
+    displayedProduct,
+    methodologySignalLabels,
+    tt,
+  ]);
+
+  const beautyMethodologyText = useMemo(() => {
+    if (!displayedProduct || displayedProduct.type !== 'beauty') {
+      return null;
+    }
+
+    const hasIngredientSignal = Boolean(displayedProduct.ingredients_text?.trim());
+    const hasSourceSignal =
+      typeof displayedProduct.score === 'number' || Boolean(displayedProduct.grade?.trim());
+
+    if (hasIngredientSignal && hasSourceSignal) {
+      return tt(
+        'beauty_methodology_text_full',
+        'Bu kozmetik yorumu; mevcut kaynak skoru, içerik metni ve kullanım bağlamı birlikte okunarak üretilir. Sonuç tıbbi tanı vermez, ihtiyatlı bir kullanıcı özetidir.'
+      );
+    }
+
+    return tt(
+      'beauty_methodology_text_limited',
+      'Bu kozmetik yorumunda veri sınırlı olabilir. Mevcut kayıt ve içerik sinyalleri üzerinden ihtiyatlı bir özet sunulur.'
+    );
+  }, [displayedProduct, tt]);
+
+  const scientificEvidenceSummary = useMemo(() => {
+    if (!displayedProduct) {
+      return '';
+    }
+
+    if (displayedProduct.type === 'medicine') {
+      return tt(
+        'scientific_basis_medicine_summary',
+        'Bu kayıt resmi TITCK ilaç kataloğu ve varsa prospektüs/KÜB belgeleri üzerinden çözümlendi. İlaç değerlendirmesi topluluk yorumu değil, resmi kayıt zincirine dayanır.'
+      );
+    }
+
+    if (displayedProduct.type === 'beauty') {
+      return tt(
+        'scientific_basis_beauty_summary',
+        'Kozmetik yorumu; ürün kaydı, içerik metni ve tespit edilen içerik sinyalleri birlikte okunarak oluşturulur. Bu yüzey tıbbi karar yerine ihtiyatlı kullanıcı farkındalığı sağlar.'
+      );
+    }
+
+    return tt(
+      'scientific_basis_food_summary',
+      'Gıda yorumu; ürünün topluluk veri kaydı, resmi besin puanı alanları, NOVA işlenme seviyesi ve içerik taramasından gelen katkı sinyalleri birlikte değerlendirilerek oluşturulur.'
+    );
+  }, [displayedProduct, tt]);
+
+  const scientificEvidenceTags = useMemo(() => {
+    if (!displayedProduct) {
+      return [];
+    }
+
+    if (displayedProduct.type === 'medicine') {
+      return [
+        tt('scientific_tag_official_record', 'Resmi kayıt'),
+        tt('scientific_tag_regulatory_document', 'Düzenleyici belge'),
+      ];
+    }
+
+    if (displayedProduct.type === 'beauty') {
+      return [
+        tt('source_tag_community', 'Topluluk veritabanı'),
+        tt('source_tag_ingredient_scan', 'İçerik taraması'),
+        tt('source_tag_precautionary', 'İhtiyat ilkesi'),
+      ];
+    }
+
+    return [
+      tt('source_tag_community', 'Topluluk veritabanı'),
+      tt('source_tag_processing_model', 'Besin / NOVA modeli'),
+      tt('source_tag_ingredient_scan', 'İçerik taraması'),
+    ];
+  }, [displayedProduct, tt]);
+
   const familyAlerts = useMemo(() => {
     if (!displayedProduct || !displayedAnalysis) return [];
 
@@ -639,6 +1346,50 @@ export const DetailScreen: React.FC = () => {
     if (!displayedAnalysis || displayedProduct?.type === 'medicine') return false;
     return displayedAnalysis.score < 75;
   }, [displayedAnalysis, displayedProduct?.type]);
+
+  const nutritionPreferenceEvaluations = useMemo(() => {
+    if (
+      !displayedProduct ||
+      displayedProduct.type !== 'food' ||
+      !hasActiveNutritionPreferences(nutritionPreferences)
+    ) {
+      return [];
+    }
+
+    return evaluateNutritionPreferences(displayedProduct, nutritionPreferences);
+  }, [displayedProduct, nutritionPreferences]);
+
+  const nutritionSuitabilityText = useMemo(() => {
+    if (!nutritionPreferenceEvaluations.length) {
+      return null;
+    }
+
+    return nutritionPreferenceEvaluations
+      .map((item) => {
+        return `${getNutritionPreferenceLabel(tt, item.key)}: ${getNutritionStatusLabel(
+          tt,
+          item.status
+        )} — ${getNutritionEvaluationDetail(tt, item)}`;
+      })
+      .join('\n');
+  }, [nutritionPreferenceEvaluations, tt]);
+
+  const alternativeSuggestions = useMemo(() => {
+    if (!displayedProduct || !displayedAnalysis || displayedProduct.type === 'medicine') {
+      return [];
+    }
+
+    if (displayedAnalysis.score >= 75) {
+      return [];
+    }
+
+    return getProductAlternativeSuggestions({
+      product: displayedProduct,
+      analysis: displayedAnalysis,
+      limit: 3,
+      nutritionPreferences,
+    });
+  }, [displayedAnalysis, displayedProduct, nutritionPreferences]);
 
   const productImageUri = imageError
     ? 'https://via.placeholder.com/400?text=No+Image'
@@ -800,6 +1551,85 @@ export const DetailScreen: React.FC = () => {
     []
   );
 
+  const scientificSourceItems = useMemo(() => {
+    if (!displayedProduct) {
+      return [];
+    }
+
+    if (displayedProduct.type === 'medicine') {
+      return [
+        {
+          key: 'titck-portal',
+          icon: 'library-outline' as const,
+          label: tt('scientific_link_titck_portal', 'TITCK KÜB/KT Portalı'),
+          helper: tt(
+            'scientific_link_titck_portal_helper',
+            'Resmi ilaç kayıt ve belge arama ekranını açar.'
+          ),
+          onPress: () => {
+            void openDocumentUrl(TITCK_PORTAL_URL);
+          },
+        },
+      ];
+    }
+
+    if (displayedProduct.type === 'beauty') {
+      return [
+        {
+          key: 'beauty-record',
+          icon: 'open-outline' as const,
+          label: tt('scientific_link_product_record', 'Ürün Kaydını Aç'),
+          helper: tt(
+            'scientific_link_beauty_record_helper',
+            'Open Beauty Facts ürün kaydını uygulama içi tarayıcıda açar.'
+          ),
+          onPress: () => {
+            void openDocumentUrl(shareProductUrl);
+          },
+        },
+      ];
+    }
+
+    return [
+      {
+        key: 'food-record',
+        icon: 'open-outline' as const,
+        label: tt('scientific_link_product_record', 'Ürün Kaydını Aç'),
+        helper: tt(
+          'scientific_link_food_record_helper',
+          'Open Food Facts ürün kaydını uygulama içi tarayıcıda açar.'
+        ),
+        onPress: () => {
+          void openDocumentUrl(shareProductUrl);
+        },
+      },
+      {
+        key: 'nutri-score',
+        icon: 'reader-outline' as const,
+        label: tt('scientific_link_nutri_score', 'Nutri-Score Özeti'),
+        helper: tt(
+          'scientific_link_nutri_score_helper',
+          'Nutri-Score değerlendirme mantığını özetleyen referans PDF dosyasını açar.'
+        ),
+        onPress: () => {
+          void openDocumentUrl(NUTRI_SCORE_OVERVIEW_URL);
+        },
+      },
+      {
+        key: 'who-guidance',
+        icon: 'globe-outline' as const,
+        label: tt('scientific_link_who_guidance', 'WHO Etiketleme Rehberi'),
+        helper: tt(
+          'scientific_link_who_guidance_helper',
+          'Ambalaj önü beslenme etiketlemesine ilişkin WHO rehberini açar.'
+        ),
+        onPress: () => {
+          void openDocumentUrl(WHO_FOPNL_GUIDANCE_URL);
+        },
+      },
+    ];
+  }, [displayedProduct, openDocumentUrl, shareProductUrl, tt]);
+
   const medicineDocumentItems = useMemo(() => {
     if (displayedProduct?.type !== 'medicine') {
       return [];
@@ -846,12 +1676,28 @@ export const DetailScreen: React.FC = () => {
     return items;
   }, [displayedProduct, openDocumentUrl, tt]);
 
+  const medicineTherapeuticAreaSummary = useMemo(() => {
+    if (displayedProduct?.type !== 'medicine') {
+      return null;
+    }
+
+    return getMedicineTherapeuticAreaSummary(tt, displayedProduct.atc_code);
+  }, [displayedProduct, tt]);
+
   const openShareSheet = useCallback(() => {
     setShareSheetVisible(true);
   }, []);
 
   const closeShareSheet = useCallback(() => {
     setShareSheetVisible(false);
+  }, []);
+
+  const openMethodologySheet = useCallback(() => {
+    setMethodologySheetVisible(true);
+  }, []);
+
+  const closeMethodologySheet = useCallback(() => {
+    setMethodologySheetVisible(false);
   }, []);
 
   const openLinkOrFallback = useCallback(
@@ -1080,6 +1926,50 @@ export const DetailScreen: React.FC = () => {
     };
   }, [
     displayedProduct,
+    displayedProduct?.prospectus_pdf_url,
+    displayedProduct?.summary_pdf_url,
+    displayedProduct?.type,
+  ]);
+
+  useEffect(() => {
+    if (
+      !displayedProduct ||
+      displayedProduct.type !== 'medicine' ||
+      displayedProduct.intended_use_summary ||
+      (!displayedProduct.summary_pdf_url && !displayedProduct.prospectus_pdf_url)
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const enrichIntendedUse = async () => {
+      const enrichedProduct = await enrichMedicineProductWithIntendedUseSummary(displayedProduct);
+
+      if (cancelled || !enrichedProduct.intended_use_summary) {
+        return;
+      }
+
+      setLocalProduct((current) => {
+        if (!current || current.barcode !== enrichedProduct.barcode) {
+          return current;
+        }
+
+        return {
+          ...current,
+          ...enrichedProduct,
+        };
+      });
+    };
+
+    void enrichIntendedUse();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    displayedProduct,
+    displayedProduct?.intended_use_summary,
     displayedProduct?.prospectus_pdf_url,
     displayedProduct?.summary_pdf_url,
     displayedProduct?.type,
@@ -1497,32 +2387,77 @@ export const DetailScreen: React.FC = () => {
             />
           ) : null}
 
+          {displayedProduct.type === 'food' ? (
+            <>
+              <ScoreBreakdownSection
+                title={tt('food_signal_breakdown_title', 'Skorun Bileşenleri')}
+                items={foodScoreBreakdownItems}
+                colors={colors}
+              />
+
+              {foodDataTransparencyText ? (
+                <NoticeCard text={foodDataTransparencyText} colors={colors} />
+              ) : null}
+            </>
+          ) : null}
+
+          {!isMedicineProduct ? (
+            <InfoActionCard
+              title={tt('score_methodology_action', 'Bu puan nasıl oluştu?')}
+              subtitle={tt(
+                'score_methodology_action_subtitle',
+                'Kullanılan sinyalleri, veri kapsamını ve yorum mantığını açın.'
+              )}
+              onPress={openMethodologySheet}
+              colors={colors}
+            />
+          ) : null}
+
           <FamilyHealthAlert items={familyAlerts} style={{ marginBottom: 24 }} />
 
-          {showAlternativeCard ? (
-            <AlternativeCard
-              title={
-                displayedProduct.type === 'food'
-                  ? tt('alternative_food_title', 'Daha sade içerikli benzer ürünleri tercih edebilirsiniz')
-                  : tt('alternative_beauty_title', 'Daha düşük riskli kozmetik alternatifleri değerlendirilebilir')
-              }
-              brand={tt('alternative_badge', 'Öneri')}
-              subtitle={
-                displayedProduct.type === 'food'
+          {nutritionSuitabilityText ? (
+            <TextSection
+              title={tt('dietary_fit_title', 'Size Uygunluk')}
+              text={nutritionSuitabilityText}
+              colors={colors}
+            />
+          ) : null}
+
+          {showAlternativeCard && alternativeSuggestions.length ? (
+            <View style={styles.alternativeSection}>
+              <Text style={[styles.alternativeSectionTitle, { color: colors.text }]}>
+                {displayedProduct.type === 'food'
                   ? tt(
-                      'alternative_food_subtitle',
-                      'Katkı maddesi daha az olan veya daha yüksek analiz skoruna sahip ürünlere bakın.'
+                      'alternative_food_title',
+                      'Daha sade içerikli benzer ürünleri tercih edebilirsiniz'
                     )
                   : tt(
-                      'alternative_beauty_subtitle',
-                      'İçerik listesi daha sade, kullanım amacı benzer alternatifler daha uygun olabilir.'
-                    )
-              }
-              badgeText={tt('alternative_badge', 'Öneri')}
-              score={displayScore}
-              grade={displayGrade}
-              style={{ marginBottom: 28 }}
-            />
+                      'alternative_beauty_title',
+                      'Daha düşük riskli kozmetik alternatifleri değerlendirilebilir'
+                    )}
+              </Text>
+              {alternativeSuggestions.map((item, index) => (
+                <AlternativeCard
+                  key={item.product.barcode}
+                  title={item.product.name || tt('unnamed_product', 'İsimsiz Ürün')}
+                  brand={item.product.brand || tt('unknown_brand', 'Bilinmeyen Marka')}
+                  subtitle={buildAlternativeSubtitle(tt, displayedProduct.type, item)}
+                  imageUrl={item.product.image_url}
+                  badgeText={buildAlternativeBadge(tt, item, index)}
+                  score={item.analysis.score}
+                  grade={item.product.grade}
+                  onPress={() => {
+                    navigation.push('Detail', {
+                      barcode: item.product.barcode,
+                      entrySource: 'home',
+                      prefetchedProduct: item.product,
+                      lookupMode:
+                        item.product.type === 'medicine' ? 'medicine' : undefined,
+                    });
+                  }}
+                />
+              ))}
+            </View>
           ) : null}
 
           <SummarySection
@@ -1535,8 +2470,29 @@ export const DetailScreen: React.FC = () => {
             colors={colors}
           />
 
+          <EvidenceSection
+            title={tt('scientific_basis_title', 'Bilimsel Dayanak')}
+            summary={scientificEvidenceSummary}
+            tags={scientificEvidenceTags}
+            colors={colors}
+          />
+
+          <ActionLinksSection
+            title={tt('scientific_sources_title', 'Kaynaklar')}
+            items={scientificSourceItems}
+            colors={colors}
+          />
+
           {isMedicineProduct ? (
             <>
+              {displayedProduct.intended_use_summary ? (
+                <TextSection
+                  title={tt('medicine_intended_use_title', 'Ne İçin Kullanılır?')}
+                  text={displayedProduct.intended_use_summary}
+                  colors={colors}
+                />
+              ) : null}
+
               <TextSection
                 title={tt('medicine_active_ingredients', 'Etken Maddeler')}
                 text={
@@ -1624,8 +2580,24 @@ export const DetailScreen: React.FC = () => {
                   colors={colors}
                 />
               ) : null}
+
+              {displayedProduct.type === 'beauty' && beautyMethodologyText ? (
+                <TextSection
+                  title={tt('beauty_methodology_title', 'İçerik Risk Metodolojisi')}
+                  text={beautyMethodologyText}
+                  colors={colors}
+                />
+              ) : null}
             </>
           )}
+
+          {displayedProduct.type === 'medicine' && medicineTherapeuticAreaSummary ? (
+            <TextSection
+              title={tt('medicine_therapeutic_area', 'Genel Kullanım Alanı')}
+              text={medicineTherapeuticAreaSummary}
+              colors={colors}
+            />
+          ) : null}
         </View>
       </ScrollView>
 
@@ -1637,6 +2609,45 @@ export const DetailScreen: React.FC = () => {
       >
         <AdBanner placement="detail_footer" />
       </View>
+
+      <Modal
+        visible={methodologySheetVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={closeMethodologySheet}
+      >
+        <View style={styles.shareOverlay}>
+          <TouchableOpacity
+            style={styles.shareOverlayBackdrop}
+            activeOpacity={1}
+            onPress={closeMethodologySheet}
+          />
+
+          <View style={styles.shareSheetWrap}>
+            <MethodologySheet
+              title={tt('score_methodology_title', 'Bu puan nasıl oluştu?')}
+              subtitle={
+                displayedProduct?.type === 'beauty'
+                  ? tt(
+                      'score_methodology_subtitle_beauty',
+                      'Kozmetik yorumu hangi sinyallerle üretildiğini ve hangi alanların eksik olduğunu burada görebilirsiniz.'
+                    )
+                  : tt(
+                      'score_methodology_subtitle_food',
+                      'Gıda skorunun hangi sinyallerle oluştuğunu ve verinin ne kadar güçlü olduğunu burada görebilirsiniz.'
+                    )
+              }
+              sourcesLabel={tt('score_methodology_sources', 'Kaynak etiketleri')}
+              sourceTags={methodologySourceTags}
+              sections={methodologySections}
+              closeLabel={tt('score_methodology_close', 'Kapat')}
+              onClose={closeMethodologySheet}
+              colors={colors}
+            />
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={shareSheetVisible}
@@ -1705,5 +2716,14 @@ const styles = StyleSheet.create({
     maxWidth: 460,
     alignSelf: 'center',
     marginBottom: 8,
+  },
+  alternativeSection: {
+    gap: 12,
+    marginBottom: 28,
+  },
+  alternativeSectionTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    lineHeight: 24,
   },
 });

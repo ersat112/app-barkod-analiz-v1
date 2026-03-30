@@ -1,4 +1,4 @@
-import { APP_RUNTIME, getEnvString, hasEnvOverride } from './appRuntime';
+import { APP_RUNTIME, getEnvString } from './appRuntime';
 
 export type RevenueCatRuntimeSource = 'env_override' | 'fallback';
 export type RevenueCatRuntimePlatform = 'ios' | 'android' | 'web';
@@ -21,16 +21,24 @@ export type RevenueCatRuntimeDiagnosticsSnapshot = {
 const FALLBACK_REVENUECAT_CONFIG = Object.freeze({
   iosApiKey: '',
   androidApiKey: '',
-  entitlementIdentifier: 'premium',
-  offeringIdentifier: 'default',
+  entitlementIdentifier: '',
+  offeringIdentifier: '',
 });
 
-const hasRuntimeOverrides = [
+const ENV = process.env as Record<string, string | undefined>;
+
+const RUNTIME_ENV_KEYS = [
   'EXPO_PUBLIC_REVENUECAT_IOS_API_KEY',
   'EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY',
   'EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID',
   'EXPO_PUBLIC_REVENUECAT_OFFERING_ID',
-].some((key) => hasEnvOverride(key));
+] as const;
+
+function hasRuntimeOverride(key: (typeof RUNTIME_ENV_KEYS)[number]): boolean {
+  return typeof ENV[key] === 'string' && ENV[key]!.trim().length > 0;
+}
+
+const hasRuntimeOverrides = RUNTIME_ENV_KEYS.some((key) => hasRuntimeOverride(key));
 
 const platform: RevenueCatRuntimePlatform =
   APP_RUNTIME.platform === 'ios' || APP_RUNTIME.platform === 'android'
@@ -57,6 +65,9 @@ const offeringIdentifier = getEnvString(
   FALLBACK_REVENUECAT_CONFIG.offeringIdentifier
 ).trim();
 
+const supportsNativePurchases =
+  APP_RUNTIME.isNativeBuild && (platform === 'ios' || platform === 'android');
+
 const activePlatformApiKey =
   platform === 'ios'
     ? iosApiKey
@@ -74,29 +85,31 @@ if (platform === 'android' && !androidApiKey) {
   missingKeys.push('EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY');
 }
 
-if (!entitlementIdentifier) {
+if (platform !== 'web' && !entitlementIdentifier) {
   missingKeys.push('EXPO_PUBLIC_REVENUECAT_ENTITLEMENT_ID');
 }
 
-if (!offeringIdentifier) {
+if (platform !== 'web' && !offeringIdentifier) {
   missingKeys.push('EXPO_PUBLIC_REVENUECAT_OFFERING_ID');
 }
+
+const isReady =
+  supportsNativePurchases &&
+  Boolean(activePlatformApiKey) &&
+  Boolean(entitlementIdentifier) &&
+  Boolean(offeringIdentifier);
 
 export const REVENUECAT_RUNTIME = Object.freeze({
   source: (hasRuntimeOverrides ? 'env_override' : 'fallback') as RevenueCatRuntimeSource,
   platform,
   isExpoGo: APP_RUNTIME.isExpoGo,
-  supportsNativePurchases: APP_RUNTIME.isNativeBuild && platform !== 'web',
+  supportsNativePurchases,
   iosApiKey,
   androidApiKey,
   activePlatformApiKey,
   entitlementIdentifier,
   offeringIdentifier,
-  isReady:
-    platform !== 'web' &&
-    Boolean(activePlatformApiKey) &&
-    Boolean(entitlementIdentifier) &&
-    Boolean(offeringIdentifier),
+  isReady,
   missingKeys,
 });
 

@@ -1,5 +1,5 @@
 import { CACHE_POLICY, PRODUCT_CACHE_SCHEMA_VERSION } from '../../config/features';
-import type { Product } from '../../utils/analysis';
+import type { Product, ProductType } from '../../utils/analysis';
 import { TABLES, getDatabase, safeNumber, safeText } from './core';
 import { initDatabase } from './migrations';
 import type { ProductCacheRecord, ProductCacheStatus, ProductCacheUpsertInput } from './types';
@@ -154,6 +154,51 @@ export const getLocalProductCacheHit = (
     fetchedAt,
     expiresAt,
   };
+};
+
+export const getCachedProductsByType = (
+  type: ProductType,
+  limit = 80
+): Product[] => {
+  try {
+    initDatabase();
+
+    const safeLimit =
+      typeof limit === 'number' && Number.isFinite(limit) && limit > 0
+        ? Math.min(Math.round(limit), 200)
+        : 80;
+
+    const rows = db.getAllSync<{
+      barcode: string;
+      payload_json: string | null;
+    }>(
+      `SELECT barcode, payload_json
+       FROM ${TABLES.PRODUCT_CACHE}
+       WHERE cache_status = 'found'
+         AND product_type = ?
+       ORDER BY last_accessed_at DESC, fetched_at DESC
+       LIMIT ?`,
+      [type, safeLimit]
+    );
+
+    return rows
+      .map((row) => {
+        const product = parsePayload(row.payload_json);
+
+        if (!product) {
+          return null;
+        }
+
+        return {
+          ...product,
+          barcode: normalizeProductCacheBarcode(row.barcode),
+        };
+      })
+      .filter((product): product is Product => product !== null);
+  } catch (error) {
+    console.error('Cached products by type read error:', error);
+    return [];
+  }
 };
 
 export const upsertProductCache = (input: ProductCacheUpsertInput): void => {
