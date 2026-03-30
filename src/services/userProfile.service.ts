@@ -3,14 +3,25 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 
 import { auth, db } from '../config/firebase';
 import {
+  LEGAL_DOCUMENT_VERSIONS,
+  LEGAL_VERSION_LABEL,
+  buildCurrentLegalAcceptance,
+} from '../config/legalRuntime';
+import {
   resolveCanonicalCity,
   resolveCanonicalDistrict,
 } from './locationData';
+import {
+  DEFAULT_NUTRITION_PREFERENCES,
+  type NutritionPreferences,
+} from './nutritionPreferences.service';
 import { entitlementService } from './entitlement.service';
 import { freeScanPolicyService } from './freeScanPolicy.service';
 import { monetizationPolicyService } from './monetizationPolicy.service';
 import type {
   AppUserProfile,
+  LegalAcceptanceSnapshot,
+  LegalDocumentVersionMap,
   UserMonetizationProjection,
   UserProfileInput,
 } from '../types/userProfile';
@@ -42,6 +53,78 @@ function normalizeEditableString(value?: string | null): string | undefined {
 
 function normalizeOptionalBoolean(value?: boolean | null): boolean | undefined {
   return typeof value === 'boolean' ? value : undefined;
+}
+
+function normalizeNutritionPreferences(input: unknown): NutritionPreferences | undefined {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+
+  const record = input as Record<string, unknown>;
+  const normalized: NutritionPreferences = {
+    ...DEFAULT_NUTRITION_PREFERENCES,
+  };
+
+  let hasAnyValue = false;
+
+  (Object.keys(DEFAULT_NUTRITION_PREFERENCES) as (keyof NutritionPreferences)[]).forEach((key) => {
+    if (typeof record[key] === 'boolean') {
+      normalized[key] = record[key] as boolean;
+      hasAnyValue = true;
+    }
+  });
+
+  return hasAnyValue ? normalized : undefined;
+}
+
+function normalizeLegalDocumentVersions(input: unknown): LegalDocumentVersionMap | undefined {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+
+  const record = input as Record<string, unknown>;
+  const normalized: LegalDocumentVersionMap = {
+    ...LEGAL_DOCUMENT_VERSIONS,
+  };
+  let hasAnyValue = false;
+
+  (Object.keys(LEGAL_DOCUMENT_VERSIONS) as (keyof LegalDocumentVersionMap)[]).forEach((key) => {
+    if (typeof record[key] === 'string' && record[key].trim()) {
+      normalized[key] = record[key].trim();
+      hasAnyValue = true;
+    }
+  });
+
+  return hasAnyValue ? normalized : undefined;
+}
+
+function normalizeLegalAcceptanceSnapshot(
+  input: unknown
+): LegalAcceptanceSnapshot | undefined {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+
+  const record = input as Record<string, unknown>;
+  const acceptedAt = normalizeOptionalString(record.acceptedAt as string | undefined);
+  const versionLabel =
+    normalizeOptionalString(record.versionLabel as string | undefined) ?? LEGAL_VERSION_LABEL;
+  const source = normalizeOptionalString(record.source as string | undefined) as
+    | LegalAcceptanceSnapshot['source']
+    | undefined;
+  const documents =
+    normalizeLegalDocumentVersions(record.documents) ?? LEGAL_DOCUMENT_VERSIONS;
+
+  if (!acceptedAt && !source) {
+    return undefined;
+  }
+
+  return {
+    acceptedAt,
+    versionLabel,
+    source,
+    documents,
+  };
 }
 
 function normalizeProviderIds(
@@ -135,6 +218,8 @@ function sanitizeUserProfileInput(input?: UserProfileInput): UserProfileInput {
     providerIds: normalizeProviderIds(input.providerIds),
     emailVerified: normalizeOptionalBoolean(input.emailVerified),
     kvkkAccepted: normalizeOptionalBoolean(input.kvkkAccepted),
+    legalAcceptance: normalizeLegalAcceptanceSnapshot(input.legalAcceptance),
+    nutritionPreferences: normalizeNutritionPreferences(input.nutritionPreferences),
     createdAt: normalizeOptionalString(input.createdAt),
     updatedAt: normalizeOptionalString(input.updatedAt),
     lastLoginAt: normalizeOptionalString(input.lastLoginAt),
@@ -160,6 +245,8 @@ function sanitizeEditableUserProfileInput(input?: UserProfileInput): UserProfile
     providerIds: normalizeProviderIds(input.providerIds),
     emailVerified: normalizeOptionalBoolean(input.emailVerified),
     kvkkAccepted: normalizeOptionalBoolean(input.kvkkAccepted),
+    legalAcceptance: normalizeLegalAcceptanceSnapshot(input.legalAcceptance),
+    nutritionPreferences: normalizeNutritionPreferences(input.nutritionPreferences),
     createdAt: normalizeEditableString(input.createdAt),
     updatedAt: normalizeEditableString(input.updatedAt),
     lastLoginAt: normalizeEditableString(input.lastLoginAt),
@@ -341,6 +428,8 @@ function compactUserProfile(input: UserProfileInput): AppUserProfile {
   assign('providerIds', input.providerIds);
   assign('emailVerified', input.emailVerified);
   assign('kvkkAccepted', input.kvkkAccepted);
+  assign('legalAcceptance', input.legalAcceptance);
+  assign('nutritionPreferences', input.nutritionPreferences);
   assign('createdAt', input.createdAt);
   assign('updatedAt', input.updatedAt);
   assign('lastLoginAt', input.lastLoginAt);
@@ -382,6 +471,8 @@ function normalizeStoredUserProfile(input: unknown): AppUserProfile | null {
       typeof record.emailVerified === 'boolean' ? record.emailVerified : undefined,
     kvkkAccepted:
       typeof record.kvkkAccepted === 'boolean' ? record.kvkkAccepted : undefined,
+    legalAcceptance: normalizeLegalAcceptanceSnapshot(record.legalAcceptance),
+    nutritionPreferences: normalizeNutritionPreferences(record.nutritionPreferences),
     createdAt: normalizeOptionalString(record.createdAt as string | undefined),
     updatedAt: normalizeOptionalString(record.updatedAt as string | undefined),
     lastLoginAt: normalizeOptionalString(record.lastLoginAt as string | undefined),
@@ -520,6 +611,15 @@ export async function ensureUserProfileDocument(
     emailVerified: user.emailVerified,
     kvkkAccepted:
       overrideProfile.kvkkAccepted ?? existingProfile?.kvkkAccepted ?? false,
+    legalAcceptance:
+      overrideProfile.legalAcceptance ??
+      existingProfile?.legalAcceptance ??
+      buildCurrentLegalAcceptance(
+        options?.trackLogin ? 'first_auth' : 'profile_sync',
+        now
+      ),
+    nutritionPreferences:
+      overrideProfile.nutritionPreferences ?? existingProfile?.nutritionPreferences,
     createdAt: existingProfile?.createdAt ?? now,
     updatedAt: now,
     lastSeenAt: now,
@@ -619,6 +719,9 @@ export async function updateCurrentUserProfile(input: {
     ]),
     emailVerified: currentUser.emailVerified,
     kvkkAccepted: existingProfile?.kvkkAccepted ?? false,
+    legalAcceptance:
+      existingProfile?.legalAcceptance ?? buildCurrentLegalAcceptance('profile_sync', now),
+    nutritionPreferences: existingProfile?.nutritionPreferences,
     createdAt: existingProfile?.createdAt ?? now,
     updatedAt: now,
     lastLoginAt: existingProfile?.lastLoginAt,
@@ -631,4 +734,72 @@ export async function updateCurrentUserProfile(input: {
   await setDoc(ref, mergedProfile, { merge: true });
 
   return mergedProfile;
+}
+
+export async function updateCurrentUserNutritionPreferences(
+  nutritionPreferences: NutritionPreferences
+): Promise<AppUserProfile | null> {
+  const currentUser = auth.currentUser;
+
+  if (!currentUser) {
+    return null;
+  }
+
+  const normalizedPreferences = normalizeNutritionPreferences(nutritionPreferences);
+  const existingProfile = await getUserProfile(currentUser.uid);
+  const now = new Date().toISOString();
+
+  const ref = doc(db, USERS_COLLECTION, currentUser.uid);
+
+  await setDoc(
+    ref,
+    compactUserProfile({
+      nutritionPreferences: normalizedPreferences,
+      updatedAt: now,
+      lastSeenAt: now,
+    }),
+    { merge: true }
+  );
+
+  return compactUserProfile({
+    ...(existingProfile ?? {}),
+    nutritionPreferences: normalizedPreferences,
+    updatedAt: now,
+    lastSeenAt: now,
+  });
+}
+
+export async function updateCurrentUserLegalAcceptance(
+  legalAcceptance: LegalAcceptanceSnapshot
+): Promise<AppUserProfile | null> {
+  const currentUser = auth.currentUser;
+
+  if (!currentUser) {
+    return null;
+  }
+
+  const normalizedAcceptance = normalizeLegalAcceptanceSnapshot(legalAcceptance);
+  const existingProfile = await getUserProfile(currentUser.uid);
+  const now = new Date().toISOString();
+
+  const ref = doc(db, USERS_COLLECTION, currentUser.uid);
+
+  await setDoc(
+    ref,
+    compactUserProfile({
+      kvkkAccepted: true,
+      legalAcceptance: normalizedAcceptance,
+      updatedAt: now,
+      lastSeenAt: now,
+    }),
+    { merge: true }
+  );
+
+  return compactUserProfile({
+    ...(existingProfile ?? {}),
+    kvkkAccepted: true,
+    legalAcceptance: normalizedAcceptance,
+    updatedAt: now,
+    lastSeenAt: now,
+  });
 }

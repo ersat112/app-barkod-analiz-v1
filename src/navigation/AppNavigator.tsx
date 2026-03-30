@@ -33,6 +33,9 @@ import { HistoryScreen } from '../screens/main/HistoryScreen';
 import { SettingsScreen } from '../screens/main/SettingsScreen';
 import { ECodeCatalogScreen } from '../screens/main/ECodeCatalogScreen';
 import { ProfileSettingsScreen } from '../screens/main/ProfileSettingsScreen';
+import { MethodologySourcesScreen } from '../screens/main/MethodologySourcesScreen';
+import { LegalDocumentScreen } from '../screens/main/LegalDocumentScreen';
+import { NutritionPreferencesScreen } from '../screens/main/NutritionPreferencesScreen';
 import { MissingProductScreen } from '../screens/main/MissingProductScreen';
 import { PaywallScreen } from '../screens/main/PaywallScreen';
 import type { PaywallEntrySource } from '../types/monetization';
@@ -56,6 +59,11 @@ export type RootStackParamList = {
     historyAlreadySaved?: boolean;
   };
   ECodeCatalog: undefined;
+  MethodologySources: undefined;
+  LegalDocument: {
+    documentKey: 'terms' | 'privacy' | 'medical' | 'premium' | 'independence';
+  };
+  NutritionPreferences: undefined;
   ProfileSettings: undefined;
   MissingProduct: { barcode: string };
   Paywall: { source?: PaywallEntrySource } | undefined;
@@ -331,6 +339,21 @@ const AppStack = () => (
     <Stack.Screen
       name="ECodeCatalog"
       component={ECodeCatalogScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="MethodologySources"
+      component={MethodologySourcesScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="LegalDocument"
+      component={LegalDocumentScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="NutritionPreferences"
+      component={NutritionPreferencesScreen}
       options={{ animation: 'slide_from_right' }}
     />
     <Stack.Screen

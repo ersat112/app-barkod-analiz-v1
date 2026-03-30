@@ -82,6 +82,70 @@ service cloud.firestore {
       return value == null || value is map;
     }
 
+    function isOptionalNutritionPreferencesMap(value) {
+      return value == null
+        || (
+          value is map
+          && value.keys().hasOnly([
+            'glutenFree',
+            'lactoseFree',
+            'palmOilFree',
+            'vegetarian',
+            'vegan'
+          ])
+          && isOptionalBoolean(value.glutenFree)
+          && isOptionalBoolean(value.lactoseFree)
+          && isOptionalBoolean(value.palmOilFree)
+          && isOptionalBoolean(value.vegetarian)
+          && isOptionalBoolean(value.vegan)
+        );
+    }
+
+    function isOptionalLegalAcceptanceMap(value) {
+      return value == null
+        || (
+          value is map
+          && value.keys().hasOnly([
+            'acceptedAt',
+            'versionLabel',
+            'source',
+            'documents'
+          ])
+          && isOptionalStringOrTimestamp(value.acceptedAt)
+          && isOptionalString(value.versionLabel)
+          && (
+            value.source == null
+            || (
+              value.source is string
+              && (
+                value.source == 'signup'
+                || value.source == 'first_auth'
+                || value.source == 'profile_sync'
+                || value.source == 'manual_refresh'
+              )
+            )
+          )
+          && (
+            value.documents == null
+            || (
+              value.documents is map
+              && value.documents.keys().hasOnly([
+                'terms',
+                'privacy',
+                'medical',
+                'premium',
+                'independence'
+              ])
+              && isOptionalString(value.documents.terms)
+              && isOptionalString(value.documents.privacy)
+              && isOptionalString(value.documents.medical)
+              && isOptionalString(value.documents.premium)
+              && isOptionalString(value.documents.independence)
+            )
+          )
+        );
+    }
+
     function isOptionalStringList(value) {
       return value == null || value is list;
     }
@@ -283,6 +347,8 @@ service cloud.firestore {
         && isOptionalStringList(request.resource.data.providerIds)
         && isOptionalBoolean(request.resource.data.emailVerified)
         && isOptionalBoolean(request.resource.data.kvkkAccepted)
+        && isOptionalLegalAcceptanceMap(request.resource.data.legalAcceptance)
+        && isOptionalNutritionPreferencesMap(request.resource.data.nutritionPreferences)
         && isOptionalMap(request.resource.data.monetization)
         && isOptionalStringOrTimestamp(request.resource.data.createdAt)
         && isOptionalStringOrTimestamp(request.resource.data.updatedAt)

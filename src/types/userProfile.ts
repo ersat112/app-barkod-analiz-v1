@@ -3,6 +3,22 @@ import type {
   MonetizationPlan,
   MonetizationPolicySource,
 } from './monetization';
+import type { NutritionPreferences } from '../services/nutritionPreferences.service';
+
+export type LegalDocumentVersionMap = {
+  terms: string;
+  privacy: string;
+  medical: string;
+  premium: string;
+  independence: string;
+};
+
+export type LegalAcceptanceSnapshot = {
+  acceptedAt?: string;
+  versionLabel?: string;
+  source?: 'signup' | 'first_auth' | 'profile_sync' | 'manual_refresh';
+  documents?: LegalDocumentVersionMap;
+};
 
 export type UserMonetizationProjection = {
   projectionVersion?: number;
@@ -45,11 +61,13 @@ export type AppUserProfile = {
   providerIds?: string[];
   emailVerified?: boolean;
   kvkkAccepted?: boolean;
+  legalAcceptance?: LegalAcceptanceSnapshot;
   createdAt?: string;
   updatedAt?: string;
   lastLoginAt?: string;
   lastSeenAt?: string;
   monetization?: UserMonetizationProjection;
+  nutritionPreferences?: NutritionPreferences;
 };
 
 export type UserProfileInput = Partial<AppUserProfile>;

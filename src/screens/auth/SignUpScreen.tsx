@@ -35,9 +35,11 @@ import {
   getGoogleAuthRedirectUri,
   getEmailVerificationActionSettings,
 } from '../../config/authRuntime';
+import { buildCurrentLegalAcceptance } from '../../config/legalRuntime';
 import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
+import { AuthLegalNotice } from '../../components/auth/AuthLegalNotice';
 import {
   SearchableSelectSheet,
   SelectionField,
@@ -56,6 +58,7 @@ import {
   isGoogleNativeSignInReady,
   signInWithGoogleNativeFirebase,
 } from '../../services/googleNativeAuth.service';
+import type { UserProfileInput } from '../../types/userProfile';
 import { withAlpha } from '../../utils/color';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -177,6 +180,9 @@ type GoogleAuthSectionProps = {
   missingCredentialMessage: string;
   failureFallbackMessage: string;
   providerDisabledMessage: string;
+  disabled?: boolean;
+  blockedMessage?: string;
+  profileSeed?: UserProfileInput;
 };
 
 const NativeGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
@@ -185,11 +191,19 @@ const NativeGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
   missingCredentialMessage,
   failureFallbackMessage,
   providerDisabledMessage,
+  disabled = false,
+  blockedMessage,
+  profileSeed,
 }) => {
   const [loading, setLoading] = useState(false);
 
   const handlePress = useCallback(async () => {
     try {
+      if (disabled) {
+        Alert.alert(errorTitle, blockedMessage || failureFallbackMessage);
+        return;
+      }
+
       setLoading(true);
       const result = await signInWithGoogleNativeFirebase();
 
@@ -199,13 +213,14 @@ const NativeGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
 
       await ensureUserProfileDocument(result.userCredential.user, {
         trackLogin: true,
+        profile: profileSeed,
       });
 
       await authAnalyticsService.trackSignupSucceeded({
         method: 'google',
         surface: 'signup',
         emailVerified: result.userCredential.user.emailVerified,
-        hasProfileSeed: false,
+        hasProfileSeed: true,
       });
     } catch (error: any) {
       console.error('Google signup/login failed:', error);
@@ -231,9 +246,12 @@ const NativeGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
       setLoading(false);
     }
   }, [
+    blockedMessage,
+    disabled,
     errorTitle,
     failureFallbackMessage,
     missingCredentialMessage,
+    profileSeed,
     providerDisabledMessage,
   ]);
 
@@ -242,7 +260,7 @@ const NativeGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
       icon="logo-google"
       label={label}
       onPress={handlePress}
-      disabled={!isGoogleNativeSignInReady()}
+      disabled={!isGoogleNativeSignInReady() || disabled}
       loading={loading}
       backgroundColor="#FFFFFF"
       borderColor="#E5E5E5"
@@ -257,6 +275,9 @@ const BrowserGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
   missingCredentialMessage,
   failureFallbackMessage,
   providerDisabledMessage,
+  disabled = false,
+  blockedMessage,
+  profileSeed,
 }) => {
   const [loading, setLoading] = useState(false);
   const redirectUri = useMemo(() => getGoogleAuthRedirectUri(), []);
@@ -279,6 +300,11 @@ const BrowserGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
       if (response?.type !== 'success') return;
 
       try {
+        if (disabled) {
+          Alert.alert(errorTitle, blockedMessage || failureFallbackMessage);
+          return;
+        }
+
         setLoading(true);
 
         const idToken =
@@ -304,12 +330,16 @@ const BrowserGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
 
         const credential = GoogleAuthProvider.credential(idToken, accessToken);
         const userCredential = await signInWithCredential(auth, credential);
+        await ensureUserProfileDocument(userCredential.user, {
+          trackLogin: true,
+          profile: profileSeed,
+        });
 
         await authAnalyticsService.trackSignupSucceeded({
           method: 'google',
           surface: 'signup',
           emailVerified: userCredential.user.emailVerified,
-          hasProfileSeed: false,
+          hasProfileSeed: true,
         });
       } catch (error: any) {
         console.error('Google signup/login failed:', error);
@@ -334,9 +364,12 @@ const BrowserGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
 
     void handleGoogleResponse();
   }, [
+    blockedMessage,
+    disabled,
     errorTitle,
     failureFallbackMessage,
     missingCredentialMessage,
+    profileSeed,
     providerDisabledMessage,
     response,
   ]);
@@ -350,7 +383,7 @@ const BrowserGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
           showInRecents: true,
         })
       }
-      disabled={!request}
+      disabled={!request || disabled}
       loading={loading}
       backgroundColor="#FFFFFF"
       borderColor="#E5E5E5"
@@ -414,6 +447,13 @@ export const SignUpScreen: React.FC = () => {
   );
   const resolvedCity = useMemo(() => resolveCanonicalCity(city), [city]);
   const passwordStrength = useMemo(() => getPasswordStrength(password, tt), [password, tt]);
+  const buildLegalProfileSeed = useCallback(
+    (): UserProfileInput => ({
+      kvkkAccepted: true,
+      legalAcceptance: buildCurrentLegalAcceptance('signup'),
+    }),
+    []
+  );
 
   const isFormValid = useMemo(() => {
     return (
@@ -547,6 +587,14 @@ export const SignUpScreen: React.FC = () => {
 
   const handleAppleLogin = useCallback(async () => {
     try {
+      if (!kvkkAccepted) {
+        Alert.alert(
+          tt('error_title', 'Hata'),
+          tt('accept_kvkk_error', 'Devam etmek için KVKK metnini onaylamalısınız.')
+        );
+        return;
+      }
+
       setAppleLoading(true);
 
       const rawNonce = randomNonce();
@@ -584,12 +632,16 @@ export const SignUpScreen: React.FC = () => {
       });
 
       const userCredential = await signInWithCredential(auth, credential);
+      await ensureUserProfileDocument(userCredential.user, {
+        trackLogin: true,
+        profile: buildLegalProfileSeed(),
+      });
 
       await authAnalyticsService.trackSignupSucceeded({
         method: 'apple',
         surface: 'signup',
         emailVerified: userCredential.user.emailVerified,
-        hasProfileSeed: false,
+        hasProfileSeed: true,
       });
     } catch (error: any) {
       if (error?.code === 'ERR_REQUEST_CANCELED') {
@@ -620,7 +672,7 @@ export const SignUpScreen: React.FC = () => {
     } finally {
       setAppleLoading(false);
     }
-  }, [tt]);
+  }, [buildLegalProfileSeed, kvkkAccepted, tt]);
 
   const handleSignUp = useCallback(async () => {
     if (!isFormValid) {
@@ -678,6 +730,7 @@ export const SignUpScreen: React.FC = () => {
           address: address.trim(),
           email: email.trim(),
           kvkkAccepted: true,
+          legalAcceptance: buildCurrentLegalAcceptance('signup'),
         },
       });
 
@@ -1105,6 +1158,8 @@ export const SignUpScreen: React.FC = () => {
             />
           </View>
 
+          <AuthLegalNotice compact />
+
           <TouchableOpacity
             style={[
               styles.primaryButton,
@@ -1151,6 +1206,12 @@ export const SignUpScreen: React.FC = () => {
                 'google_provider_disabled',
                 'Google ile giriş Firebase üzerinde etkin değil.'
               )}
+              disabled={!kvkkAccepted}
+              blockedMessage={tt(
+                'accept_kvkk_error',
+                'Devam etmek için KVKK metnini onaylamalısınız.'
+              )}
+              profileSeed={buildLegalProfileSeed()}
             />
           ) : (
             <SocialButton

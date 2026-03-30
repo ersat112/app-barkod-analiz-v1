@@ -19,6 +19,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
 
 import { auth } from '../../config/firebase';
+import {
+  LEGAL_VERSION_LABEL,
+  buildCurrentLegalAcceptance,
+} from '../../config/legalRuntime';
 import { FEATURES } from '../../config/features';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, type ThemeColors } from '../../context/ThemeContext';
@@ -36,6 +40,7 @@ import {
 } from '../../services/engagementNotifications.service';
 import { analyticsService } from '../../services/analytics.service';
 import { clearMonetizationFlowLogs } from '../../services/purchaseFlowLog.service';
+import { updateCurrentUserLegalAcceptance } from '../../services/userProfile.service';
 import { usePreferenceStore } from '../../store/usePreferenceStore';
 import {
   buildAvatarLetter,
@@ -382,6 +387,7 @@ export const SettingsScreen: React.FC = () => {
   const { colors, isDark, setIsDark, toggleTheme } = useTheme();
   const { locale, changeLanguage, supportedLanguages, ready: languageReady } = useLanguage();
   const notificationsEnabled = usePreferenceStore((state) => state.notificationsEnabled);
+  const nutritionPreferences = usePreferenceStore((state) => state.nutritionPreferences);
   const setNotificationsEnabled = usePreferenceStore(
     (state) => state.setNotificationsEnabled
   );
@@ -432,6 +438,7 @@ export const SettingsScreen: React.FC = () => {
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [flowLogResetting, setFlowLogResetting] = useState(false);
   const [notificationSyncing, setNotificationSyncing] = useState(false);
+  const [legalAcceptanceUpdating, setLegalAcceptanceUpdating] = useState(false);
 
   const handleOpenPaywall = useCallback(() => {
     void analyticsService.track(
@@ -560,6 +567,19 @@ export const SettingsScreen: React.FC = () => {
   const handleOpenProfileSettings = useCallback(() => {
     navigation.navigate('ProfileSettings');
   }, [navigation]);
+
+  const handleOpenNutritionPreferences = useCallback(() => {
+    navigation.navigate('NutritionPreferences');
+  }, [navigation]);
+
+  const handleOpenLegalDocument = useCallback(
+    (
+      documentKey: 'terms' | 'privacy' | 'medical' | 'premium' | 'independence'
+    ) => {
+      navigation.navigate('LegalDocument', { documentKey });
+    },
+    [navigation]
+  );
 
   const displayName = useMemo(() => {
     return buildUserDisplayName({
@@ -732,6 +752,90 @@ export const SettingsScreen: React.FC = () => {
   const premiumStatusLabel = monetization.entitlement?.isPremium
     ? tt('premium_badge_active', 'Aktif')
     : tt('premium_badge_yearly', 'Yıllık');
+
+  const nutritionPreferenceCount = useMemo(() => {
+    return Object.values(nutritionPreferences).filter(Boolean).length;
+  }, [nutritionPreferences]);
+
+  const nutritionPreferencesBadge = nutritionPreferenceCount
+    ? tt('nutrition_preferences_summary_count', `${nutritionPreferenceCount} aktif`).replace(
+        '{{count}}',
+        String(nutritionPreferenceCount)
+      )
+    : tt('nutrition_preferences_summary_none', 'Tercih seçilmedi');
+
+  const acceptedLegalVersion = profile?.legalAcceptance?.versionLabel ?? null;
+  const acceptedLegalAt = profile?.legalAcceptance?.acceptedAt ?? null;
+  const legalVersionMatches = acceptedLegalVersion === LEGAL_VERSION_LABEL;
+  const acceptedLegalAtText = useMemo(() => {
+    if (!acceptedLegalAt) {
+      return tt('not_available_short', '-');
+    }
+
+    try {
+      return new Date(acceptedLegalAt).toLocaleString(undefined, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return acceptedLegalAt;
+    }
+  }, [acceptedLegalAt, tt]);
+
+  const legalStatusLabel = legalVersionMatches
+    ? tt('legal_version_current_badge', 'Güncel')
+    : tt('legal_version_update_badge', 'Güncelle');
+
+  const legalStatusSubtitle = legalVersionMatches
+    ? tt(
+        'legal_status_subtitle_current',
+        'Bu hesap güncel hukuk belge setini onaylamış görünüyor.'
+      )
+    : tt(
+        'legal_status_subtitle_outdated',
+        'Belge sürümü değişmiş olabilir. Güncel seti yeniden inceleyip onaylayın.'
+      );
+
+  const handleRefreshLegalAcceptance = useCallback(() => {
+    Alert.alert(
+      tt('legal_reaccept_title', 'Güncel belge setini onayla'),
+      tt(
+        'legal_reaccept_message',
+        'Güncel Şartlar, Gizlilik ve Tıbbi Uyarı setini incelediğinizi profile kaydedeceğiz. Devam etmek istiyor musunuz?'
+      ),
+      [
+        { text: tt('cancel', 'İptal'), style: 'cancel' },
+        {
+          text: tt('confirm', 'Onayla'),
+          onPress: () => {
+            void (async () => {
+              try {
+                setLegalAcceptanceUpdating(true);
+                await updateCurrentUserLegalAcceptance(
+                  buildCurrentLegalAcceptance('manual_refresh')
+                );
+                await refreshProfile();
+              } catch (error) {
+                console.error('[SettingsScreen] legal acceptance refresh failed:', error);
+                Alert.alert(
+                  tt('error_title', 'Hata'),
+                  tt(
+                    'legal_reaccept_error',
+                    'Hukuk belge onayı güncellenemedi. Lütfen tekrar deneyin.'
+                  )
+                );
+              } finally {
+                setLegalAcceptanceUpdating(false);
+              }
+            })();
+          },
+        },
+      ]
+    );
+  }, [refreshProfile, tt]);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -965,6 +1069,18 @@ export const SettingsScreen: React.FC = () => {
         }}
       />
 
+      <SettingsActionCard
+        icon="leaf-outline"
+        title={tt('nutrition_preferences', 'Beslenme Tercihleri')}
+        subtitle={tt(
+          'nutrition_preferences_subtitle',
+          'Gluten, laktoz, palmiye yağı ve vegan/vejetaryen tercihlerine göre kişisel uygunluk uyarıları alın.'
+        )}
+        badgeLabel={nutritionPreferencesBadge}
+        onPress={handleOpenNutritionPreferences}
+        colors={colors}
+      />
+
       <SettingsItem
         icon="notifications-outline"
         label={tt('smart_notifications', 'Akıllı Bildirimler')}
@@ -1008,16 +1124,78 @@ export const SettingsScreen: React.FC = () => {
       />
 
       <SettingsItem
+        icon="library-outline"
+        label={tt('methodology_sources', 'Metodoloji ve Kaynaklar')}
+        colors={colors}
+        onPress={() => navigation.navigate('MethodologySources')}
+      />
+
+      <Text
+        style={[
+          styles.sectionTitle,
+          { color: colors.text, marginHorizontal: layout.horizontalPadding, marginTop: 10 },
+        ]}
+      >
+        {tt('legal_and_trust', 'Yasal ve Güven')}
+      </Text>
+
+      <SettingsItem
+        icon="document-text-outline"
+        label={tt('terms_and_conditions', 'Şartlar ve Koşullar')}
+        colors={colors}
+        onPress={() => handleOpenLegalDocument('terms')}
+      />
+
+      <SettingsItem
         icon="shield-checkmark-outline"
         label={tt('privacy_policy', 'Gizlilik Politikası')}
         colors={colors}
-        onPress={() =>
-          handleSafeOpenUrl(
-            'https://ersat112.github.io/barkodanaliz-policy/',
-            tt('privacy_policy_open_error', 'Gizlilik politikası açılamadı')
-          )
-        }
+        onPress={() => handleOpenLegalDocument('privacy')}
       />
+
+      <SettingsItem
+        icon="medkit-outline"
+        label={tt('medical_disclaimer', 'Tıbbi ve Bilgilendirme Uyarısı')}
+        colors={colors}
+        onPress={() => handleOpenLegalDocument('medical')}
+      />
+
+      <SettingsItem
+        icon="diamond-outline"
+        label={tt('premium_terms', 'Premium Koşulları')}
+        colors={colors}
+        onPress={() => handleOpenLegalDocument('premium')}
+      />
+
+      <SettingsItem
+        icon="compass-outline"
+        label={tt('independence_policy', 'Bağımsızlık Politikası')}
+        colors={colors}
+        onPress={() => handleOpenLegalDocument('independence')}
+      />
+
+      <SettingsActionCard
+        icon="document-lock-outline"
+        title={tt('legal_version_status_title', 'Belge Sürümü ve Onay')}
+        subtitle={`${legalStatusSubtitle} ${tt('legal_version_current_label', 'Geçerli sürüm')}: ${LEGAL_VERSION_LABEL}. ${tt('legal_version_accepted_label', 'Hesap sürümü')}: ${acceptedLegalVersion ?? '-'}. ${tt('legal_version_accepted_at_label', 'Onay zamanı')}: ${acceptedLegalAtText}.`}
+        badgeLabel={legalStatusLabel}
+        onPress={handleRefreshLegalAcceptance}
+        colors={colors}
+      />
+
+      {legalAcceptanceUpdating ? (
+        <View
+          style={[
+            styles.premiumLoadingCard,
+            {
+              backgroundColor: withAlpha(colors.cardElevated, 'F1'),
+              borderColor: withAlpha(colors.border, 'B8'),
+            },
+          ]}
+        >
+          <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      ) : null}
 
       <View
         style={[

@@ -31,6 +31,7 @@ import { AUTH_RUNTIME, getGoogleAuthRedirectUri } from '../../config/authRuntime
 import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
+import { AuthLegalNotice } from '../../components/auth/AuthLegalNotice';
 import { authAnalyticsService } from '../../services/authAnalytics.service';
 import {
   isGoogleNativePlayServicesError,
@@ -688,6 +689,8 @@ export const LoginScreen: React.FC = () => {
               ) : null}
             </View>
           ) : null}
+
+          <AuthLegalNotice compact />
         </View>
 
         <View style={styles.footerRow}>
