@@ -6,9 +6,9 @@ Bu not, Google login dogrulamasi temiz gectikten sonra production benzeri Androi
 
 1. Uygulama Play test kanalindan yuklenmis olmali.
 2. RevenueCat dashboard icinde:
-   - entitlement bagli olmali
-   - offering bagli olmali
-   - annual package gercek store product ile eslesmis olmali
+   - entitlement `BarkodAnaliz Pro` bagli olmali
+   - offering `premium_annual_39_99_try` bagli olmali
+   - annual package gercek store product `premium_annual_39_99_try:annual` ile eslesmis olmali
 3. Google Play Console icinde ilgili subscription urunu aktif olmali.
 4. Tester hesabi:
    - test kanalina dahil olmali
@@ -63,6 +63,7 @@ Bu not, Google login dogrulamasi temiz gectikten sonra production benzeri Androi
 
 1. `ConfigurationError`
    - RevenueCat offering/package/product eslesmesi eksik
+   - ozellikle `BarkodAnaliz Pro` entitlement veya `premium_annual_39_99_try:annual` package baglantisi kontrol edilmeli
 2. `PurchaseNotAllowedError`
    - cihaz ya da build Google Play Billing icin uygun degil
 3. `identityMismatchWarning`

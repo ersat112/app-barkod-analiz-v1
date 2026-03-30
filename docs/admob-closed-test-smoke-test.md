@@ -8,6 +8,11 @@ Bu not, production benzeri Android build kapali test kanalina yüklendikten sonr
 2. Build Expo Go degil, native release/test build olmali.
 3. AdMob uygulama id ve unit id'leri native metadata icinde dogru olmali.
 4. Tester cihazda Google Play Store etkin olmali.
+5. Kod yerlesimleri su anda soyledir:
+   - `App Open`: cold start akisi
+   - `Interstitial`: scanner akisi
+   - `Rewarded / tam ekran`: detail akisi
+   - `Banner`: home, history, detail, settings, missing product
 
 ## Banner Kontrolu
 
@@ -22,12 +27,20 @@ Bu not, production benzeri Android build kapali test kanalina yüklendikten sonr
 
 ## Rewarded / Full Screen Kontrolu
 
-1. Ucretsiz kullanicida gunluk tarama limitini asan akisi dene.
-2. Barkod sonucu ekraninda full screen reklam tetikleniyor mu bak.
+1. Ucretsiz kullanicida scanner uzerinden urun detaya gec.
+2. Barkod sonucu ekraninda rewarded / tam ekran reklam tetikleniyor mu bak.
 3. Beklenen sonuc:
    - reklam acilir
    - kapaninca detail akisi bozulmaz
    - reward / close loglari gelir
+
+## Interstitial Kontrolu
+
+1. Scanner akisinda basarili tarama sayisini policy kapilarina getirecek kadar ilerlet.
+2. Scan sonucundan once veya gecis aninda interstitial akisi tetikleniyor mu bak.
+3. Beklenen sonuc:
+   - reklam acilirsa scanner / detail zinciri bozulmamali
+   - acilmazsa akisin kendisi yine de devam etmeli
 
 ## App Open Kontrolu
 
