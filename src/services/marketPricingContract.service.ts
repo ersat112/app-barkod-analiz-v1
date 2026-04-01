@@ -4,6 +4,7 @@ import type {
   MarketOffer,
   MarketOpportunityBreakdown,
   MarketOpportunityScoreInput,
+  MarketScanEventRequest,
 } from '../types/marketPricing';
 
 function clamp(value: number, min = 0, max = 1): number {
@@ -75,6 +76,59 @@ export function buildMarketGelsinAlternativesEndpoint(): string {
   return '/v1/pricing/alternatives';
 }
 
+export function buildMarketGelsinSearchEndpoint(params?: {
+  query?: string;
+  cityCode?: string;
+  category?: string;
+  brand?: string;
+  limit?: number;
+}): string {
+  const query = new URLSearchParams();
+
+  if (params?.query) {
+    query.set('q', params.query);
+  }
+
+  if (params?.cityCode) {
+    query.set('city_code', params.cityCode);
+  }
+
+  if (params?.category) {
+    query.set('category', params.category);
+  }
+
+  if (params?.brand) {
+    query.set('brand', params.brand);
+  }
+
+  if (typeof params?.limit === 'number' && Number.isFinite(params.limit)) {
+    query.set('limit', String(params.limit));
+  }
+
+  const suffix = query.toString();
+  return `/v1/search/products${suffix ? `?${suffix}` : ''}`;
+}
+
+export function buildMarketGelsinStatusEndpoint(): string {
+  return '/api/v1/status';
+}
+
+export function buildMarketGelsinProgramCoverageEndpoint(): string {
+  return '/api/v1/program/coverage';
+}
+
+export function buildMarketGelsinIntegrationsStatusEndpoint(): string {
+  return '/api/v1/integrations/status';
+}
+
+export function buildMarketGelsinScanEventEndpoint(): string {
+  return '/api/v1/barcode/scans';
+}
+
+export function buildMarketGelsinBatchScanEventEndpoint(): string {
+  return '/api/v1/barcode/scans/batch';
+}
+
 export function buildMarketGelsinAlternativesRequest(
   barcode: string,
   cityCode: string,
@@ -89,6 +143,20 @@ export function buildMarketGelsinAlternativesRequest(
   };
 }
 
+export function buildMarketGelsinScanEventRequest(
+  input: MarketScanEventRequest
+): MarketScanEventRequest {
+  return {
+    barcode: input.barcode.trim(),
+    cityCode: input.cityCode?.trim() || null,
+    districtName: input.districtName?.trim() || null,
+    platform: input.platform ?? 'android',
+    scannedAt: input.scannedAt,
+    appVersion: input.appVersion?.trim() || null,
+    requestId: input.requestId?.trim() || null,
+  };
+}
+
 export function getBestInStockOffer(offers: MarketOffer[]): MarketOffer | null {
   const inStockOffers = offers.filter((offer) => offer.inStock);
 
@@ -97,6 +165,31 @@ export function getBestInStockOffer(offers: MarketOffer[]): MarketOffer | null {
   }
 
   return [...inStockOffers].sort((left, right) => left.price - right.price)[0] ?? null;
+}
+
+export function partitionOffersByPriceSourceType(offers: MarketOffer[]): {
+  localMarketOffers: MarketOffer[];
+  nationalReferenceOffers: MarketOffer[];
+  otherOffers: MarketOffer[];
+} {
+  return offers.reduce(
+    (accumulator, offer) => {
+      if (offer.priceSourceType === 'local_market_price') {
+        accumulator.localMarketOffers.push(offer);
+      } else if (offer.priceSourceType === 'national_reference_price') {
+        accumulator.nationalReferenceOffers.push(offer);
+      } else {
+        accumulator.otherOffers.push(offer);
+      }
+
+      return accumulator;
+    },
+    {
+      localMarketOffers: [] as MarketOffer[],
+      nationalReferenceOffers: [] as MarketOffer[],
+      otherOffers: [] as MarketOffer[],
+    }
+  );
 }
 
 export function computeFreshnessRatio(

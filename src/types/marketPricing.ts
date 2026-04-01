@@ -2,9 +2,34 @@ export type MarketScope = 'local' | 'national_chain';
 
 export type MarketDataFreshnessMode = 'weekly_crawl' | 'hot_refresh' | 'mixed';
 
+export type MarketPriceSourceType =
+  | 'national_reference_price'
+  | 'local_market_price'
+  | string;
+
+export type MarketCoverageScope =
+  | 'national'
+  | 'city'
+  | 'district'
+  | 'live_controlled_local'
+  | 'verified_local_needs_adapter'
+  | 'discovery_pending_national_fallback'
+  | string;
+
+export type MarketPricingScope =
+  | 'national_reference'
+  | 'local_city_offer'
+  | 'district_offer'
+  | 'mixed'
+  | string;
+
 export type MarketOffer = {
+  marketKey?: string | null;
   marketName: string;
   marketType: MarketScope;
+  coverageScope?: MarketCoverageScope | null;
+  pricingScope?: MarketPricingScope | null;
+  priceSourceType?: MarketPriceSourceType | null;
   cityCode: string;
   cityName: string;
   districtName?: string | null;
@@ -13,6 +38,7 @@ export type MarketOffer = {
   unitPrice?: number | null;
   unitPriceUnit?: string | null;
   inStock: boolean;
+  imageUrl?: string | null;
   capturedAt: string;
   sourceUrl: string;
   sourceConfidence?: number | null;
@@ -96,4 +122,14 @@ export type MarketOpportunityBreakdown = {
   priceContribution: number;
   availabilityContribution: number;
   freshnessContribution: number;
+};
+
+export type MarketScanEventRequest = {
+  barcode: string;
+  cityCode?: string | null;
+  districtName?: string | null;
+  platform?: 'android' | 'ios' | 'web' | string;
+  scannedAt: string;
+  appVersion?: string | null;
+  requestId?: string | null;
 };
