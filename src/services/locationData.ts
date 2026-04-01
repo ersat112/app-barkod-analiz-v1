@@ -178,6 +178,24 @@ export const TURKEY_CITY_CODES: Record<string, string> = {
 export const normalizeLocationLookup = (value?: string | null): string =>
   String(value || '').trim().toLocaleLowerCase('tr');
 
+const TURKISH_SLUG_REPLACEMENTS: Record<string, string> = {
+  ç: 'c',
+  ğ: 'g',
+  ı: 'i',
+  İ: 'i',
+  ö: 'o',
+  ş: 's',
+  ü: 'u',
+};
+
+export const slugifyTurkeyLocation = (value?: string | null): string =>
+  String(value || '')
+    .trim()
+    .replace(/[çğıİöşü]/g, (letter) => TURKISH_SLUG_REPLACEMENTS[letter] ?? letter)
+    .toLocaleLowerCase('tr')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+
 export const resolveCanonicalCity = (value?: string | null): string | null => {
   const normalized = normalizeLocationLookup(value);
 
@@ -200,6 +218,17 @@ export const resolveTurkeyCityCode = (city?: string | null): string | null => {
   }
 
   return TURKEY_CITY_CODES[canonicalCity] ?? null;
+};
+
+export const resolveTurkeyCitySlug = (city?: string | null): string | null => {
+  const canonicalCity = resolveCanonicalCity(city);
+
+  if (!canonicalCity) {
+    return null;
+  }
+
+  const slug = slugifyTurkeyLocation(canonicalCity);
+  return slug || null;
 };
 
 export const getDistrictsByCity = (city?: string): string[] => {

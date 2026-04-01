@@ -112,7 +112,6 @@ async function ensureAndroidChannel(): Promise<void> {
   await Notifications.setNotificationChannelAsync(ANDROID_CHANNEL_ID, {
     name: tt('smart_notifications', 'Akıllı Bildirimler'),
     importance: Notifications.AndroidImportance.DEFAULT,
-    sound: 'default',
     vibrationPattern: [0, 120, 90, 120],
     enableVibrate: true,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
@@ -272,7 +271,7 @@ export async function syncEngagementNotifications(options?: {
     content: {
       title: tt('notification_reminder_title', 'Bugün tarama yaptın mı?'),
       body: buildReminderBody(schedule.preferredHour),
-      sound: 'default',
+      sound: Platform.OS === 'ios' ? 'default' : undefined,
       data: {
         kind: 'daily_scan_reminder',
       },
@@ -292,7 +291,7 @@ export async function syncEngagementNotifications(options?: {
         'Günün en iyi skorlu ürünleri'
       ),
       body: buildSummaryBody(),
-      sound: 'default',
+      sound: Platform.OS === 'ios' ? 'default' : undefined,
       data: {
         kind: 'daily_score_summary',
       },

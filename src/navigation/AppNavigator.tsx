@@ -173,7 +173,7 @@ const PersistentBottomNav: React.FC<{
   onOpenHome: () => void;
   onOpenHistory: () => void;
   onOpenScanner: () => void;
-  onOpenMedicine: () => void;
+  onOpenCompare: () => void;
   onOpenSettings: () => void;
 }> = ({
   activeRouteName,
@@ -181,7 +181,7 @@ const PersistentBottomNav: React.FC<{
   onOpenHome,
   onOpenHistory,
   onOpenScanner,
-  onOpenMedicine,
+  onOpenCompare,
   onOpenSettings,
 }) => {
   const { t } = useTranslation();
@@ -204,7 +204,8 @@ const PersistentBottomNav: React.FC<{
   const activeSection =
     activeRouteName === 'Home' ||
     activeRouteName === 'History' ||
-    activeRouteName === 'Settings'
+    activeRouteName === 'Settings' ||
+    activeRouteName === 'PriceCompare'
       ? activeRouteName
       : activeMainTab;
 
@@ -244,11 +245,11 @@ const PersistentBottomNav: React.FC<{
         <View style={styles.centerTabSpacer} />
         <View style={styles.tabBarSlot}>
           <TabBarItem
-            active={activeRouteName === 'MedicineScanner'}
+            active={activeSection === 'PriceCompare'}
             colors={colors}
-            iconName="medkit-outline"
-            label={tt('scan_medicine', 'İlaç Tara')}
-            onPress={onOpenMedicine}
+            iconName={activeSection === 'PriceCompare' ? 'pricetags' : 'pricetags-outline'}
+            label={tt('price_compare_short_label', 'Fiyat')}
+            onPress={onOpenCompare}
           />
         </View>
         <View style={styles.tabBarSlot}>
@@ -417,7 +418,7 @@ export const AppNavigator: React.FC = () => {
   }, []);
 
   const navigateToStackScreen = useCallback(
-    (screen: 'Scanner' | 'MedicineScanner') => {
+    (screen: 'Scanner' | 'MedicineScanner' | 'PriceCompare') => {
       if (!navigationRef.isReady()) {
         return;
       }
@@ -476,7 +477,7 @@ export const AppNavigator: React.FC = () => {
           onOpenHome={() => navigateToMainTab('Home')}
           onOpenHistory={() => navigateToMainTab('History')}
           onOpenScanner={() => navigateToStackScreen('Scanner')}
-          onOpenMedicine={() => navigateToStackScreen('MedicineScanner')}
+          onOpenCompare={() => navigateToStackScreen('PriceCompare')}
           onOpenSettings={() => navigateToMainTab('Settings')}
         />
       ) : null}

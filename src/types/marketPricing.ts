@@ -27,6 +27,8 @@ export type MarketOffer = {
   marketKey?: string | null;
   marketName: string;
   marketLogoUrl?: string | null;
+  branchId?: string | null;
+  branchName?: string | null;
   marketType: MarketScope;
   coverageScope?: MarketCoverageScope | null;
   pricingScope?: MarketPricingScope | null;
@@ -34,6 +36,8 @@ export type MarketOffer = {
   cityCode: string;
   cityName: string;
   districtName?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   distanceMeters?: number | null;
   price: number;
   currency: 'TRY' | string;
@@ -141,6 +145,56 @@ export type MarketPriceHistoryResponse = {
   partial?: boolean;
   warnings?: string[];
   history: MarketPriceHistoryPoint[];
+};
+
+export type MarketBasketCompareItemRequest = {
+  barcode: string;
+  quantity: number;
+};
+
+export type MarketBasketCompareItem = {
+  barcode: string;
+  quantity: number;
+  bestOffer?: MarketOffer | null;
+  offers: MarketOffer[];
+  availableMarketCount: number;
+};
+
+export type MarketBasketMarketTotal = {
+  marketKey: string;
+  marketName: string;
+  marketLogoUrl?: string | null;
+  distanceMeters?: number | null;
+  branchId?: string | null;
+  branchName?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  basketTotal: number;
+  availableItemCount: number;
+  missingItemCount: number;
+};
+
+export type MarketBasketMissingItem = {
+  barcode: string;
+  quantity: number;
+};
+
+export type MarketBasketCompareResponse = {
+  fetchedAt: string;
+  requestId?: string | null;
+  partial?: boolean;
+  warnings?: string[];
+  city?: {
+    code: string;
+    name: string;
+  } | null;
+  district?: string | null;
+  mixedCheapestTotal: number;
+  bestSingleMarketTotal?: number | null;
+  nearestMarketTotal?: number | null;
+  items: MarketBasketCompareItem[];
+  marketTotals: MarketBasketMarketTotal[];
+  missingItems: MarketBasketMissingItem[];
 };
 
 export type MarketAlternativePricingRequest = {

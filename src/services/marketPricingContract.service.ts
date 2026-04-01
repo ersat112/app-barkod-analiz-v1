@@ -76,6 +76,10 @@ export function buildMarketGelsinAlternativesEndpoint(): string {
   return '/v1/pricing/alternatives';
 }
 
+export function buildMarketGelsinBarcodeLookupEndpoint(barcode: string): string {
+  return `/api/v1/barcode/${encodeURIComponent(barcode)}`;
+}
+
 export function buildMarketGelsinSearchEndpoint(params?: {
   query?: string;
   cityCode?: string;
@@ -109,6 +113,39 @@ export function buildMarketGelsinSearchEndpoint(params?: {
   return `/v1/search/products${suffix ? `?${suffix}` : ''}`;
 }
 
+export function buildMarketGelsinLegacyOffersSearchEndpoint(params?: {
+  citySlug?: string;
+  query?: string;
+  marketKey?: string;
+  barcode?: string;
+  limit?: number;
+}): string {
+  const query = new URLSearchParams();
+
+  if (params?.citySlug) {
+    query.set('city', params.citySlug);
+  }
+
+  if (params?.query) {
+    query.set('q', params.query);
+  }
+
+  if (params?.marketKey) {
+    query.set('market_key', params.marketKey);
+  }
+
+  if (params?.barcode) {
+    query.set('barcode', params.barcode);
+  }
+
+  if (typeof params?.limit === 'number' && Number.isFinite(params.limit)) {
+    query.set('limit', String(params.limit));
+  }
+
+  const suffix = query.toString();
+  return `/api/v1/offers${suffix ? `?${suffix}` : ''}`;
+}
+
 export function buildMarketGelsinStatusEndpoint(): string {
   return '/api/v1/status';
 }
@@ -127,6 +164,10 @@ export function buildMarketGelsinScanEventEndpoint(): string {
 
 export function buildMarketGelsinBatchScanEventEndpoint(): string {
   return '/api/v1/barcode/scans/batch';
+}
+
+export function buildMarketGelsinBasketCompareEndpoint(): string {
+  return '/api/v1/basket/compare';
 }
 
 export function buildMarketGelsinAlternativesRequest(
