@@ -55,6 +55,16 @@ export type MethodologySectionItem = {
   body: string;
 };
 
+export type PricingHighlightItem = {
+  key: string;
+  badge: string;
+  title: string;
+  priceLabel: string;
+  helper?: string;
+  meta?: string;
+  tone?: 'local' | 'reference' | 'best';
+};
+
 export const DetailLoadingState: React.FC<{
   label: string;
   colors: ThemeColors;
@@ -858,6 +868,112 @@ export const ActionLinksSection: React.FC<{
   );
 };
 
+export const PricingHighlightsSection: React.FC<{
+  title: string;
+  subtitle?: string;
+  items: PricingHighlightItem[];
+  loading?: boolean;
+  emptyLabel?: string;
+  colors: ThemeColors;
+}> = ({ title, subtitle, items, loading = false, emptyLabel, colors }) => {
+  const resolveToneColor = (tone: PricingHighlightItem['tone']): string => {
+    switch (tone) {
+      case 'local':
+        return colors.teal;
+      case 'reference':
+        return colors.primary;
+      default:
+        return colors.success;
+    }
+  };
+
+  if (!loading && !items.length && !emptyLabel) {
+    return null;
+  }
+
+  return (
+    <>
+      <Text style={[styles.sectionTitle, styles.textSectionTitle, { color: colors.text }]}>
+        {title}
+      </Text>
+
+      {subtitle ? (
+        <Text style={[styles.pricingSectionSubtitle, { color: colors.mutedText }]}>
+          {subtitle}
+        </Text>
+      ) : null}
+
+      <View style={styles.pricingCardsWrap}>
+        {loading ? (
+          <View
+            style={[
+              styles.pricingLoadingCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : items.length ? (
+          items.map((item) => {
+            const toneColor = resolveToneColor(item.tone);
+
+            return (
+              <View
+                key={item.key}
+                style={[
+                  styles.pricingCard,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}
+              >
+                <View style={styles.pricingCardHeader}>
+                  <View
+                    style={[
+                      styles.pricingBadge,
+                      { backgroundColor: withAlpha(toneColor, '12') },
+                    ]}
+                  >
+                    <Text style={[styles.pricingBadgeText, { color: toneColor }]}>
+                      {item.badge}
+                    </Text>
+                  </View>
+
+                  {item.meta ? (
+                    <Text style={[styles.pricingMeta, { color: colors.mutedText }]}>
+                      {item.meta}
+                    </Text>
+                  ) : null}
+                </View>
+
+                <Text style={[styles.pricingTitle, { color: colors.text }]}>{item.title}</Text>
+                <Text style={[styles.pricingValue, { color: toneColor }]}>
+                  {item.priceLabel}
+                </Text>
+
+                {item.helper ? (
+                  <Text style={[styles.pricingHelper, { color: colors.mutedText }]}>
+                    {item.helper}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })
+        ) : (
+          <View
+            style={[
+              styles.pricingLoadingCard,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.pricingEmptyText, { color: colors.mutedText }]}>
+              {emptyLabel}
+            </Text>
+          </View>
+        )}
+      </View>
+    </>
+  );
+};
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
@@ -1218,6 +1334,70 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 12,
     lineHeight: 18,
+  },
+  pricingSectionSubtitle: {
+    marginTop: -6,
+    marginBottom: 12,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  pricingCardsWrap: {
+    gap: 12,
+    marginBottom: 8,
+  },
+  pricingCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    padding: 16,
+  },
+  pricingCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  pricingBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  pricingBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+  },
+  pricingMeta: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  pricingTitle: {
+    marginTop: 12,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  pricingValue: {
+    marginTop: 10,
+    fontSize: 26,
+    fontWeight: '900',
+    letterSpacing: -0.6,
+  },
+  pricingHelper: {
+    marginTop: 10,
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  pricingLoadingCard: {
+    minHeight: 92,
+    borderWidth: 1,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 18,
+  },
+  pricingEmptyText: {
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
   },
   shareSheetCard: {
     width: '100%',

@@ -1,4 +1,4 @@
-export type MarketScope = 'local' | 'national_chain';
+export type MarketScope = 'local' | 'national_chain' | string;
 
 export type MarketDataFreshnessMode = 'weekly_crawl' | 'hot_refresh' | 'mixed';
 
@@ -55,6 +55,43 @@ export type MarketDataFreshness = {
   mode: MarketDataFreshnessMode;
   lastFullRefreshAt?: string | null;
   lastHotRefreshAt?: string | null;
+};
+
+export type MarketRuntimeStatusResponse = {
+  cities: number;
+  activeMarkets: number;
+  cityTargets: number;
+  verifiedCities: number;
+  localCandidates: number;
+  scrapeRuns: number;
+  offers: number;
+  currentOffers: number;
+  canonicalProducts: number;
+  barcodes: number;
+  liveAdapters: number;
+  plannedAdapters: number;
+  metroCities: number;
+  v1LocalProgramCities: number;
+  v2LocalProgramCities: number;
+  v1NationalCoreMarkets: number;
+  scanSignals: number;
+};
+
+export type MarketProgramCoverageResponse = {
+  [key: string]: unknown;
+};
+
+export type MarketIntegrationStatusSection = {
+  enabled?: boolean;
+  available?: boolean;
+  [key: string]: unknown;
+};
+
+export type MarketIntegrationsStatusResponse = {
+  sqlite?: MarketIntegrationStatusSection | null;
+  postgres?: MarketIntegrationStatusSection | null;
+  firebase?: MarketIntegrationStatusSection | null;
+  [key: string]: unknown;
 };
 
 export type MarketProductOffersResponse = {
@@ -132,4 +169,18 @@ export type MarketScanEventRequest = {
   scannedAt: string;
   appVersion?: string | null;
   requestId?: string | null;
+};
+
+export type MarketScanEventResponse = {
+  acceptedCount?: number;
+  writtenCount?: number;
+  signalCount?: number;
+  [key: string]: unknown;
+};
+
+export type MarketBatchScanEventResponse = {
+  acceptedCount?: number;
+  writtenCount?: number;
+  signalCount?: number;
+  [key: string]: unknown;
 };

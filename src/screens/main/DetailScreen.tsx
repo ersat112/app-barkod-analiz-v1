@@ -12,13 +12,16 @@ import {
 } from 'react-native';
 import { RouteProp, useNavigation, useRoute } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
+import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
 
+import { useAuth } from '../../context/AuthContext';
 import {
   lookupProductByBarcode,
   type ProductLookupResult,
 } from '../../services/productLookup.service';
 import { FEATURES } from '../../config/features';
+import { MARKET_GELSIN_RUNTIME } from '../../config/marketGelsinRuntime';
 import { useTheme } from '../../context/ThemeContext';
 import { useMissingProductFlow } from '../../hooks/useMissingProductFlow';
 import { RootStackParamList } from '../../navigation/AppNavigator';
@@ -37,11 +40,27 @@ import {
 } from '../../services/titckMedicine.service';
 import { enqueueRemoteHistorySync } from '../../services/historyRemoteSync.service';
 import {
+  buildMarketGelsinAlternativesRequest,
+  buildMarketGelsinScanEventRequest,
+  getBestInStockOffer,
+  partitionOffersByPriceSourceType,
+} from '../../services/marketPricingContract.service';
+import {
+  fetchMarketAlternativePricing,
+  fetchMarketProductOffers,
+  postMarketScanEvent,
+} from '../../services/marketPricing.service';
+import {
   evaluateNutritionPreferences,
   hasActiveNutritionPreferences,
   type NutritionPreferenceEvaluation,
   type NutritionPreferenceKey,
 } from '../../services/nutritionPreferences.service';
+import {
+  resolveCanonicalCity,
+  resolveCanonicalDistrict,
+  resolveTurkeyCityCode,
+} from '../../services/locationData';
 import { usePreferenceStore } from '../../store/usePreferenceStore';
 import { useScanStore } from '../../store/useScanStore';
 import {
@@ -66,6 +85,7 @@ import {
   MetaChipsSection,
   MethodologySheet,
   NoticeCard,
+  PricingHighlightsSection,
   ProductHeadingSection,
   ScoreBreakdownSection,
   ScoreOverviewCard,
@@ -73,8 +93,17 @@ import {
   SummarySection,
   TextSection,
 } from './detail/DetailSections';
-import type { MethodologySectionItem, ScoreBreakdownItem } from './detail/DetailSections';
+import type {
+  MethodologySectionItem,
+  PricingHighlightItem,
+  ScoreBreakdownItem,
+} from './detail/DetailSections';
 import type { ProductRepositoryCacheTier, ProductRepositoryLookupMeta } from '../../types/productRepository';
+import type {
+  MarketAlternativePricingEntry,
+  MarketOffer,
+  MarketProductOffersResponse,
+} from '../../types/marketPricing';
 
 type DetailRoute = RouteProp<RootStackParamList, 'Detail'>;
 
@@ -448,7 +477,8 @@ const getMedicineTherapeuticAreaSummary = (
 const buildAlternativeSubtitle = (
   tt: TranslateFn,
   productType: Product['type'],
-  suggestion: ProductAlternativeSuggestion
+  suggestion: ProductAlternativeSuggestion,
+  marketHint?: string | null
 ): string => {
   const parts: string[] = [];
 
@@ -496,6 +526,10 @@ const buildAlternativeSubtitle = (
     );
   }
 
+  if (marketHint) {
+    parts.push(marketHint);
+  }
+
   return parts.join(' ');
 };
 
@@ -513,6 +547,110 @@ const buildAlternativeBadge = (
   }
 
   return tt('alternative_badge', 'Öneri');
+};
+
+const formatLocalizedPrice = (
+  locale: string,
+  amount?: number | null,
+  currency: string = 'TRY'
+): string => {
+  if (typeof amount !== 'number' || !Number.isFinite(amount)) {
+    return '--';
+  }
+
+  try {
+    return new Intl.NumberFormat(locale || 'tr-TR', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    return `${amount.toFixed(2)} ${currency}`;
+  }
+};
+
+const formatLocalizedDateTime = (locale: string, value?: string | null): string => {
+  if (!value) {
+    return '';
+  }
+
+  const date = new Date(value);
+
+  if (!Number.isFinite(date.getTime())) {
+    return '';
+  }
+
+  try {
+    return new Intl.DateTimeFormat(locale || 'tr-TR', {
+      day: '2-digit',
+      month: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date);
+  } catch {
+    return value;
+  }
+};
+
+const buildMarketOfferMeta = (
+  tt: TranslateFn,
+  locale: string,
+  offer?: MarketOffer | null
+): string => {
+  if (!offer) {
+    return '';
+  }
+
+  const parts: string[] = [];
+
+  if (typeof offer.unitPrice === 'number' && offer.unitPriceUnit) {
+    parts.push(
+      applyTemplate(
+        tt('market_pricing_unit_price_template', '{{price}} / {{unit}}'),
+        {
+          price: formatLocalizedPrice(locale, offer.unitPrice, offer.currency),
+          unit: offer.unitPriceUnit,
+        }
+      )
+    );
+  }
+
+  const updatedAt = formatLocalizedDateTime(locale, offer.capturedAt);
+
+  if (updatedAt) {
+    parts.push(
+      applyTemplate(tt('market_pricing_updated_template', 'Güncellendi {{value}}'), {
+        value: updatedAt,
+      })
+    );
+  }
+
+  return parts.join(' • ');
+};
+
+const buildAlternativeMarketHint = (params: {
+  tt: TranslateFn;
+  locale: string;
+  offer?: MarketOffer | null;
+  locationLabel?: string | null;
+}): string | null => {
+  if (!params.offer) {
+    return null;
+  }
+
+  const location = params.locationLabel || params.offer.cityName || params.tt('location', 'Konum');
+
+  return applyTemplate(
+    params.tt(
+      'alternative_reason_market_price',
+      '{{location}} için {{market}} fiyatı {{price}}.'
+    ),
+    {
+      location,
+      market: params.offer.marketName,
+      price: formatLocalizedPrice(params.locale, params.offer.price, params.offer.currency),
+    }
+  );
 };
 
 const buildLocalizedAnalysisSummary = (params: {
@@ -639,7 +777,8 @@ const buildLocalizedRecommendation = (params: {
 };
 
 export const DetailScreen: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const { profile } = useAuth();
   const nutritionPreferences = usePreferenceStore((state) => state.nutritionPreferences);
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<any>();
@@ -707,6 +846,13 @@ export const DetailScreen: React.FC = () => {
   const [shareSheetVisible, setShareSheetVisible] = useState(false);
   const [methodologySheetVisible, setMethodologySheetVisible] = useState(false);
   const [notFoundReason, setNotFoundReason] = useState<'not_found' | 'invalid_barcode' | 'unknown' | null>(null);
+  const [marketOffersLoading, setMarketOffersLoading] = useState(false);
+  const [marketOffersError, setMarketOffersError] = useState<string | null>(null);
+  const [marketOffersResponse, setMarketOffersResponse] =
+    useState<MarketProductOffersResponse | null>(null);
+  const [alternativePricingByBarcode, setAlternativePricingByBarcode] = useState<
+    Record<string, MarketAlternativePricingEntry>
+  >({});
 
   const [localProduct, setLocalProduct] = useState<Product | null>(
     isCurrentBarcodeInStore ? currentProduct : prefetchedRouteProduct
@@ -734,6 +880,7 @@ export const DetailScreen: React.FC = () => {
   const lastSavedHistoryKeyRef = useRef<string | null>(null);
   const lastTrackedDetailViewKeyRef = useRef<string | null>(null);
   const lastInterstitialAttemptKeyRef = useRef<string | null>(null);
+  const lastMarketScanSignalKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (isCurrentBarcodeInStore && currentProduct) {
@@ -783,6 +930,36 @@ export const DetailScreen: React.FC = () => {
   const extendedProduct = displayedProduct as DisplayProduct | null;
   const isMedicineProduct = displayedProduct?.type === 'medicine';
   const analysisColor = displayedAnalysis?.color ?? '#888';
+  const preferredLocale = i18n.language || 'tr-TR';
+
+  const profileCity = useMemo(() => {
+    const fallbackCity = String(profile?.city || '').trim();
+    return (resolveCanonicalCity(profile?.city) ?? fallbackCity) || null;
+  }, [profile?.city]);
+  const profileDistrict = useMemo(() => {
+    if (!profileCity) {
+      return null;
+    }
+
+    const fallbackDistrict = String(profile?.district || '').trim();
+
+    return (
+      (resolveCanonicalDistrict(profileCity, profile?.district) ??
+        fallbackDistrict) ||
+      null
+    );
+  }, [profile?.district, profileCity]);
+  const profileCityCode = useMemo(
+    () => resolveTurkeyCityCode(profileCity),
+    [profileCity]
+  );
+  const marketPricingLocationLabel = useMemo(() => {
+    if (profileCity && profileDistrict) {
+      return `${profileCity} / ${profileDistrict}`;
+    }
+
+    return profileCity || profileDistrict || null;
+  }, [profileCity, profileDistrict]);
 
   const sourceLabel = useMemo(() => {
     if (!extendedProduct?.sourceName) return tt('source_unknown', 'Bilinmeyen Kaynak');
@@ -1390,6 +1567,294 @@ export const DetailScreen: React.FC = () => {
       nutritionPreferences,
     });
   }, [displayedAnalysis, displayedProduct, nutritionPreferences]);
+
+  useEffect(() => {
+    if (!MARKET_GELSIN_RUNTIME.isEnabled || !normalizedRouteBarcode) {
+      return;
+    }
+
+    const nextSignalKey = [
+      normalizedRouteBarcode,
+      profileCityCode ?? '',
+      profileDistrict ?? '',
+    ].join(':');
+
+    if (lastMarketScanSignalKeyRef.current === nextSignalKey) {
+      return;
+    }
+
+    lastMarketScanSignalKeyRef.current = nextSignalKey;
+
+    void postMarketScanEvent(
+      buildMarketGelsinScanEventRequest({
+        barcode: normalizedRouteBarcode,
+        cityCode: profileCityCode ?? null,
+        districtName: profileDistrict ?? null,
+        platform: 'native',
+        scannedAt: new Date().toISOString(),
+        appVersion: Constants.expoConfig?.version ?? null,
+      })
+    ).catch((signalError) => {
+      console.error('[DetailScreen] market scan signal failed:', signalError);
+    });
+  }, [normalizedRouteBarcode, profileCityCode, profileDistrict]);
+
+  useEffect(() => {
+    if (
+      !MARKET_GELSIN_RUNTIME.isEnabled ||
+      !displayedProduct ||
+      displayedProduct.type === 'medicine' ||
+      !profileCityCode
+    ) {
+      setMarketOffersResponse(null);
+      setMarketOffersError(null);
+      setMarketOffersLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadMarketOffers = async () => {
+      try {
+        setMarketOffersLoading(true);
+        setMarketOffersError(null);
+
+        const nextResponse = await fetchMarketProductOffers(normalizedRouteBarcode, {
+          cityCode: profileCityCode,
+          districtName: profileDistrict ?? undefined,
+          limit: 8,
+          includeOutOfStock: false,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        setMarketOffersResponse(nextResponse);
+      } catch (loadError) {
+        console.error('[DetailScreen] market offers load failed:', loadError);
+
+        if (cancelled) {
+          return;
+        }
+
+        setMarketOffersResponse(null);
+        setMarketOffersError(
+          tt(
+            'market_pricing_error',
+            'Fiyat katmanı şu anda yüklenemedi. Daha sonra tekrar deneyebilirsiniz.'
+          )
+        );
+      } finally {
+        if (!cancelled) {
+          setMarketOffersLoading(false);
+        }
+      }
+    };
+
+    void loadMarketOffers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    displayedProduct,
+    normalizedRouteBarcode,
+    profileCityCode,
+    profileDistrict,
+    tt,
+  ]);
+
+  useEffect(() => {
+    if (
+      !MARKET_GELSIN_RUNTIME.isEnabled ||
+      !displayedProduct ||
+      displayedProduct.type === 'medicine' ||
+      !profileCityCode ||
+      !alternativeSuggestions.length
+    ) {
+      setAlternativePricingByBarcode({});
+      return;
+    }
+
+    const candidateBarcodes = alternativeSuggestions
+      .map((item) => String(item.product.barcode || '').trim())
+      .filter(Boolean);
+
+    if (!candidateBarcodes.length) {
+      setAlternativePricingByBarcode({});
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadAlternativePricing = async () => {
+      try {
+        const response = await fetchMarketAlternativePricing(
+          buildMarketGelsinAlternativesRequest(
+            normalizedRouteBarcode,
+            profileCityCode,
+            candidateBarcodes,
+            profileDistrict ?? undefined
+          )
+        );
+
+        if (cancelled) {
+          return;
+        }
+
+        setAlternativePricingByBarcode(
+          response.entries.reduce<Record<string, MarketAlternativePricingEntry>>(
+            (accumulator, entry) => {
+              accumulator[entry.barcode] = entry;
+              return accumulator;
+            },
+            {}
+          )
+        );
+      } catch (loadError) {
+        console.error('[DetailScreen] alternative pricing load failed:', loadError);
+
+        if (!cancelled) {
+          setAlternativePricingByBarcode({});
+        }
+      }
+    };
+
+    void loadAlternativePricing();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    alternativeSuggestions,
+    displayedProduct,
+    normalizedRouteBarcode,
+    profileCityCode,
+    profileDistrict,
+  ]);
+
+  const marketPricingOffers = useMemo(
+    () => marketOffersResponse?.offers ?? [],
+    [marketOffersResponse?.offers]
+  );
+
+  const marketPricingSummary = useMemo(() => {
+    if (!marketPricingOffers.length) {
+      return {
+        bestLocalOffer: null as MarketOffer | null,
+        bestReferenceOffer: null as MarketOffer | null,
+        bestFallbackOffer: null as MarketOffer | null,
+      };
+    }
+
+    const partitioned = partitionOffersByPriceSourceType(marketPricingOffers);
+
+    return {
+      bestLocalOffer: getBestInStockOffer(partitioned.localMarketOffers),
+      bestReferenceOffer: getBestInStockOffer(partitioned.nationalReferenceOffers),
+      bestFallbackOffer: getBestInStockOffer(marketPricingOffers),
+    };
+  }, [marketPricingOffers]);
+
+  const pricingHighlightItems = useMemo<PricingHighlightItem[]>(() => {
+    const items: PricingHighlightItem[] = [];
+
+    if (marketPricingSummary.bestLocalOffer) {
+      items.push({
+        key: 'local-offer',
+        badge: tt('market_pricing_local_badge', 'Şehrindeki fiyat'),
+        title: marketPricingSummary.bestLocalOffer.marketName,
+        priceLabel: formatLocalizedPrice(
+          preferredLocale,
+          marketPricingSummary.bestLocalOffer.price,
+          marketPricingSummary.bestLocalOffer.currency
+        ),
+        helper: buildMarketOfferMeta(tt, preferredLocale, marketPricingSummary.bestLocalOffer),
+        meta: marketPricingLocationLabel || profileCity || undefined,
+        tone: 'local',
+      });
+    }
+
+    if (marketPricingSummary.bestReferenceOffer) {
+      items.push({
+        key: 'reference-offer',
+        badge: tt('market_pricing_reference_badge', 'Ulusal referans'),
+        title: marketPricingSummary.bestReferenceOffer.marketName,
+        priceLabel: formatLocalizedPrice(
+          preferredLocale,
+          marketPricingSummary.bestReferenceOffer.price,
+          marketPricingSummary.bestReferenceOffer.currency
+        ),
+        helper: buildMarketOfferMeta(
+          tt,
+          preferredLocale,
+          marketPricingSummary.bestReferenceOffer
+        ),
+        meta: tt('market_pricing_reference_meta', 'Referans fiyat'),
+        tone: 'reference',
+      });
+    }
+
+    if (!items.length && marketPricingSummary.bestFallbackOffer) {
+      items.push({
+        key: 'best-offer',
+        badge: tt('market_pricing_best_badge', 'En iyi teklif'),
+        title: marketPricingSummary.bestFallbackOffer.marketName,
+        priceLabel: formatLocalizedPrice(
+          preferredLocale,
+          marketPricingSummary.bestFallbackOffer.price,
+          marketPricingSummary.bestFallbackOffer.currency
+        ),
+        helper: buildMarketOfferMeta(
+          tt,
+          preferredLocale,
+          marketPricingSummary.bestFallbackOffer
+        ),
+        meta: marketPricingLocationLabel || profileCity || undefined,
+        tone: 'best',
+      });
+    }
+
+    return items;
+  }, [
+    marketPricingLocationLabel,
+    marketPricingSummary.bestFallbackOffer,
+    marketPricingSummary.bestLocalOffer,
+    marketPricingSummary.bestReferenceOffer,
+    preferredLocale,
+    profileCity,
+    tt,
+  ]);
+
+  const pricingSectionSubtitle = useMemo(() => {
+    if (!profileCity) {
+      return null;
+    }
+
+    if (marketPricingOffers.length) {
+      return applyTemplate(
+        tt(
+          'market_pricing_offer_count',
+          '{{location}} için {{count}} güncel teklif bulundu.'
+        ),
+        {
+          location: marketPricingLocationLabel || profileCity,
+          count: marketPricingOffers.length,
+        }
+      );
+    }
+
+    return applyTemplate(
+      tt(
+        'market_pricing_subtitle',
+        'market_gelsin verisi ile {{location}} için fiyat katmanı gösterilir.'
+      ),
+      {
+        location: marketPricingLocationLabel || profileCity,
+      }
+    );
+  }, [marketPricingLocationLabel, marketPricingOffers.length, profileCity, tt]);
 
   const productImageUri = imageError
     ? 'https://via.placeholder.com/400?text=No+Image'
@@ -2423,6 +2888,45 @@ export const DetailScreen: React.FC = () => {
             />
           ) : null}
 
+          {!isMedicineProduct && MARKET_GELSIN_RUNTIME.isEnabled ? (
+            profileCityCode ? (
+              <>
+                <PricingHighlightsSection
+                  title={tt('market_pricing_title', 'Fiyat ve Bulunabilirlik')}
+                  subtitle={pricingSectionSubtitle ?? undefined}
+                  items={pricingHighlightItems}
+                  loading={marketOffersLoading}
+                  emptyLabel={
+                    !marketOffersLoading && !pricingHighlightItems.length
+                      ? tt(
+                          'market_pricing_empty',
+                          'Bu ürün için şu anda fiyat teklifi bulunamadı.'
+                        )
+                      : undefined
+                  }
+                  colors={colors}
+                />
+
+                {marketOffersError ? (
+                  <NoticeCard text={marketOffersError} colors={colors} />
+                ) : null}
+              </>
+            ) : (
+              <InfoActionCard
+                title={tt(
+                  'market_pricing_missing_location_title',
+                  'Şehrine göre fiyat karşılaştırmasını aç'
+                )}
+                subtitle={tt(
+                  'market_pricing_missing_location_subtitle',
+                  'Profiline şehir ve ilçe bilgisi eklediğinde bu ürün için market tekliflerini göstereceğiz.'
+                )}
+                onPress={() => navigation.navigate('ProfileSettings')}
+                colors={colors}
+              />
+            )
+          ) : null}
+
           {showAlternativeCard && alternativeSuggestions.length ? (
             <View style={styles.alternativeSection}>
               <Text style={[styles.alternativeSectionTitle, { color: colors.text }]}>
@@ -2441,7 +2945,17 @@ export const DetailScreen: React.FC = () => {
                   key={item.product.barcode}
                   title={item.product.name || tt('unnamed_product', 'İsimsiz Ürün')}
                   brand={item.product.brand || tt('unknown_brand', 'Bilinmeyen Marka')}
-                  subtitle={buildAlternativeSubtitle(tt, displayedProduct.type, item)}
+                  subtitle={buildAlternativeSubtitle(
+                    tt,
+                    displayedProduct.type,
+                    item,
+                    buildAlternativeMarketHint({
+                      tt,
+                      locale: preferredLocale,
+                      offer: alternativePricingByBarcode[item.product.barcode]?.bestOffer,
+                      locationLabel: marketPricingLocationLabel || profileCity,
+                    }) ?? undefined
+                  )}
                   imageUrl={item.product.image_url}
                   badgeText={buildAlternativeBadge(tt, item, index)}
                   score={item.analysis.score}
