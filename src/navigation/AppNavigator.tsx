@@ -38,6 +38,7 @@ import { LegalDocumentScreen } from '../screens/main/LegalDocumentScreen';
 import { NutritionPreferencesScreen } from '../screens/main/NutritionPreferencesScreen';
 import { MissingProductScreen } from '../screens/main/MissingProductScreen';
 import { PaywallScreen } from '../screens/main/PaywallScreen';
+import { PriceCompareScreen } from '../screens/main/PriceCompareScreen';
 import type { PaywallEntrySource } from '../types/monetization';
 import type { Product } from '../utils/analysis';
 
@@ -63,6 +64,11 @@ export type RootStackParamList = {
   LegalDocument: {
     documentKey: 'terms' | 'privacy' | 'medical' | 'premium' | 'independence';
   };
+  PriceCompare:
+    | {
+        initialQuery?: string;
+      }
+    | undefined;
   NutritionPreferences: undefined;
   ProfileSettings: undefined;
   MissingProduct: { barcode: string };
@@ -349,6 +355,11 @@ const AppStack = () => (
     <Stack.Screen
       name="LegalDocument"
       component={LegalDocumentScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="PriceCompare"
+      component={PriceCompareScreen}
       options={{ animation: 'slide_from_right' }}
     />
     <Stack.Screen

@@ -108,6 +108,27 @@ export type MarketProductOffersResponse = {
   offers: MarketOffer[];
 };
 
+export type MarketSearchProduct = {
+  barcode: string;
+  productName: string;
+  brand?: string | null;
+  category?: string | null;
+  imageUrl?: string | null;
+  bestOffer?: MarketOffer | null;
+  marketCount: number;
+  inStockMarketCount: number;
+  dataFreshness?: MarketDataFreshness | null;
+};
+
+export type MarketProductSearchResponse = {
+  query: string;
+  fetchedAt: string;
+  requestId?: string | null;
+  partial?: boolean;
+  warnings?: string[];
+  results: MarketSearchProduct[];
+};
+
 export type MarketPriceHistoryResponse = {
   barcode: string;
   marketName: string;

@@ -572,6 +572,10 @@ export const SettingsScreen: React.FC = () => {
     navigation.navigate('NutritionPreferences');
   }, [navigation]);
 
+  const handleOpenPriceCompare = useCallback(() => {
+    navigation.navigate('PriceCompare');
+  }, [navigation]);
+
   const handleOpenLegalDocument = useCallback(
     (
       documentKey: 'terms' | 'privacy' | 'medical' | 'premium' | 'independence'
@@ -1128,6 +1132,14 @@ export const SettingsScreen: React.FC = () => {
         label={tt('methodology_sources', 'Metodoloji ve Kaynaklar')}
         colors={colors}
         onPress={() => navigation.navigate('MethodologySources')}
+      />
+
+      <SettingsItem
+        icon="pricetags-outline"
+        label={tt('price_compare_title', 'Fiyat Karşılaştır')}
+        colors={colors}
+        value={tt('price_compare_short_value', 'Market bazında')}
+        onPress={handleOpenPriceCompare}
       />
 
       <Text

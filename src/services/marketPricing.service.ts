@@ -9,6 +9,7 @@ import type {
   MarketDataFreshness,
   MarketOffer,
   MarketIntegrationsStatusResponse,
+  MarketProductSearchResponse,
   MarketProgramCoverageResponse,
   MarketPriceHistoryPoint,
   MarketPriceHistoryResponse,
@@ -16,6 +17,7 @@ import type {
   MarketRuntimeStatusResponse,
   MarketScanEventRequest,
   MarketScanEventResponse,
+  MarketSearchProduct,
 } from '../types/marketPricing';
 import {
   buildMarketGelsinAlternativesEndpoint,
@@ -25,6 +27,7 @@ import {
   buildMarketGelsinOffersEndpoint,
   buildMarketGelsinProgramCoverageEndpoint,
   buildMarketGelsinScanEventEndpoint,
+  buildMarketGelsinSearchEndpoint,
   buildMarketGelsinStatusEndpoint,
 } from './marketPricingContract.service';
 
@@ -156,6 +159,32 @@ const parseHistoryPoint = (value: unknown): MarketPriceHistoryPoint => {
   };
 };
 
+const parseSearchProduct = (value: unknown): MarketSearchProduct => {
+  const payload = toObject(value);
+
+  return {
+    barcode: toText(payload.barcode ?? payload.code, ''),
+    productName: toText(
+      payload.product_name ?? payload.productName ?? payload.name ?? payload.title,
+      '-'
+    ),
+    brand: toText(payload.brand ?? payload.brand_name ?? payload.brandName, '') || null,
+    category:
+      toText(payload.category ?? payload.category_name ?? payload.categoryName, '') ||
+      null,
+    imageUrl: toText(payload.image_url ?? payload.imageUrl, '') || null,
+    bestOffer: payload.best_offer
+      ? parseOffer(payload.best_offer)
+      : payload.bestOffer
+        ? parseOffer(payload.bestOffer)
+        : null,
+    marketCount: toNumber(payload.market_count ?? payload.marketCount) ?? 0,
+    inStockMarketCount:
+      toNumber(payload.in_stock_market_count ?? payload.inStockMarketCount) ?? 0,
+    dataFreshness: parseFreshness(payload.data_freshness ?? payload.dataFreshness),
+  };
+};
+
 const ensureRuntimeReady = () => {
   if (!MARKET_GELSIN_RUNTIME.isEnabled || !marketPricingClient) {
     throw new Error('market_gelsin_runtime_not_ready');
@@ -192,6 +221,38 @@ export async function fetchMarketProductOffers(
     city: cityCode || cityName ? { code: cityCode, name: cityName } : null,
     dataFreshness: parseFreshness(payload.data_freshness ?? payload.dataFreshness),
     offers,
+  };
+}
+
+export async function fetchMarketProductSearch(params: {
+  query: string;
+  cityCode?: string;
+  category?: string;
+  brand?: string;
+  limit?: number;
+}): Promise<MarketProductSearchResponse> {
+  ensureRuntimeReady();
+
+  const endpoint = buildMarketGelsinSearchEndpoint({
+    query: params.query,
+    cityCode: params.cityCode,
+    category: params.category,
+    brand: params.brand,
+    limit: params.limit,
+  });
+  const response = await marketPricingClient!.get(endpoint);
+  const payload = toObject(response.data);
+  const results = Array.isArray(payload.results)
+    ? payload.results.map(parseSearchProduct).filter((item) => item.barcode)
+    : [];
+
+  return {
+    query: toText(payload.query ?? payload.q, params.query),
+    fetchedAt: toText(payload.fetched_at ?? payload.fetchedAt, new Date().toISOString()),
+    requestId: toText(payload.request_id ?? payload.requestId, '') || null,
+    partial: toBoolean(payload.partial, false),
+    warnings: toStringArray(payload.warnings),
+    results,
   };
 }
 
