@@ -26,6 +26,9 @@ export type MonetizationPolicySnapshot = {
   source: MonetizationPolicySource;
   version: number;
   fetchedAt: number | null;
+  monthlyPlanEnabled: boolean;
+  monthlyPriceTry: number;
+  monthlyProductId: string;
   annualPlanEnabled: boolean;
   annualPriceTry: number;
   annualProductId: string;

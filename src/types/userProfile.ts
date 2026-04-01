@@ -30,6 +30,9 @@ export type UserMonetizationProjection = {
   entitlementSource?: EntitlementSource;
   policySource?: MonetizationPolicySource;
   policyVersion?: number;
+  monthlyPlanEnabled?: boolean;
+  monthlyPriceTry?: number;
+  monthlyProductId?: string;
   annualPlanEnabled?: boolean;
   annualPriceTry?: number;
   annualProductId?: string;

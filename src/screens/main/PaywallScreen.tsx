@@ -138,16 +138,94 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
           'Günlük ücretsiz tarama limitine ulaştın'
         );
       case 'settings':
-        return tt('premium_title', 'Premium Yıllık Plan');
+        return tt('premium_title', 'BarkodAnaliz Premium');
       default:
-        return tt('premium_title', 'Premium Yıllık Plan');
+        return tt('premium_title', 'BarkodAnaliz Premium');
     }
   }, [route.params?.source, tt]);
 
   const paywallSource = (route.params?.source ?? 'unknown') as PaywallEntrySource;
+  const monthlyPlanEnabled = policy?.monthlyPlanEnabled ?? false;
+  const monthlyPriceTry = policy?.monthlyPriceTry ?? 49.99;
   const annualPriceTry = policy?.annualPriceTry ?? 39.99;
   const purchaseReady = Boolean(
     policy?.purchaseProviderEnabled && policy?.annualPlanEnabled
+  );
+  const annualSavingsTry = useMemo(() => {
+    const rawValue = monthlyPriceTry * 12 - annualPriceTry;
+    return rawValue > 0 ? Math.round(rawValue * 100) / 100 : 0;
+  }, [annualPriceTry, monthlyPriceTry]);
+
+  const premiumFeatureCards = useMemo(
+    () => [
+      {
+        key: 'adfree',
+        icon: 'sparkles-outline' as const,
+        iconColor: colors.primary,
+        backgroundColor: withAlpha(colors.primary, '10'),
+        title: tt('benefit_adfree_title', 'Reklamsız odak'),
+        text: tt(
+          'benefit_adfree_text',
+          'Tarama, detay ve fiyat karşılaştırma akışları reklamsız kalır.'
+        ),
+      },
+      {
+        key: 'markets',
+        icon: 'storefront-outline' as const,
+        iconColor: colors.teal,
+        backgroundColor: withAlpha(colors.teal, '10'),
+        title: tt('benefit_markets_title', 'Tüm marketleri gör'),
+        text: tt(
+          'benefit_markets_text',
+          'Gelişmiş market listesi, daha fazla teklif görünürlüğü ve tam kıyas açılır.'
+        ),
+      },
+      {
+        key: 'basket',
+        icon: 'basket-outline' as const,
+        iconColor: colors.text,
+        backgroundColor: withAlpha(colors.border, '3E'),
+        title: tt('benefit_basket_title', 'Akıllı sepet'),
+        text: tt(
+          'benefit_basket_text',
+          'Sepette en ucuz dağılım, tek market toplamı ve tasarruf farkı daha net görünür.'
+        ),
+      },
+      {
+        key: 'alerts',
+        icon: 'notifications-outline' as const,
+        iconColor: colors.warning,
+        backgroundColor: withAlpha(colors.warning, '12'),
+        title: tt('benefit_alerts_title', 'Fiyat alarmı'),
+        text: tt(
+          'benefit_alerts_text',
+          'Takip ettiğin ürünlerde fiyat değişimini ve düşüş fırsatlarını kaçırmazsın.'
+        ),
+      },
+      {
+        key: 'history',
+        icon: 'time-outline' as const,
+        iconColor: colors.primary,
+        backgroundColor: withAlpha(colors.primary, '10'),
+        title: tt('benefit_history_title', 'Tam geçmiş ve favoriler'),
+        text: tt(
+          'benefit_history_text',
+          'Geçmiş taramalar, favoriler, aile listeleri ve ilaç/prospektüs kayıtları korunur.'
+        ),
+      },
+      {
+        key: 'filters',
+        icon: 'options-outline' as const,
+        iconColor: colors.teal,
+        backgroundColor: withAlpha(colors.teal, '10'),
+        title: tt('benefit_filters_title', 'Gelişmiş filtreler'),
+        text: tt(
+          'benefit_filters_text',
+          'Beslenme tercihleri, market tercihi ve ürün karşılaştırması daha güçlü filtrelerle çalışır.'
+        ),
+      },
+    ],
+    [colors.border, colors.primary, colors.teal, colors.text, colors.warning, tt]
   );
 
   const operationStatusColor = useMemo(() => {
@@ -425,9 +503,29 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
           <Text style={[styles.heroSubtitle, { color: colors.mutedText }]}>
             {tt(
               'premium_subtitle',
-              'Premium ile reklamsız kullanım, limitsiz barkod tarama ve daha güvenilir operasyon yüzeyi açılır.'
+              'Ücretsizde tara, skor gör ve temel fiyat kıyasını kullan. Premium ile reklamsız deneyim, gelişmiş market optimizasyonu ve daha akıllı alışveriş araçları açılır.'
             )}
           </Text>
+
+          <View
+            style={[
+              styles.freeCoreNotice,
+              {
+                backgroundColor: withAlpha(colors.cardElevated, 'E6'),
+                borderColor: withAlpha(colors.border, 'B8'),
+              },
+            ]}
+          >
+            <Text style={[styles.freeCoreTitle, { color: colors.text }]}>
+              {tt('free_core_title', 'Ücretsiz çekirdek hep açık')}
+            </Text>
+            <Text style={[styles.freeCoreText, { color: colors.mutedText }]}>
+              {tt(
+                'free_core_text',
+                'Barkod tara, ürün skorunu gör ve temel fiyat kıyasını reklamlı modelle kullanmaya devam edebilirsin.'
+              )}
+            </Text>
+          </View>
 
           <View style={styles.valueStrip}>
             <View
@@ -447,9 +545,9 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                 { backgroundColor: withAlpha(colors.teal, '12') },
               ]}
             >
-              <Ionicons name="scan-outline" size={16} color={colors.teal} />
+              <Ionicons name="storefront-outline" size={16} color={colors.teal} />
               <Text style={[styles.valueChipText, { color: colors.text }]}>
-                {tt('value_chip_unlimited', 'Limitsiz tarama')}
+                {tt('value_chip_full_markets', 'Tam market görünümü')}
               </Text>
             </View>
             <View
@@ -458,9 +556,20 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                 { backgroundColor: withAlpha(colors.border, '42') },
               ]}
             >
-              <Ionicons name="shield-checkmark-outline" size={16} color={colors.text} />
+              <Ionicons name="basket-outline" size={16} color={colors.text} />
               <Text style={[styles.valueChipText, { color: colors.text }]}>
-                {tt('value_chip_restore_ready', 'Restore hazir')}
+                {tt('value_chip_smart_basket', 'Akıllı sepet')}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.valueChip,
+                { backgroundColor: withAlpha(colors.warning, '12') },
+              ]}
+            >
+              <Ionicons name="notifications-outline" size={16} color={colors.warning} />
+              <Text style={[styles.valueChipText, { color: colors.text }]}>
+                {tt('value_chip_alerts', 'Fiyat alarmı')}
               </Text>
             </View>
           </View>
@@ -482,89 +591,129 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                   },
                 ]}
               >
-                <View style={styles.planHeader}>
-                  <View style={styles.planHeaderTextWrap}>
-                    <Text style={[styles.planEyebrow, { color: colors.primary }]}>
-                      {tt('annual_plan_label', 'Yillik plan')}
+                <View style={styles.planComparisonGrid}>
+                  <View
+                    style={[
+                      styles.planOptionCard,
+                      {
+                        backgroundColor: withAlpha(colors.card, 'D8'),
+                        borderColor: withAlpha(colors.border, 'B8'),
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.planOptionBadge,
+                        {
+                          backgroundColor: withAlpha(
+                            monthlyPlanEnabled ? colors.teal : colors.warning,
+                            '14'
+                          ),
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.planOptionBadgeText,
+                          {
+                            color: monthlyPlanEnabled ? colors.teal : colors.warning,
+                          },
+                        ]}
+                      >
+                        {monthlyPlanEnabled
+                          ? tt('monthly_plan_badge', 'Esnek plan')
+                          : tt('monthly_plan_coming_soon_badge', 'Yakında')}
+                      </Text>
+                    </View>
+
+                    <Text style={[styles.planOptionTitle, { color: colors.text }]}>
+                      {tt('premium_monthly', 'Aylık Premium')}
                     </Text>
-                    <Text style={[styles.planTitle, { color: colors.text }]}>
-                      {tt('premium_yearly', 'Yıllık Premium')}
+                    <Text style={[styles.planOptionPrice, { color: colors.text }]}>
+                      {monthlyPlanEnabled
+                        ? formatTryPrice(monthlyPriceTry)
+                        : tt('monthly_plan_coming_soon_price', 'Yakında')}
                     </Text>
-                    <Text style={[styles.planMeta, { color: colors.mutedText }]}>
-                      {tt(
-                        'annual_price_equivalent',
-                        '{{price}} / ay esitligi ile yillik kilit fiyat'
-                      ).replace('{{price}}', formatMonthlyEquivalent(annualPriceTry))}
+                    <Text style={[styles.planOptionMeta, { color: colors.mutedText }]}>
+                      {monthlyPlanEnabled
+                        ? tt(
+                            'monthly_plan_meta',
+                            'Esnek giriş isteyen kullanıcılar için aylık erişim.'
+                          )
+                        : tt(
+                            'monthly_plan_disabled_meta',
+                            'Aylık plan mağaza ürünü aktif olduğunda bu ekrana eklenecek.'
+                          )}
                     </Text>
                   </View>
 
                   <View
                     style={[
-                      styles.priceSpotlight,
-                      { backgroundColor: withAlpha(colors.primary, '14') },
+                      styles.planOptionCard,
+                      styles.planOptionCardRecommended,
+                      {
+                        backgroundColor: withAlpha(colors.primary, '10'),
+                        borderColor: withAlpha(colors.primary, '3A'),
+                      },
                     ]}
                   >
-                    <Text style={[styles.priceMain, { color: colors.text }]}>
+                    <View
+                      style={[
+                        styles.planOptionBadge,
+                        { backgroundColor: withAlpha(colors.primary, '16') },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.planOptionBadgeText,
+                          { color: colors.primary },
+                        ]}
+                      >
+                        {tt('annual_plan_badge', 'En iyi değer')}
+                      </Text>
+                    </View>
+
+                    <Text style={[styles.planOptionTitle, { color: colors.text }]}>
+                      {tt('premium_yearly', 'Yıllık Premium')}
+                    </Text>
+                    <Text style={[styles.planOptionPrice, { color: colors.text }]}>
                       {formatTryPrice(annualPriceTry)}
                     </Text>
-                    <Text style={[styles.priceSub, { color: colors.mutedText }]}>
-                      / yil
+                    <Text style={[styles.planOptionMeta, { color: colors.mutedText }]}>
+                      {tt(
+                        'annual_price_equivalent',
+                        '{{price}} / ay eşitliği ile yıllık kilit fiyat'
+                      ).replace('{{price}}', formatMonthlyEquivalent(annualPriceTry))}
                     </Text>
+                    {monthlyPlanEnabled && annualSavingsTry > 0 ? (
+                      <Text style={[styles.planOptionSavings, { color: colors.primary }]}>
+                        {tt(
+                          'annual_plan_savings',
+                          'Aylık plana göre {{price}} daha avantajlı'
+                        ).replace('{{price}}', formatTryPrice(annualSavingsTry))}
+                      </Text>
+                    ) : null}
                   </View>
                 </View>
 
                 <View style={styles.planBenefitGrid}>
-                  <View
-                    style={[
-                      styles.planBenefitCard,
-                      { backgroundColor: withAlpha(colors.primary, '10') },
-                    ]}
-                  >
-                    <Ionicons name="radio-outline" size={18} color={colors.primary} />
-                    <Text style={[styles.planBenefitTitle, { color: colors.text }]}>
-                      {tt('benefit_silent_experience_title', 'Sessiz deneyim')}
-                    </Text>
-                    <Text style={[styles.planBenefitText, { color: colors.mutedText }]}>
-                      {tt(
-                        'benefit_silent_experience_text',
-                        'Reklamlar bastirilir, odak kaybi azalir.'
-                      )}
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.planBenefitCard,
-                      { backgroundColor: withAlpha(colors.teal, '10') },
-                    ]}
-                  >
-                    <Ionicons name="infinite-outline" size={18} color={colors.teal} />
-                    <Text style={[styles.planBenefitTitle, { color: colors.text }]}>
-                      {tt('benefit_unlimited_volume_title', 'Sinirsiz hacim')}
-                    </Text>
-                    <Text style={[styles.planBenefitText, { color: colors.mutedText }]}>
-                      {tt(
-                        'benefit_unlimited_volume_text',
-                        'Gunluk tarama limiti kalkar, akisin bozulmaz.'
-                      )}
-                    </Text>
-                  </View>
-                  <View
-                    style={[
-                      styles.planBenefitCard,
-                      { backgroundColor: withAlpha(colors.border, '3E') },
-                    ]}
-                  >
-                    <Ionicons name="server-outline" size={18} color={colors.text} />
-                    <Text style={[styles.planBenefitTitle, { color: colors.text }]}>
-                      {tt('benefit_identity_sync_title', 'Kimlik senkronu')}
-                    </Text>
-                    <Text style={[styles.planBenefitText, { color: colors.mutedText }]}>
-                      {tt(
-                        'benefit_identity_sync_text',
-                        'Auth ve restore akislarinda entitlement takibi korunur.'
-                      )}
-                    </Text>
-                  </View>
+                  {premiumFeatureCards.map((item) => (
+                    <View
+                      key={item.key}
+                      style={[
+                        styles.planBenefitCard,
+                        { backgroundColor: item.backgroundColor },
+                      ]}
+                    >
+                      <Ionicons name={item.icon} size={18} color={item.iconColor} />
+                      <Text style={[styles.planBenefitTitle, { color: colors.text }]}>
+                        {item.title}
+                      </Text>
+                      <Text style={[styles.planBenefitText, { color: colors.mutedText }]}>
+                        {item.text}
+                      </Text>
+                    </View>
+                  ))}
                 </View>
 
                 <View
@@ -594,11 +743,11 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                     {purchaseReady
                       ? tt(
                           'purchase_surface_ready_text',
-                          'Provider acik. Bundle, offering ve cihaz billing katmani dogrulandiginda satin alma sheet acilir.'
+                          'Yıllık plan şu an aktif satın alma yoludur. Store ve provider doğrulandığında doğrudan satın alma akışı açılır.'
                         )
                       : tt(
                           'purchase_surface_setup_text',
-                          'Dashboard ve store paketlerini tamamlayinca bu ekran dogrudan satin alma akisini acacak.'
+                          'Store ve provider yapılandırması tamamlandığında yıllık plan doğrudan satın alma akışını açacak. Aylık plan ayrı ürün olarak sonra aktive edilebilir.'
                         )}
                   </Text>
                 </View>
@@ -616,7 +765,7 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                     <Text style={[styles.activeStateText, { color: colors.mutedText }]}>
                       {tt(
                         'premium_active_text',
-                        'Bu hesapta premium entitlement aktif görünüyor. Reklamlar bastırılır ve tarama limiti uygulanmaz.'
+                        'Bu hesapta premium aktif. Reklamlar bastırılır; gelişmiş market optimizasyonu, geçmiş ve filtre özellikleri açılır.'
                       )}
                     </Text>
                   </View>
@@ -652,7 +801,7 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                       ]}
                     >
                       {purchaseReady
-                        ? tt('buy_yearly_premium', 'Yıllık Premium Satın Al')
+                        ? tt('buy_yearly_premium', 'Yıllık Premium ile Tasarrufa Başla')
                         : tt(
                             'purchase_provider_inactive',
                             'Satın alma sağlayıcısı henüz aktif değil'
@@ -821,6 +970,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 24,
   },
+  freeCoreNotice: {
+    marginTop: 16,
+    borderWidth: 1,
+    borderRadius: 18,
+    padding: 14,
+    gap: 6,
+  },
+  freeCoreTitle: {
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  freeCoreText: {
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '600',
+  },
   valueStrip: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -855,6 +1020,56 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 24,
     padding: 18,
+  },
+  planComparisonGrid: {
+    gap: 12,
+  },
+  planOptionCard: {
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 14,
+    gap: 8,
+  },
+  planOptionCardRecommended: {
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    elevation: 4,
+  },
+  planOptionBadge: {
+    alignSelf: 'flex-start',
+    minHeight: 28,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planOptionBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.4,
+  },
+  planOptionTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  planOptionPrice: {
+    fontSize: 24,
+    fontWeight: '900',
+    letterSpacing: -0.5,
+  },
+  planOptionMeta: {
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: '600',
+  },
+  planOptionSavings: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '800',
   },
   planHeader: {
     flexDirection: 'row',

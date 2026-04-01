@@ -300,6 +300,9 @@ function compactUserMonetizationProjection(
   assign('entitlementSource', input.entitlementSource);
   assign('policySource', input.policySource);
   assign('policyVersion', input.policyVersion);
+  assign('monthlyPlanEnabled', input.monthlyPlanEnabled);
+  assign('monthlyPriceTry', input.monthlyPriceTry);
+  assign('monthlyProductId', input.monthlyProductId);
   assign('annualPlanEnabled', input.annualPlanEnabled);
   assign('annualPriceTry', input.annualPriceTry);
   assign('annualProductId', input.annualProductId);
@@ -350,6 +353,15 @@ function normalizeStoredMonetizationProjection(
     ) as UserMonetizationProjection['policySource'] | undefined,
     policyVersion:
       typeof record.policyVersion === 'number' ? record.policyVersion : undefined,
+    monthlyPlanEnabled:
+      typeof record.monthlyPlanEnabled === 'boolean'
+        ? record.monthlyPlanEnabled
+        : undefined,
+    monthlyPriceTry:
+      typeof record.monthlyPriceTry === 'number' ? record.monthlyPriceTry : undefined,
+    monthlyProductId: normalizeOptionalString(
+      record.monthlyProductId as string | undefined
+    ),
     annualPlanEnabled:
       typeof record.annualPlanEnabled === 'boolean'
         ? record.annualPlanEnabled
@@ -505,6 +517,9 @@ async function buildMonetizationProjectionForUser(
       entitlementSource: entitlement.source,
       policySource: policy.source,
       policyVersion: policy.version,
+      monthlyPlanEnabled: policy.monthlyPlanEnabled,
+      monthlyPriceTry: policy.monthlyPriceTry,
+      monthlyProductId: policy.monthlyProductId,
       annualPlanEnabled: policy.annualPlanEnabled,
       annualPriceTry: policy.annualPriceTry,
       annualProductId: policy.annualProductId,

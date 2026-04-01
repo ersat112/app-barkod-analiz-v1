@@ -114,6 +114,9 @@ export const AD_POLICY = Object.freeze({
 });
 
 export const MONETIZATION_POLICY = Object.freeze({
+  monthlyPlanEnabled: false,
+  monthlyPriceTry: 49.99,
+  monthlyProductId: '',
   annualPlanEnabled: true,
   annualPriceTry: 39.99,
   annualProductId: 'premium_annual_39_99_try:annual',

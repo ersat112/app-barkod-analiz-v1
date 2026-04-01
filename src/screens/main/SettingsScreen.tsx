@@ -741,21 +741,21 @@ export const SettingsScreen: React.FC = () => {
 
   const premiumTitle = monetization.entitlement?.isPremium
     ? tt('premium_active', 'Premium aktif')
-    : tt('premium_title', 'Premium yıllık plan');
+    : tt('premium_title', 'BarkodAnaliz Premium');
 
   const premiumSubtitle = monetization.entitlement?.isPremium
     ? tt(
         'premium_active_text',
-        'Bu hesapta premium entitlement aktif. Reklamlar bastırılır ve tarama limiti uygulanmaz.'
+        'Bu hesapta premium aktif. Reklamlar bastırılır; gelişmiş market optimizasyonu, geçmiş ve filtre özellikleri açılır.'
       )
     : tt(
         'premium_settings_subtitle',
-        'Yıllık premium ile reklamsız kullanım ve limitsiz barkod tarama açılır.'
+        'Premium ile reklamsız kullanım, tam market kıyası, akıllı sepet optimizasyonu ve gelişmiş geçmiş özellikleri açılır.'
       );
 
   const premiumStatusLabel = monetization.entitlement?.isPremium
     ? tt('premium_badge_active', 'Aktif')
-    : tt('premium_badge_yearly', 'Yıllık');
+    : tt('premium_badge_available', 'Hazır');
 
   const nutritionPreferenceCount = useMemo(() => {
     return Object.values(nutritionPreferences).filter(Boolean).length;

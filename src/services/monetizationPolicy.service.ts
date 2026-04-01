@@ -17,6 +17,9 @@ import type {
 
 type RemoteMonetizationPolicyDocument = Partial<{
   version: number;
+  monthlyPlanEnabled: boolean;
+  monthlyPriceTry: number;
+  monthlyProductId: string;
   annualPlanEnabled: boolean;
   annualPriceTry: number;
   annualProductId: string;
@@ -124,6 +127,16 @@ function applyRuntimeOverrides(
     };
   }
 
+  if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_MONTHLY_PLAN_ENABLED')) {
+    nextPolicy = {
+      ...nextPolicy,
+      monthlyPlanEnabled: getEnvBoolean(
+        'EXPO_PUBLIC_MONETIZATION_MONTHLY_PLAN_ENABLED',
+        nextPolicy.monthlyPlanEnabled
+      ),
+    };
+  }
+
   if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_PURCHASE_PROVIDER_ENABLED')) {
     nextPolicy = {
       ...nextPolicy,
@@ -167,6 +180,19 @@ function applyRuntimeOverrides(
     };
   }
 
+  if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_MONTHLY_PRODUCT_ID')) {
+    nextPolicy = {
+      ...nextPolicy,
+      monthlyProductId: normalizeAnnualProductIdValue(
+        getEnvString(
+          'EXPO_PUBLIC_MONETIZATION_MONTHLY_PRODUCT_ID',
+          nextPolicy.monthlyProductId
+        ).trim(),
+        nextPolicy.monthlyProductId
+      ),
+    };
+  }
+
   if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_ANNUAL_PRICE_TRY')) {
     nextPolicy = {
       ...nextPolicy,
@@ -176,6 +202,19 @@ function applyRuntimeOverrides(
           nextPolicy.annualPriceTry
         ),
         nextPolicy.annualPriceTry
+      ),
+    };
+  }
+
+  if (hasRuntimeOverride('EXPO_PUBLIC_MONETIZATION_MONTHLY_PRICE_TRY')) {
+    nextPolicy = {
+      ...nextPolicy,
+      monthlyPriceTry: clampPrice(
+        getEnvNumber(
+          'EXPO_PUBLIC_MONETIZATION_MONTHLY_PRICE_TRY',
+          nextPolicy.monthlyPriceTry
+        ),
+        nextPolicy.monthlyPriceTry
       ),
     };
   }
@@ -190,6 +229,9 @@ function createDefaultPolicy(
     source: 'default',
     version: 1,
     fetchedAt: null,
+    monthlyPlanEnabled: MONETIZATION_POLICY.monthlyPlanEnabled,
+    monthlyPriceTry: MONETIZATION_POLICY.monthlyPriceTry,
+    monthlyProductId: MONETIZATION_POLICY.monthlyProductId,
     annualPlanEnabled: MONETIZATION_POLICY.annualPlanEnabled,
     annualPriceTry: MONETIZATION_POLICY.annualPriceTry,
     annualProductId: MONETIZATION_POLICY.annualProductId,
@@ -220,6 +262,15 @@ function normalizePolicy(
     source,
     fetchedAt,
     version: clampInteger(raw.version, fallback.version, 1, 10_000),
+    monthlyPlanEnabled: toBoolean(
+      raw.monthlyPlanEnabled,
+      fallback.monthlyPlanEnabled
+    ),
+    monthlyPriceTry: clampPrice(raw.monthlyPriceTry, fallback.monthlyPriceTry),
+    monthlyProductId: normalizeAnnualProductIdValue(
+      raw.monthlyProductId,
+      fallback.monthlyProductId
+    ),
     annualPlanEnabled: toBoolean(
       raw.annualPlanEnabled,
       fallback.annualPlanEnabled
@@ -277,6 +328,9 @@ async function readStoredPolicy(): Promise<MonetizationPolicySnapshot | null> {
     return normalizePolicy(
       {
         version: policy.version,
+        monthlyPlanEnabled: policy.monthlyPlanEnabled,
+        monthlyPriceTry: policy.monthlyPriceTry,
+        monthlyProductId: policy.monthlyProductId,
         annualPlanEnabled: policy.annualPlanEnabled,
         annualPriceTry: policy.annualPriceTry,
         annualProductId: policy.annualProductId,
