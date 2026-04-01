@@ -40,6 +40,10 @@ const buildCandidateFromProduct = (
   source: LocalSearchSource,
   freshnessSeed: number
 ): LocalSearchCandidate | null => {
+  if (product.type === 'medicine') {
+    return null;
+  }
+
   const barcode = String(product.barcode || '').trim();
 
   if (!barcode) {
