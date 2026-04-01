@@ -166,28 +166,56 @@ const parseHistoryPoint = (value: unknown): MarketPriceHistoryPoint => {
 
 const parseSearchProduct = (value: unknown): MarketSearchProduct => {
   const payload = toObject(value);
+  const nestedOffers = Array.isArray(payload.offers)
+    ? payload.offers.map((item) => parseOffer(item))
+    : [];
+  const bestOffer =
+    payload.best_offer
+      ? parseOffer(payload.best_offer)
+      : payload.bestOffer
+        ? parseOffer(payload.bestOffer)
+        : nestedOffers.find((item) => item.inStock) ?? nestedOffers[0] ?? null;
+  const marketCount =
+    toNumber(
+      payload.market_count ??
+        payload.marketCount ??
+        payload.markets_seen_count ??
+        payload.marketsSeenCount
+    ) ?? nestedOffers.length;
+  const inStockMarketCount =
+    toNumber(payload.in_stock_market_count ?? payload.inStockMarketCount) ??
+    nestedOffers.filter((item) => item.inStock).length;
 
   return {
     barcode: toText(payload.barcode ?? payload.code, ''),
     productName: toText(
-      payload.product_name ?? payload.productName ?? payload.name ?? payload.title,
+      payload.product_name ??
+        payload.productName ??
+        payload.normalized_product_name ??
+        payload.normalizedProductName ??
+        payload.display_name ??
+        payload.displayName ??
+        payload.name ??
+        payload.title,
       '-'
     ),
     brand: toText(payload.brand ?? payload.brand_name ?? payload.brandName, '') || null,
     category:
-      toText(payload.category ?? payload.category_name ?? payload.categoryName, '') ||
+      toText(
+        payload.category ??
+          payload.category_name ??
+          payload.categoryName ??
+          payload.normalized_category ??
+          payload.normalizedCategory,
+        ''
+      ) ||
       null,
     imageUrl: toText(payload.image_url ?? payload.imageUrl, '') || null,
     marketLogoUrl:
       toText(payload.market_logo_url ?? payload.marketLogoUrl, '') || null,
-    bestOffer: payload.best_offer
-      ? parseOffer(payload.best_offer)
-      : payload.bestOffer
-        ? parseOffer(payload.bestOffer)
-        : null,
-    marketCount: toNumber(payload.market_count ?? payload.marketCount) ?? 0,
-    inStockMarketCount:
-      toNumber(payload.in_stock_market_count ?? payload.inStockMarketCount) ?? 0,
+    bestOffer,
+    marketCount,
+    inStockMarketCount,
     dataFreshness: parseFreshness(payload.data_freshness ?? payload.dataFreshness),
   };
 };
@@ -249,9 +277,14 @@ export async function fetchMarketProductSearch(params: {
   });
   const response = await marketPricingClient!.get(endpoint);
   const payload = toObject(response.data);
-  const results = Array.isArray(payload.results)
-    ? payload.results.map(parseSearchProduct).filter((item) => item.barcode)
-    : [];
+  const rawResults = Array.isArray(payload.results)
+    ? payload.results
+    : Array.isArray(payload.products)
+      ? payload.products
+      : [];
+  const results = rawResults
+    .map(parseSearchProduct)
+    .filter((item) => item.barcode)
 
   return {
     query: toText(payload.query ?? payload.q, params.query),
@@ -276,29 +309,47 @@ export async function fetchMarketAlternativePricing(
     candidate_barcodes: request.candidateBarcodes,
   });
   const payload = toObject(response.data);
-  const entries = Array.isArray(payload.entries)
-    ? payload.entries.map((item) => {
-        const entry = toObject(item);
-        return {
-          barcode: toText(entry.barcode),
-          bestOffer: entry.best_offer
-            ? parseOffer(entry.best_offer, request.cityCode)
-            : entry.bestOffer
-              ? parseOffer(entry.bestOffer, request.cityCode)
-              : null,
-          marketCount: toNumber(entry.market_count ?? entry.marketCount) ?? 0,
-          inStockMarketCount:
-            toNumber(entry.in_stock_market_count ?? entry.inStockMarketCount) ?? 0,
-          dataFreshness: parseFreshness(
-            entry.data_freshness ?? entry.dataFreshness
-          ),
-        } satisfies MarketAlternativePricingEntry;
-      })
-    : [];
+  const city = toObject(payload.city);
+  const cityCode =
+    toText(payload.city_code ?? payload.cityCode, '') ||
+    toText(city.code ?? city.city_code, '') ||
+    request.cityCode;
+  const rawEntries = Array.isArray(payload.entries)
+    ? payload.entries
+    : Array.isArray(payload.alternatives)
+      ? payload.alternatives
+      : [];
+  const entries = rawEntries.map((item) => {
+    const entry = toObject(item);
+    const entryOffers = Array.isArray(entry.offers)
+      ? entry.offers.map((offer) => parseOffer(offer, cityCode, toText(city.name ?? city.city_name)))
+      : [];
+    return {
+      barcode: toText(entry.barcode),
+      bestOffer: entry.best_offer
+        ? parseOffer(entry.best_offer, cityCode)
+        : entry.bestOffer
+          ? parseOffer(entry.bestOffer, cityCode)
+          : entryOffers.find((offer) => offer.inStock) ?? entryOffers[0] ?? null,
+      marketCount:
+        toNumber(
+          entry.market_count ??
+            entry.marketCount ??
+            entry.markets_seen_count ??
+            entry.marketsSeenCount
+        ) ?? entryOffers.length,
+      inStockMarketCount:
+        toNumber(entry.in_stock_market_count ?? entry.inStockMarketCount) ??
+        entryOffers.filter((offer) => offer.inStock).length,
+      dataFreshness: parseFreshness(
+        entry.data_freshness ?? entry.dataFreshness ?? payload.data_freshness ?? payload.dataFreshness
+      ),
+    } satisfies MarketAlternativePricingEntry;
+  });
 
   return {
     barcode: toText(payload.barcode, request.barcode),
-    cityCode: toText(payload.city_code ?? payload.cityCode, request.cityCode),
+    cityCode,
     fetchedAt: toText(payload.fetched_at ?? payload.fetchedAt, new Date().toISOString()),
     requestId: toText(payload.request_id ?? payload.requestId, '') || null,
     partial: toBoolean(payload.partial, false),
