@@ -101,6 +101,7 @@ import type {
 import type { ProductRepositoryCacheTier, ProductRepositoryLookupMeta } from '../../types/productRepository';
 import type {
   MarketAlternativePricingEntry,
+  MarketDataFreshness,
   MarketOffer,
   MarketProductOffersResponse,
 } from '../../types/marketPricing';
@@ -622,6 +623,60 @@ const buildMarketOfferMeta = (
       applyTemplate(tt('market_pricing_updated_template', 'Güncellendi {{value}}'), {
         value: updatedAt,
       })
+    );
+  }
+
+  return parts.join(' • ');
+};
+
+const getMarketFreshnessModeLabel = (
+  tt: TranslateFn,
+  freshness?: MarketDataFreshness | null
+): string => {
+  switch (freshness?.mode) {
+    case 'weekly_crawl':
+      return tt('market_pricing_freshness_weekly', 'Haftalık tarama');
+    case 'hot_refresh':
+      return tt('market_pricing_freshness_hot', 'Sıcak yenileme');
+    case 'mixed':
+      return tt('market_pricing_freshness_mixed', 'Karma yenileme');
+    default:
+      return tt('market_pricing_freshness_unknown', 'Güncellik bilgisi');
+  }
+};
+
+const buildMarketFreshnessMeta = (
+  tt: TranslateFn,
+  locale: string,
+  freshness?: MarketDataFreshness | null
+): string => {
+  if (!freshness) {
+    return '';
+  }
+
+  const parts: string[] = [];
+  const fullRefreshAt = formatLocalizedDateTime(locale, freshness.lastFullRefreshAt);
+  const hotRefreshAt = formatLocalizedDateTime(locale, freshness.lastHotRefreshAt);
+
+  if (fullRefreshAt) {
+    parts.push(
+      applyTemplate(
+        tt('market_pricing_full_refresh_template', 'Tam tarama {{value}}'),
+        {
+          value: fullRefreshAt,
+        }
+      )
+    );
+  }
+
+  if (hotRefreshAt) {
+    parts.push(
+      applyTemplate(
+        tt('market_pricing_hot_refresh_template', 'Hot refresh {{value}}'),
+        {
+          value: hotRefreshAt,
+        }
+      )
     );
   }
 
@@ -1759,6 +1814,7 @@ export const DetailScreen: React.FC = () => {
 
   const pricingHighlightItems = useMemo<PricingHighlightItem[]>(() => {
     const items: PricingHighlightItem[] = [];
+    const inStockCount = marketPricingOffers.filter((offer) => offer.inStock).length;
 
     if (marketPricingSummary.bestLocalOffer) {
       items.push({
@@ -1816,9 +1872,57 @@ export const DetailScreen: React.FC = () => {
       });
     }
 
+    if (marketPricingOffers.length) {
+      const freshnessLabel = getMarketFreshnessModeLabel(
+        tt,
+        marketOffersResponse?.dataFreshness
+      );
+      const freshnessMeta = buildMarketFreshnessMeta(
+        tt,
+        preferredLocale,
+        marketOffersResponse?.dataFreshness
+      );
+
+      items.push({
+        key: 'coverage-freshness',
+        badge: tt('market_pricing_coverage_badge', 'Kapsama'),
+        title: applyTemplate(
+          tt('market_pricing_coverage_title', '{{count}} market izlendi'),
+          {
+            count: marketPricingOffers.length,
+          }
+        ),
+        priceLabel: freshnessLabel,
+        helper:
+          freshnessMeta ||
+          applyTemplate(
+            tt(
+              'market_pricing_coverage_helper',
+              '{{inStock}} markette stokta gorunuyor'
+            ),
+            {
+              inStock: inStockCount,
+            }
+          ),
+        meta: applyTemplate(
+          tt(
+            'market_pricing_coverage_meta',
+            '{{location}} icin {{inStock}} markette stok var'
+          ),
+          {
+            location: marketPricingLocationLabel || profileCity || tt('location', 'Konum'),
+            inStock: inStockCount,
+          }
+        ),
+        tone: 'coverage',
+      });
+    }
+
     return items;
   }, [
+    marketOffersResponse?.dataFreshness,
     marketPricingLocationLabel,
+    marketPricingOffers,
     marketPricingSummary.bestFallbackOffer,
     marketPricingSummary.bestLocalOffer,
     marketPricingSummary.bestReferenceOffer,

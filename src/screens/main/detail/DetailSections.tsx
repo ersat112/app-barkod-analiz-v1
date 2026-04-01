@@ -62,7 +62,7 @@ export type PricingHighlightItem = {
   priceLabel: string;
   helper?: string;
   meta?: string;
-  tone?: 'local' | 'reference' | 'best';
+  tone?: 'local' | 'reference' | 'best' | 'coverage';
 };
 
 export const DetailLoadingState: React.FC<{
@@ -882,6 +882,8 @@ export const PricingHighlightsSection: React.FC<{
         return colors.teal;
       case 'reference':
         return colors.primary;
+      case 'coverage':
+        return colors.warning;
       default:
         return colors.success;
     }
