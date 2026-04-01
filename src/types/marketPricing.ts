@@ -26,6 +26,7 @@ export type MarketPricingScope =
 export type MarketOffer = {
   marketKey?: string | null;
   marketName: string;
+  marketLogoUrl?: string | null;
   marketType: MarketScope;
   coverageScope?: MarketCoverageScope | null;
   pricingScope?: MarketPricingScope | null;
@@ -33,6 +34,7 @@ export type MarketOffer = {
   cityCode: string;
   cityName: string;
   districtName?: string | null;
+  distanceMeters?: number | null;
   price: number;
   currency: 'TRY' | string;
   unitPrice?: number | null;
@@ -114,6 +116,7 @@ export type MarketSearchProduct = {
   brand?: string | null;
   category?: string | null;
   imageUrl?: string | null;
+  marketLogoUrl?: string | null;
   bestOffer?: MarketOffer | null;
   marketCount: number;
   inStockMarketCount: number;

@@ -23,7 +23,8 @@
       "usesAppleSignIn": true,
       "infoPlist": {
         "NSCameraUsageDescription": "BarkodAnaliz, ürün barkodlarını tarayabilmek için kamera erişimine ihtiyaç duyar.",
-        "NSPhotoLibraryUsageDescription": "Eksik ürün bildirimi için ürün görseli seçebilmek adına fotoğraf arşivinize erişim gerekir."
+        "NSPhotoLibraryUsageDescription": "Eksik ürün bildirimi için ürün görseli seçebilmek adına fotoğraf arşivinize erişim gerekir.",
+        "NSLocationWhenInUseUsageDescription": "BarkodAnaliz, size yakın market tekliflerini ve konuma göre fiyat karşılaştırmasını gösterebilmek için konum erişimine ihtiyaç duyar."
       }
     },
     "android": {
@@ -38,7 +39,9 @@
         "CAMERA",
         "INTERNET",
         "com.android.vending.BILLING",
-        "POST_NOTIFICATIONS"
+        "POST_NOTIFICATIONS",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -56,6 +59,12 @@
         {
           "photosPermission": "Eksik ürün bildirimi için galeri görseli seçebilmek adına fotoğraf arşivinize erişim gerekir.",
           "cameraPermission": "Eksik ürün bildirimi için ürün fotoğrafı çekebilmek adına kamera erişimi gerekir."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "BarkodAnaliz, size yakın market tekliflerini ve konuma göre fiyat karşılaştırmasını gösterebilmek için konum erişimine ihtiyaç duyar."
         }
       ],
       "expo-notifications",

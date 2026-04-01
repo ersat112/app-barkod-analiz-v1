@@ -14,13 +14,24 @@ import { bootstrapOperabilitySurface } from './src/services/operability.service'
 import { adService } from './src/services/adService';
 import { entitlementService } from './src/services/entitlement.service';
 import { syncEngagementNotifications } from './src/services/engagementNotifications.service';
+import { requestLocationPermission } from './src/services/locationPermission.service';
 import { syncPurchaseProviderIdentity } from './src/services/purchaseProvider.service';
+import { usePreferenceStore } from './src/store/usePreferenceStore';
 
 const AppContent: React.FC = () => {
   const { isDark } = useTheme();
   const { loading, isAuthenticated } = useAuth();
   const appOpenAttemptedRef = useRef(false);
   const lastPurchaseIdentitySyncAtRef = useRef(0);
+  const locationPermissionPrompted = usePreferenceStore(
+    (state) => state.locationPermissionPrompted
+  );
+  const setLocationPermissionPrompted = usePreferenceStore(
+    (state) => state.setLocationPermissionPrompted
+  );
+  const setLocationPermissionGranted = usePreferenceStore(
+    (state) => state.setLocationPermissionGranted
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -128,6 +139,46 @@ const AppContent: React.FC = () => {
       cancelled = true;
     };
   }, [loading]);
+
+  useEffect(() => {
+    if (loading || locationPermissionPrompted) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const requestOnce = async () => {
+      try {
+        const snapshot = await requestLocationPermission();
+
+        if (cancelled) {
+          return;
+        }
+
+        setLocationPermissionGranted(snapshot.granted);
+      } catch (error) {
+        console.warn('Location permission request failed:', error);
+      } finally {
+        if (!cancelled) {
+          setLocationPermissionPrompted(true);
+        }
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      void requestOnce();
+    }, 1400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeoutId);
+    };
+  }, [
+    loading,
+    locationPermissionPrompted,
+    setLocationPermissionGranted,
+    setLocationPermissionPrompted,
+  ]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {

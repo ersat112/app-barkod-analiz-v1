@@ -106,6 +106,8 @@ const parseOffer = (
   return {
     marketKey: toText(payload.market_key ?? payload.marketKey, '') || null,
     marketName: toText(payload.market_name ?? payload.marketName, '-'),
+    marketLogoUrl:
+      toText(payload.market_logo_url ?? payload.marketLogoUrl, '') || null,
     marketType: toText(payload.market_type ?? payload.marketType, 'local') as MarketOffer['marketType'],
     coverageScope: toText(
       payload.coverage_scope ?? payload.coverageScope,
@@ -128,6 +130,9 @@ const parseOffer = (
       fallbackCityName ||
       '',
     districtName: toText(payload.district_name ?? payload.districtName, '') || null,
+    distanceMeters: toNumber(
+      payload.distance_meters ?? payload.distanceMeters ?? payload.distance
+    ),
     price: toNumber(payload.price) ?? 0,
     currency: toText(payload.currency, 'TRY'),
     unitPrice: toNumber(payload.unit_price ?? payload.unitPrice),
@@ -173,6 +178,8 @@ const parseSearchProduct = (value: unknown): MarketSearchProduct => {
       toText(payload.category ?? payload.category_name ?? payload.categoryName, '') ||
       null,
     imageUrl: toText(payload.image_url ?? payload.imageUrl, '') || null,
+    marketLogoUrl:
+      toText(payload.market_logo_url ?? payload.marketLogoUrl, '') || null,
     bestOffer: payload.best_offer
       ? parseOffer(payload.best_offer)
       : payload.bestOffer

@@ -28,6 +28,10 @@ import {
   fetchMarketProductSearch,
 } from '../../services/marketPricing.service';
 import {
+  getCurrentLocationContext,
+  type CurrentLocationContext,
+} from '../../services/locationPermission.service';
+import {
   resolveCanonicalCity,
   resolveCanonicalDistrict,
   resolveTurkeyCityCode,
@@ -44,10 +48,25 @@ import type {
   MarketProductOffersResponse,
   MarketSearchProduct,
 } from '../../types/marketPricing';
+import { usePreferenceStore } from '../../store/usePreferenceStore';
 import { withAlpha } from '../../utils/color';
 
 type PriceCompareRoute = RouteProp<RootStackParamList, 'PriceCompare'>;
 type TranslateFn = (key: string, fallback: string) => string;
+type ComparisonCartEntry = {
+  product: MarketSearchProduct;
+  offersResponse: MarketProductOffersResponse;
+};
+
+const MARKET_BRAND_ACCENTS = [
+  '#167A78',
+  '#B97719',
+  '#A855F7',
+  '#2563EB',
+  '#DC2626',
+  '#0F766E',
+  '#7C3AED',
+];
 
 const formatLocalizedPrice = (locale: string, amount: number, currency: string): string => {
   try {
@@ -179,6 +198,90 @@ const getOfferToneLabel = (tt: TranslateFn, offer: MarketOffer): string => {
   return tt('price_compare_market_row_other', 'Diğer fiyat');
 };
 
+const formatDistanceMeters = (tt: TranslateFn, value?: number | null): string | null => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  if (value < 1000) {
+    return tt('price_compare_distance_meters', '{{value}} m').replace(
+      '{{value}}',
+      String(Math.round(value))
+    );
+  }
+
+  return tt('price_compare_distance_km', '{{value}} km').replace(
+    '{{value}}',
+    (value / 1000).toFixed(1)
+  );
+};
+
+const resolveMarketAccent = (marketKey?: string | null, marketName?: string | null): string => {
+  const seed = `${marketKey || ''}${marketName || ''}`;
+  const hash = Array.from(seed).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  return MARKET_BRAND_ACCENTS[hash % MARKET_BRAND_ACCENTS.length] ?? MARKET_BRAND_ACCENTS[0];
+};
+
+const buildMarketMonogram = (marketName?: string | null): string => {
+  const parts = String(marketName || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  if (!parts.length) {
+    return 'M';
+  }
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() ?? '')
+    .join('');
+};
+
+const MarketBadge: React.FC<{
+  marketName?: string | null;
+  marketKey?: string | null;
+  logoUrl?: string | null;
+  size?: number;
+}> = ({ marketName, marketKey, logoUrl, size = 42 }) => {
+  const { colors } = useTheme();
+  const accent = resolveMarketAccent(marketKey, marketName);
+  const monogram = buildMarketMonogram(marketName);
+
+  if (logoUrl) {
+    return (
+      <Image
+        source={{ uri: logoUrl }}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: withAlpha(colors.card, 'EE'),
+        }}
+      />
+    );
+  }
+
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: withAlpha(accent, '22'),
+        borderWidth: 1,
+        borderColor: withAlpha(accent, '66'),
+      }}
+    >
+      <Text style={{ color: accent, fontWeight: '800', fontSize: Math.max(11, size * 0.28) }}>
+        {monogram}
+      </Text>
+    </View>
+  );
+};
+
 const SearchResultCard: React.FC<{
   item: MarketSearchProduct;
   selected: boolean;
@@ -208,18 +311,30 @@ const SearchResultCard: React.FC<{
       ]}
     >
       <View style={styles.resultCardRow}>
-        {item.imageUrl ? (
-          <Image source={{ uri: item.imageUrl }} style={styles.resultImage} />
-        ) : (
-          <View
-            style={[
-              styles.resultImageFallback,
-              { backgroundColor: withAlpha(colors.primary, '12') },
-            ]}
-          >
-            <Ionicons name="pricetags-outline" size={20} color={colors.primary} />
-          </View>
-        )}
+        <View style={styles.resultVisualStack}>
+          {item.imageUrl ? (
+            <Image source={{ uri: item.imageUrl }} style={styles.resultImage} />
+          ) : (
+            <View
+              style={[
+                styles.resultImageFallback,
+                { backgroundColor: withAlpha(colors.primary, '12') },
+              ]}
+            >
+              <Ionicons name="pricetags-outline" size={20} color={colors.primary} />
+            </View>
+          )}
+          {item.bestOffer ? (
+            <View style={styles.resultLogoBadge}>
+              <MarketBadge
+                marketKey={item.bestOffer.marketKey}
+                marketName={item.bestOffer.marketName}
+                logoUrl={item.bestOffer.marketLogoUrl || item.marketLogoUrl}
+                size={26}
+              />
+            </View>
+          ) : null}
+        </View>
 
         <View style={styles.resultTextWrap}>
           <Text style={[styles.resultTitle, { color: colors.text }]} numberOfLines={2}>
@@ -269,6 +384,9 @@ export const PriceCompareScreen: React.FC = () => {
   const { t, i18n } = useTranslation();
   const { colors, isDark } = useTheme();
   const { profile } = useAuth();
+  const locationPermissionGranted = usePreferenceStore(
+    (state) => state.locationPermissionGranted
+  );
   const layout = useAppScreenLayout({
     topInsetExtra: 18,
     topInsetMin: 72,
@@ -285,22 +403,35 @@ export const PriceCompareScreen: React.FC = () => {
   );
 
   const preferredLocale = i18n.language || 'tr-TR';
-  const canonicalCity = resolveCanonicalCity(profile?.city);
-  const canonicalDistrict = resolveCanonicalDistrict(profile?.city, profile?.district);
-  const cityCode = resolveTurkeyCityCode(canonicalCity);
-  const locationLabel = canonicalDistrict
-    ? `${canonicalDistrict}, ${canonicalCity ?? profile?.city ?? ''}`
-    : canonicalCity || profile?.city || null;
+  const [detectedLocation, setDetectedLocation] = useState<CurrentLocationContext | null>(null);
+  const [detectedLocationLoading, setDetectedLocationLoading] = useState(false);
+  const [detectedLocationResolved, setDetectedLocationResolved] = useState(false);
+  const canonicalProfileCity = resolveCanonicalCity(profile?.city);
+  const canonicalProfileDistrict = resolveCanonicalDistrict(profile?.city, profile?.district);
+  const canonicalDetectedCity = resolveCanonicalCity(detectedLocation?.city);
+  const canonicalDetectedDistrict = resolveCanonicalDistrict(
+    detectedLocation?.city,
+    detectedLocation?.district
+  );
+  const effectiveCity = canonicalProfileCity || canonicalDetectedCity;
+  const effectiveDistrict = canonicalProfileDistrict || canonicalDetectedDistrict;
+  const cityCode = resolveTurkeyCityCode(effectiveCity);
+  const locationLabel = effectiveDistrict
+    ? `${effectiveDistrict}, ${effectiveCity ?? profile?.city ?? detectedLocation?.city ?? ''}`
+    : effectiveCity || profile?.city || detectedLocation?.city || null;
 
   const [query, setQuery] = useState(route.params?.initialQuery ?? '');
   const [searchLoading, setSearchLoading] = useState(false);
+  const [autocompleteLoading, setAutocompleteLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
   const [results, setResults] = useState<MarketSearchProduct[]>([]);
+  const [autocompleteResults, setAutocompleteResults] = useState<MarketSearchProduct[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<MarketSearchProduct | null>(null);
   const [offersResponse, setOffersResponse] = useState<MarketProductOffersResponse | null>(null);
   const [offersLoading, setOffersLoading] = useState(false);
   const [offersError, setOffersError] = useState<string | null>(null);
+  const [comparisonCart, setComparisonCart] = useState<ComparisonCartEntry[]>([]);
 
   const loadOffers = useCallback(
     async (product: MarketSearchProduct) => {
@@ -311,7 +442,7 @@ export const PriceCompareScreen: React.FC = () => {
       try {
         const response = await fetchMarketProductOffers(product.barcode, {
           cityCode: cityCode ?? undefined,
-          districtName: canonicalDistrict ?? undefined,
+          districtName: effectiveDistrict ?? undefined,
           includeOutOfStock: true,
           limit: 24,
         });
@@ -330,7 +461,7 @@ export const PriceCompareScreen: React.FC = () => {
         setOffersLoading(false);
       }
     },
-    [canonicalDistrict, cityCode, tt]
+    [cityCode, effectiveDistrict, tt]
   );
 
   const handleSearch = useCallback(async () => {
@@ -382,6 +513,137 @@ export const PriceCompareScreen: React.FC = () => {
       setSearchLoading(false);
     }
   }, [cityCode, loadOffers, query, tt]);
+
+  const handleSelectProduct = useCallback(
+    async (product: MarketSearchProduct) => {
+      setQuery(product.productName);
+      setHasSearched(true);
+      setResults((previous) => {
+        const hasProduct = previous.some((item) => item.barcode === product.barcode);
+        return hasProduct ? previous : [product, ...previous];
+      });
+      setAutocompleteResults([]);
+      await loadOffers(product);
+    },
+    [loadOffers]
+  );
+
+  const handleAddSelectedToCart = useCallback(() => {
+    if (!selectedProduct || !offersResponse) {
+      return;
+    }
+
+    setComparisonCart((previous) => {
+      const nextEntry: ComparisonCartEntry = {
+        product: selectedProduct,
+        offersResponse,
+      };
+      const existingIndex = previous.findIndex(
+        (item) => item.product.barcode === selectedProduct.barcode
+      );
+
+      if (existingIndex === -1) {
+        return [...previous, nextEntry];
+      }
+
+      return previous.map((item, index) => (index === existingIndex ? nextEntry : item));
+    });
+  }, [offersResponse, selectedProduct]);
+
+  const handleRemoveFromCart = useCallback((barcode: string) => {
+    setComparisonCart((previous) =>
+      previous.filter((item) => item.product.barcode !== barcode)
+    );
+  }, []);
+
+  useEffect(() => {
+    if (
+      !locationPermissionGranted ||
+      canonicalProfileCity ||
+      detectedLocationLoading ||
+      detectedLocationResolved
+    ) {
+      return;
+    }
+
+    let isActive = true;
+
+    const hydrateDetectedLocation = async () => {
+      setDetectedLocationLoading(true);
+
+      try {
+        const snapshot = await getCurrentLocationContext();
+
+        if (isActive) {
+          setDetectedLocation(snapshot);
+          setDetectedLocationResolved(true);
+        }
+      } catch (error) {
+        console.warn('[PriceCompareScreen] current location resolve failed:', error);
+        if (isActive) {
+          setDetectedLocationResolved(true);
+        }
+      } finally {
+        if (isActive) {
+          setDetectedLocationLoading(false);
+        }
+      }
+    };
+
+    void hydrateDetectedLocation();
+
+    return () => {
+      isActive = false;
+    };
+  }, [
+    canonicalProfileCity,
+    detectedLocationLoading,
+    detectedLocationResolved,
+    locationPermissionGranted,
+  ]);
+
+  useEffect(() => {
+    const trimmedQuery = query.trim();
+
+    if (trimmedQuery.length < 2) {
+      setAutocompleteResults([]);
+      setAutocompleteLoading(false);
+      return;
+    }
+
+    let isActive = true;
+    setAutocompleteLoading(true);
+
+    const timeoutId = setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await fetchMarketProductSearch({
+            query: trimmedQuery,
+            cityCode: cityCode ?? undefined,
+            limit: 6,
+          });
+
+          if (isActive) {
+            setAutocompleteResults(response.results);
+          }
+        } catch (error) {
+          if (isActive) {
+            console.warn('[PriceCompareScreen] autocomplete search failed:', error);
+            setAutocompleteResults([]);
+          }
+        } finally {
+          if (isActive) {
+            setAutocompleteLoading(false);
+          }
+        }
+      })();
+    }, 280);
+
+    return () => {
+      isActive = false;
+      clearTimeout(timeoutId);
+    };
+  }, [cityCode, query]);
 
   useEffect(() => {
     const initialQuery = route.params?.initialQuery?.trim();
@@ -539,6 +801,120 @@ export const PriceCompareScreen: React.FC = () => {
     );
   }, [locationLabel, offerItems.length, selectedProduct, tt]);
 
+  const cartSummary = useMemo(() => {
+    if (!comparisonCart.length) {
+      return {
+        cheapestTotal: 0,
+        cheapestCoveredCount: 0,
+        bestSingleMarket: null as null | {
+          marketKey: string;
+          marketName: string;
+          marketLogoUrl?: string | null;
+          total: number;
+          coveredCount: number;
+          distanceMeters?: number | null;
+        },
+        perMarketTotals: [] as {
+          marketKey: string;
+          marketName: string;
+          marketLogoUrl?: string | null;
+          total: number;
+          coveredCount: number;
+          distanceMeters?: number | null;
+        }[],
+      };
+    }
+
+    let cheapestTotal = 0;
+    let cheapestCoveredCount = 0;
+    const marketMap = new Map<
+      string,
+      {
+        marketKey: string;
+        marketName: string;
+        marketLogoUrl?: string | null;
+        total: number;
+        coveredCount: number;
+        distanceMeters?: number | null;
+      }
+    >();
+
+    comparisonCart.forEach((entry) => {
+      const inStockOffers = entry.offersResponse.offers.filter((offer) => offer.inStock);
+      const cheapestOffer = getBestInStockOffer(inStockOffers);
+
+      if (cheapestOffer) {
+        cheapestTotal += cheapestOffer.price;
+        cheapestCoveredCount += 1;
+      }
+
+      const seenMarkets = new Set<string>();
+
+      inStockOffers.forEach((offer) => {
+        const id = offer.marketKey || offer.marketName;
+
+        if (!id || seenMarkets.has(id)) {
+          return;
+        }
+
+        seenMarkets.add(id);
+
+        const existing = marketMap.get(id) ?? {
+          marketKey: offer.marketKey || offer.marketName,
+          marketName: offer.marketName,
+          marketLogoUrl: offer.marketLogoUrl ?? null,
+          total: 0,
+          coveredCount: 0,
+          distanceMeters: offer.distanceMeters ?? null,
+        };
+
+        existing.total += offer.price;
+        existing.coveredCount += 1;
+
+        if (
+          existing.distanceMeters == null &&
+          typeof offer.distanceMeters === 'number' &&
+          Number.isFinite(offer.distanceMeters)
+        ) {
+          existing.distanceMeters = offer.distanceMeters;
+        }
+
+        marketMap.set(id, existing);
+      });
+    });
+
+    const perMarketTotals = Array.from(marketMap.values()).sort((left, right) => {
+      if (left.coveredCount !== right.coveredCount) {
+        return right.coveredCount - left.coveredCount;
+      }
+
+      if (
+        typeof left.distanceMeters === 'number' &&
+        typeof right.distanceMeters === 'number' &&
+        left.distanceMeters !== right.distanceMeters
+      ) {
+        return left.distanceMeters - right.distanceMeters;
+      }
+
+      return left.total - right.total;
+    });
+
+    return {
+      cheapestTotal,
+      cheapestCoveredCount,
+      bestSingleMarket: perMarketTotals[0] ?? null,
+      perMarketTotals,
+    };
+  }, [comparisonCart]);
+
+  const cartDifferenceValue = useMemo(() => {
+    if (!comparisonCart.length || !cartSummary.bestSingleMarket) {
+      return null;
+    }
+
+    return Math.max(0, cartSummary.bestSingleMarket.total - cartSummary.cheapestTotal);
+  }, [cartSummary.bestSingleMarket, cartSummary.cheapestTotal, comparisonCart.length]);
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <AmbientBackdrop colors={colors} variant="settings" />
@@ -677,6 +1053,65 @@ export const PriceCompareScreen: React.FC = () => {
               'Aynı ürün için farklı marketlerdeki fiyatları ve referans teklifleri karşılaştır.'
             )}
           </Text>
+
+          {query.trim().length >= 2 ? (
+            <View
+              style={[
+                styles.autocompleteWrap,
+                {
+                  backgroundColor: withAlpha(colors.card, 'F8'),
+                  borderColor: withAlpha(colors.border, 'BC'),
+                },
+              ]}
+            >
+              {autocompleteLoading ? (
+                <View style={styles.autocompleteLoadingRow}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                </View>
+              ) : autocompleteResults.length ? (
+                autocompleteResults.map((item) => (
+                  <TouchableOpacity
+                    key={`autocomplete-${item.barcode}`}
+                    activeOpacity={0.88}
+                    onPress={() => {
+                      void handleSelectProduct(item);
+                    }}
+                    style={[
+                      styles.autocompleteRow,
+                      { borderBottomColor: withAlpha(colors.border, '7A') },
+                    ]}
+                  >
+                    <MarketBadge
+                      marketKey={item.bestOffer?.marketKey}
+                      marketName={item.bestOffer?.marketName || item.brand || item.productName}
+                      logoUrl={item.bestOffer?.marketLogoUrl || item.marketLogoUrl}
+                      size={30}
+                    />
+                    <View style={styles.autocompleteTextWrap}>
+                      <Text style={[styles.autocompleteTitle, { color: colors.text }]}>
+                        {item.productName}
+                      </Text>
+                      <Text
+                        style={[styles.autocompleteMeta, { color: colors.mutedText }]}
+                        numberOfLines={1}
+                      >
+                        {[item.brand, item.barcode].filter(Boolean).join(' • ')}
+                      </Text>
+                    </View>
+                    {item.bestOffer ? (
+                      <Text style={[styles.autocompletePrice, { color: colors.primary }]}>
+                        {formatLocalizedPrice(
+                          preferredLocale,
+                          item.bestOffer.price,
+                          item.bestOffer.currency
+                        )}
+                      </Text>
+                    ) : null}
+                  </TouchableOpacity>
+                ))
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         {searchError ? <NoticeCard text={searchError} colors={colors} /> : null}
@@ -750,6 +1185,25 @@ export const PriceCompareScreen: React.FC = () => {
                   .filter(Boolean)
                   .join(' • ')}
               </Text>
+              <TouchableOpacity
+                activeOpacity={0.88}
+                onPress={handleAddSelectedToCart}
+                disabled={!offersResponse || offersLoading}
+                style={[
+                  styles.addToCartButton,
+                  {
+                    backgroundColor: colors.primary,
+                    opacity: !offersResponse || offersLoading ? 0.65 : 1,
+                  },
+                ]}
+              >
+                <Ionicons name="basket-outline" size={16} color={colors.primaryContrast} />
+                <Text
+                  style={[styles.addToCartButtonText, { color: colors.primaryContrast }]}
+                >
+                  {tt('price_compare_add_to_cart', 'Sepete Ekle')}
+                </Text>
+              </TouchableOpacity>
             </View>
 
             {offersError ? <NoticeCard text={offersError} colors={colors} /> : null}
@@ -793,6 +1247,12 @@ export const PriceCompareScreen: React.FC = () => {
                         { borderBottomColor: withAlpha(colors.border, '80') },
                       ]}
                     >
+                      <MarketBadge
+                        marketKey={offer.marketKey}
+                        marketName={offer.marketName}
+                        logoUrl={offer.marketLogoUrl}
+                        size={38}
+                      />
                       <View style={styles.offerTextWrap}>
                         <Text style={[styles.offerTitle, { color: colors.text }]}>
                           {offer.marketName}
@@ -805,6 +1265,11 @@ export const PriceCompareScreen: React.FC = () => {
                         <Text style={[styles.offerHelper, { color: colors.mutedText }]}>
                           {buildMarketOfferMeta(tt, preferredLocale, offer)}
                         </Text>
+                        {formatDistanceMeters(tt, offer.distanceMeters) ? (
+                          <Text style={[styles.offerDistance, { color: colors.teal }]}>
+                            {formatDistanceMeters(tt, offer.distanceMeters)}
+                          </Text>
+                        ) : null}
                       </View>
 
                       <View style={styles.offerPriceWrap}>
@@ -820,6 +1285,160 @@ export const PriceCompareScreen: React.FC = () => {
                           {offer.inStock
                             ? tt('price_compare_stock_in', 'Stokta')
                             : tt('price_compare_stock_out', 'Stokta değil')}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </>
+            ) : null}
+          </>
+        ) : null}
+
+        {comparisonCart.length ? (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              {tt('price_compare_cart_title', 'Karşılaştırma Sepeti')}
+            </Text>
+            <View
+              style={[
+                styles.cartSummaryCard,
+                {
+                  backgroundColor: withAlpha(colors.cardElevated, 'F1'),
+                  borderColor: withAlpha(colors.border, 'BC'),
+                  shadowColor: colors.shadow,
+                },
+              ]}
+            >
+              <View style={styles.cartMetricsRow}>
+                <View style={styles.cartMetricBox}>
+                  <Text style={[styles.cartMetricLabel, { color: colors.mutedText }]}>
+                    {tt('price_compare_cart_best_mix', 'En ucuz karışık sepet')}
+                  </Text>
+                  <Text style={[styles.cartMetricValue, { color: colors.text }]}>
+                    {formatLocalizedPrice(preferredLocale, cartSummary.cheapestTotal, 'TRY')}
+                  </Text>
+                </View>
+                <View style={styles.cartMetricBox}>
+                  <Text style={[styles.cartMetricLabel, { color: colors.mutedText }]}>
+                    {tt('price_compare_cart_single_market', 'Tek market toplamı')}
+                  </Text>
+                  <Text style={[styles.cartMetricValue, { color: colors.text }]}>
+                    {cartSummary.bestSingleMarket
+                      ? formatLocalizedPrice(
+                          preferredLocale,
+                          cartSummary.bestSingleMarket.total,
+                          'TRY'
+                        )
+                      : '-'}
+                  </Text>
+                </View>
+              </View>
+
+              {typeof cartDifferenceValue === 'number' ? (
+                <Text style={[styles.cartDifferenceText, { color: colors.teal }]}>
+                  {tt(
+                    'price_compare_cart_difference',
+                    'Parça parça en ucuzları alırsan {{value}} avantaj var.'
+                  ).replace(
+                    '{{value}}',
+                    formatLocalizedPrice(preferredLocale, cartDifferenceValue, 'TRY')
+                  )}
+                </Text>
+              ) : null}
+
+              <Text style={[styles.cartHelperText, { color: colors.mutedText }]}>
+                {tt(
+                  'price_compare_cart_helper',
+                  'Yakın market metriği API tarafında mesafe verisi geldiğinde otomatik aktive olacak.'
+                )}
+              </Text>
+            </View>
+
+            <View style={styles.cartItemsWrap}>
+              {comparisonCart.map((entry) => (
+                <View
+                  key={`cart-${entry.product.barcode}`}
+                  style={[
+                    styles.cartItemCard,
+                    {
+                      backgroundColor: withAlpha(colors.cardElevated, 'F1'),
+                      borderColor: withAlpha(colors.border, 'BC'),
+                    },
+                  ]}
+                >
+                  <View style={styles.cartItemTextWrap}>
+                    <Text style={[styles.cartItemTitle, { color: colors.text }]} numberOfLines={2}>
+                      {entry.product.productName}
+                    </Text>
+                    <Text style={[styles.cartItemMeta, { color: colors.mutedText }]} numberOfLines={1}>
+                      {[entry.product.brand, entry.product.barcode].filter(Boolean).join(' • ')}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    activeOpacity={0.88}
+                    onPress={() => {
+                      handleRemoveFromCart(entry.product.barcode);
+                    }}
+                    style={[
+                      styles.cartRemoveButton,
+                      { backgroundColor: withAlpha(colors.danger, '12') },
+                    ]}
+                  >
+                    <Ionicons name="close-outline" size={18} color={colors.danger} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </View>
+
+            {cartSummary.perMarketTotals.length ? (
+              <>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  {tt('price_compare_cart_market_totals', 'Market Toplamları')}
+                </Text>
+                <View
+                  style={[
+                    styles.offerListCard,
+                    {
+                      backgroundColor: withAlpha(colors.cardElevated, 'F1'),
+                      borderColor: withAlpha(colors.border, 'BC'),
+                      shadowColor: colors.shadow,
+                    },
+                  ]}
+                >
+                  {cartSummary.perMarketTotals.map((market) => (
+                    <View
+                      key={`cart-market-${market.marketKey}`}
+                      style={[
+                        styles.offerRow,
+                        { borderBottomColor: withAlpha(colors.border, '80') },
+                      ]}
+                    >
+                      <MarketBadge
+                        marketKey={market.marketKey}
+                        marketName={market.marketName}
+                        logoUrl={market.marketLogoUrl}
+                        size={38}
+                      />
+                      <View style={styles.offerTextWrap}>
+                        <Text style={[styles.offerTitle, { color: colors.text }]}>
+                          {market.marketName}
+                        </Text>
+                        <Text style={[styles.offerMeta, { color: colors.mutedText }]}>
+                          {tt('price_compare_cart_coverage', '{{covered}}/{{total}} ürün')
+                            .replace('{{covered}}', String(market.coveredCount))
+                            .replace('{{total}}', String(comparisonCart.length))}
+                        </Text>
+                        {formatDistanceMeters(tt, market.distanceMeters) ? (
+                          <Text style={[styles.offerDistance, { color: colors.teal }]}>
+                            {formatDistanceMeters(tt, market.distanceMeters)}
+                          </Text>
+                        ) : null}
+                      </View>
+
+                      <View style={styles.offerPriceWrap}>
+                        <Text style={[styles.offerPrice, { color: colors.text }]}>
+                          {formatLocalizedPrice(preferredLocale, market.total, 'TRY')}
                         </Text>
                       </View>
                     </View>
@@ -967,6 +1586,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+  resultVisualStack: {
+    width: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   resultImage: {
     width: 54,
     height: 54,
@@ -979,6 +1603,11 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  resultLogoBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
   },
   resultTextWrap: {
     flex: 1,
@@ -1008,6 +1637,43 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  autocompleteWrap: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  autocompleteLoadingRow: {
+    minHeight: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  autocompleteRow: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  autocompleteTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  autocompleteTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  autocompleteMeta: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  autocompletePrice: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
   selectedProductCard: {
     borderWidth: 1,
     borderRadius: 22,
@@ -1027,6 +1693,93 @@ const styles = StyleSheet.create({
   selectedMeta: {
     fontSize: 12,
     lineHeight: 18,
+  },
+  addToCartButton: {
+    marginTop: 14,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  addToCartButtonText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  cartSummaryCard: {
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 14,
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
+  },
+  cartMetricsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cartMetricBox: {
+    flex: 1,
+    gap: 6,
+  },
+  cartMetricLabel: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '600',
+  },
+  cartMetricValue: {
+    fontSize: 18,
+    lineHeight: 24,
+    fontWeight: '800',
+  },
+  cartDifferenceText: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
+  },
+  cartHelperText: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  cartItemsWrap: {
+    gap: 10,
+    marginBottom: 12,
+  },
+  cartItemCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  cartItemTextWrap: {
+    flex: 1,
+    gap: 3,
+  },
+  cartItemTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  cartItemMeta: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  cartRemoveButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   offerListCard: {
     borderWidth: 1,
@@ -1063,6 +1816,11 @@ const styles = StyleSheet.create({
   offerHelper: {
     fontSize: 11,
     lineHeight: 16,
+  },
+  offerDistance: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
   },
   offerPriceWrap: {
     alignItems: 'flex-end',

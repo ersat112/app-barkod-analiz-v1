@@ -14,6 +14,8 @@ type PreferenceState = {
   language: AppLanguage;
   isFirstLaunch: boolean;
   notificationsEnabled: boolean;
+  locationPermissionPrompted: boolean;
+  locationPermissionGranted: boolean;
   nutritionPreferences: NutritionPreferences;
 };
 
@@ -22,6 +24,8 @@ type PreferenceActions = {
   setTheme: (value: boolean) => void;
   setLanguage: (lang: AppLanguage) => void;
   setNotificationsEnabled: (value: boolean) => void;
+  setLocationPermissionPrompted: (value: boolean) => void;
+  setLocationPermissionGranted: (value: boolean) => void;
   setNutritionPreference: (key: NutritionPreferenceKey, value: boolean) => void;
   setNutritionPreferences: (value: NutritionPreferences) => void;
   resetNutritionPreferences: () => void;
@@ -38,6 +42,8 @@ const DEFAULT_PREFERENCES: PreferenceState = {
   language: 'tr',
   isFirstLaunch: true,
   notificationsEnabled: true,
+  locationPermissionPrompted: false,
+  locationPermissionGranted: false,
   nutritionPreferences: DEFAULT_NUTRITION_PREFERENCES,
 };
 
@@ -64,6 +70,16 @@ export const usePreferenceStore = create<PreferenceStore>()(
       setNotificationsEnabled: (value) =>
         set({
           notificationsEnabled: value,
+        }),
+
+      setLocationPermissionPrompted: (value) =>
+        set({
+          locationPermissionPrompted: value,
+        }),
+
+      setLocationPermissionGranted: (value) =>
+        set({
+          locationPermissionGranted: value,
         }),
 
       setNutritionPreference: (key, value) =>
@@ -116,6 +132,8 @@ export const usePreferenceStore = create<PreferenceStore>()(
         language: state.language,
         isFirstLaunch: state.isFirstLaunch,
         notificationsEnabled: state.notificationsEnabled,
+        locationPermissionPrompted: state.locationPermissionPrompted,
+        locationPermissionGranted: state.locationPermissionGranted,
         nutritionPreferences: state.nutritionPreferences,
       }),
     }
