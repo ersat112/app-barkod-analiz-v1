@@ -20,12 +20,21 @@ import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native'
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 
+import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
+import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
+import { MARKET_GELSIN_RUNTIME } from '../../config/marketGelsinRuntime';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { adService } from '../../services/adService';
 import { entitlementService } from '../../services/entitlement.service';
 import { freeScanPolicyService } from '../../services/freeScanPolicy.service';
 import { enqueueRemoteHistorySync } from '../../services/historyRemoteSync.service';
+import {
+  resolveCanonicalCity,
+  resolveCanonicalDistrict,
+  resolveTurkeyCityCode,
+} from '../../services/locationData';
+import { fetchMarketProductOffers } from '../../services/marketPricing.service';
 import {
   lookupProductByBarcode,
   type ProductLookupMode,
@@ -38,6 +47,7 @@ import {
   unloadScanBeep,
 } from '../../services/scanFeedback.service';
 import { useScanStore } from '../../store/useScanStore';
+import type { MarketProductOffersResponse } from '../../types/marketPricing';
 import { analyzeProduct, type AnalysisResult, type Product } from '../../utils/analysis';
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
@@ -102,6 +112,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 }) => {
   const { t } = useTranslation();
   const { colors } = useTheme();
+  const { profile } = useAuth();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const isFocused = useIsFocused();
@@ -126,6 +137,10 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const [torch, setTorch] = useState(false);
   const [previewItems, setPreviewItems] = useState<ScanPreviewItem[]>([]);
   const [activeLookupBarcode, setActiveLookupBarcode] = useState<string | null>(null);
+  const [previewOffersResponse, setPreviewOffersResponse] =
+    useState<MarketProductOffersResponse | null>(null);
+  const [previewOffersLoading, setPreviewOffersLoading] = useState(false);
+  const [previewOffersError, setPreviewOffersError] = useState<string | null>(null);
 
   const [isManualMode, setIsManualMode] = useState(false);
   const [manualBarcode, setManualBarcode] = useState('');
@@ -139,6 +154,13 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const recentScanMapRef = useRef<Record<string, number>>({});
   const scanMode: ProductLookupMode =
     route?.name === 'MedicineScanner' ? 'medicine' : initialMode;
+  const profileCity = resolveCanonicalCity(profile?.city);
+  const profileDistrict = profileCity
+    ? resolveCanonicalDistrict(profileCity, profile?.district) ??
+      profile?.district ??
+      null
+    : null;
+  const profileCityCode = resolveTurkeyCityCode(profileCity);
 
   useEffect(() => {
     let disposed = false;
@@ -643,6 +665,66 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const previewHistory = previewItems.slice(1);
 
   useEffect(() => {
+    if (
+      !MARKET_GELSIN_RUNTIME.isEnabled ||
+      !latestPreview?.product ||
+      latestPreview.status !== 'found' ||
+      latestPreview.product.type === 'medicine' ||
+      !profileCityCode
+    ) {
+      setPreviewOffersResponse(null);
+      setPreviewOffersError(null);
+      setPreviewOffersLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadPreviewOffers = async () => {
+      try {
+        setPreviewOffersLoading(true);
+        setPreviewOffersError(null);
+
+        const response = await fetchMarketProductOffers(latestPreview.barcode, {
+          cityCode: profileCityCode,
+          districtName: profileDistrict ?? undefined,
+          limit: 24,
+          includeOutOfStock: true,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        setPreviewOffersResponse(response);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        console.warn('[ScannerScreen] preview market offers load failed:', error);
+        setPreviewOffersResponse(null);
+        setPreviewOffersError(
+          tt(
+            'market_pricing_error',
+            'Fiyat katmanı şu anda yüklenemedi. Daha sonra tekrar deneyebilirsiniz.'
+          )
+        );
+      } finally {
+        if (!cancelled) {
+          setPreviewOffersLoading(false);
+        }
+      }
+    };
+
+    void loadPreviewOffers();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [latestPreview, profileCityCode, profileDistrict, tt]);
+
+  useEffect(() => {
     Animated.spring(previewSheetAnim, {
       toValue: hasPreviewSurface ? 0 : 220,
       damping: 22,
@@ -924,12 +1006,56 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                   </Text>
                 </TouchableOpacity>
               ) : latestPreview.status === 'found' ? (
-                <Text style={styles.previewHintText}>
-                  {tt(
-                    'scanner_open_detail_hint',
-                    'Detay ekranını açmak için karta dokunun, kamera taramaya devam eder.'
-                  )}
-                </Text>
+                <>
+                  {latestPreview.product?.type !== 'medicine' ? (
+                    profileCityCode ? (
+                      <>
+                        {previewOffersError ? (
+                          <Text style={[styles.previewMarketErrorText, { color: '#F59E0B' }]}>
+                            {previewOffersError}
+                          </Text>
+                        ) : null}
+
+                        {!previewOffersError ? (
+                          <MarketPriceTableCard
+                            title={tt('scanner_market_prices_title', 'Market Fiyatları')}
+                            subtitle={
+                              previewOffersLoading
+                                ? tt(
+                                    'scanner_market_prices_loading',
+                                    'Market teklifleri yükleniyor...'
+                                  )
+                                : tt(
+                                    'scanner_market_prices_subtitle',
+                                    'Ulusal marketleri ve konumundaki marketleri yana kaydırarak karşılaştır.'
+                                  )
+                            }
+                            offers={previewOffersResponse?.offers ?? []}
+                            productType={latestPreview.product?.type}
+                            locale="tr-TR"
+                            colors={colors}
+                            tt={tt}
+                            loading={previewOffersLoading}
+                          />
+                        ) : null}
+                      </>
+                    ) : (
+                      <Text style={styles.previewHintText}>
+                        {tt(
+                          'scanner_market_prices_missing_location',
+                          'Şehir ve ilçe bilgini eklersen market fiyatları burada açılır.'
+                        )}
+                      </Text>
+                    )
+                  ) : null}
+
+                  <Text style={styles.previewHintText}>
+                    {tt(
+                      'scanner_open_detail_hint',
+                      'Detay ekranını açmak için karta dokunun, kamera taramaya devam eder.'
+                    )}
+                  </Text>
+                </>
               ) : null}
             </View>
           ) : null}
@@ -1357,6 +1483,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
     marginTop: 12,
+  },
+  previewMarketErrorText: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 12,
+    fontWeight: '700',
   },
   previewQueueRow: {
     paddingTop: 10,

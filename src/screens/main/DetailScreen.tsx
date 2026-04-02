@@ -72,6 +72,7 @@ import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
 import { AdBanner } from '../../components/AdBanner';
 import { AlternativeCard } from '../../components/AlternativeCard';
+import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
 import { FamilyHealthAlert } from '../../components/organisms/FamilyHealthAlert';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import {
@@ -1677,8 +1678,8 @@ export const DetailScreen: React.FC = () => {
         const nextResponse = await fetchMarketProductOffers(normalizedRouteBarcode, {
           cityCode: profileCityCode,
           districtName: profileDistrict ?? undefined,
-          limit: 8,
-          includeOutOfStock: false,
+          limit: 24,
+          includeOutOfStock: true,
         });
 
         if (cancelled) {
@@ -3010,6 +3011,22 @@ export const DetailScreen: React.FC = () => {
                   }
                   colors={colors}
                 />
+
+                {!marketOffersError ? (
+                  <MarketPriceTableCard
+                    title={tt('market_price_table_title', 'Market Fiyat Tablosu')}
+                    subtitle={tt(
+                      'market_price_table_subtitle',
+                      'Ulusal marketleri ve konumundaki marketleri yana kaydırarak karşılaştır.'
+                    )}
+                  offers={marketPricingOffers}
+                  productType={displayedProduct.type}
+                  locale={preferredLocale}
+                  colors={colors}
+                  tt={tt}
+                  loading={marketOffersLoading}
+                />
+                ) : null}
 
                 {marketOffersError ? (
                   <NoticeCard text={marketOffersError} colors={colors} />
