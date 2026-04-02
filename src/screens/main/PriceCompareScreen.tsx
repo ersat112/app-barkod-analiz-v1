@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
+  Linking,
+  Modal,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -48,6 +50,7 @@ import {
 } from './detail/DetailSections';
 import type {
   MarketBasketCompareResponse,
+  MarketBasketMarketTotal,
   MarketOffer,
   MarketProductOffersResponse,
   MarketSearchProduct,
@@ -64,6 +67,16 @@ type ComparisonCartEntry = {
   offersResponse: MarketProductOffersResponse;
   quantity: number;
 };
+type MarketSheetState =
+  | {
+      kind: 'offer';
+      offer: MarketOffer;
+    }
+  | {
+      kind: 'basket';
+      market: MarketBasketMarketTotal;
+    }
+  | null;
 
 const SEARCH_MIN_LENGTH = 2;
 const REMOTE_SEARCH_TIMEOUT_MS = 2500;
@@ -404,6 +417,19 @@ export const PriceCompareScreen: React.FC = () => {
     useState<MarketBasketCompareResponse | null>(null);
   const [basketCompareLoading, setBasketCompareLoading] = useState(false);
   const [basketCompareError, setBasketCompareError] = useState<string | null>(null);
+  const [marketSheetState, setMarketSheetState] = useState<MarketSheetState>(null);
+
+  const closeMarketSheet = useCallback(() => {
+    setMarketSheetState(null);
+  }, []);
+
+  const openOfferSheet = useCallback((offer: MarketOffer) => {
+    setMarketSheetState({ kind: 'offer', offer });
+  }, []);
+
+  const openBasketMarketSheet = useCallback((market: MarketBasketMarketTotal) => {
+    setMarketSheetState({ kind: 'basket', market });
+  }, []);
 
   const loadOffers = useCallback(
     async (product: MarketSearchProduct) => {
@@ -1084,6 +1110,186 @@ export const PriceCompareScreen: React.FC = () => {
     [basketDisplayTotals, preferredLocale, tt]
   );
 
+  const marketSheetDetails = useMemo(() => {
+    if (!marketSheetState) {
+      return null;
+    }
+
+    if (marketSheetState.kind === 'offer') {
+      const { offer } = marketSheetState;
+      const details = [
+        {
+          key: 'price',
+          label: tt('price_compare_market_sheet_price', 'Fiyat'),
+          value: formatLocalizedPrice(preferredLocale, offer.price, offer.currency),
+        },
+        typeof offer.unitPrice === 'number' && offer.unitPriceUnit
+          ? {
+              key: 'unit',
+              label: tt('price_compare_market_sheet_unit_price', 'Birim fiyat'),
+              value: tt('market_pricing_unit_price_template', '{{price}} / {{unit}}')
+                .replace(
+                  '{{price}}',
+                  formatLocalizedPrice(preferredLocale, offer.unitPrice, offer.currency)
+                )
+                .replace('{{unit}}', offer.unitPriceUnit),
+            }
+          : null,
+        {
+          key: 'stock',
+          label: tt('price_compare_market_sheet_stock', 'Durum'),
+          value: offer.inStock
+            ? tt('price_compare_stock_in', 'Stokta')
+            : tt('price_compare_stock_out', 'Stokta değil'),
+        },
+        formatDistanceMeters(tt, offer.distanceMeters)
+          ? {
+              key: 'distance',
+              label: tt('price_compare_market_sheet_distance', 'Mesafe'),
+              value: formatDistanceMeters(tt, offer.distanceMeters) ?? '',
+            }
+          : null,
+        offer.branchName
+          ? {
+              key: 'branch',
+              label: tt('price_compare_market_sheet_branch', 'Şube'),
+              value: offer.branchName,
+            }
+          : null,
+        offer.districtName
+          ? {
+              key: 'district',
+              label: tt('price_compare_market_sheet_district', 'İlçe'),
+              value: offer.districtName,
+            }
+          : null,
+        offer.cityName
+          ? {
+              key: 'city',
+              label: tt('price_compare_market_sheet_city', 'Şehir'),
+              value: offer.cityName,
+            }
+          : null,
+        {
+          key: 'source',
+          label: tt('price_compare_market_sheet_type', 'Fiyat tipi'),
+          value: getOfferToneLabel(tt, offer),
+        },
+      ].filter(Boolean) as { key: string; label: string; value: string }[];
+
+      return {
+        title: offer.marketName,
+        subtitle:
+          [offer.branchName, offer.districtName, offer.cityName].filter(Boolean).join(' • ') ||
+          tt('price_compare_market_sheet_subtitle', 'Market detayı'),
+        logoUrl: offer.marketLogoUrl,
+        marketKey: offer.marketKey,
+        canOpenSource: Boolean(offer.sourceUrl),
+        canOpenMap:
+          typeof offer.latitude === 'number' && typeof offer.longitude === 'number',
+        details,
+      };
+    }
+
+    const { market } = marketSheetState;
+    const details = [
+      {
+        key: 'total',
+        label: tt('price_compare_market_sheet_total', 'Toplam'),
+        value: formatLocalizedPrice(preferredLocale, market.basketTotal, 'TRY'),
+      },
+      {
+        key: 'coverage',
+        label: tt('price_compare_market_sheet_coverage', 'Kapsam'),
+        value: tt('price_compare_cart_coverage', '{{covered}}/{{total}} ürün')
+          .replace('{{covered}}', String(market.availableItemCount))
+          .replace('{{total}}', String(totalRequestedCartQuantity)),
+      },
+      {
+        key: 'status',
+        label: tt('price_compare_market_sheet_status', 'Sepet durumu'),
+        value: market.missingItemCount
+          ? tt('price_compare_missing_count', '{{count}} eksik').replace(
+              '{{count}}',
+              String(market.missingItemCount)
+            )
+          : tt('price_compare_market_complete', 'Tam'),
+      },
+      formatDistanceMeters(tt, market.distanceMeters)
+        ? {
+            key: 'distance',
+            label: tt('price_compare_market_sheet_distance', 'Mesafe'),
+            value: formatDistanceMeters(tt, market.distanceMeters) ?? '',
+          }
+        : null,
+      market.branchName
+        ? {
+            key: 'branch',
+            label: tt('price_compare_market_sheet_branch', 'Şube'),
+            value: market.branchName,
+          }
+        : null,
+    ].filter(Boolean) as { key: string; label: string; value: string }[];
+
+    return {
+      title: market.marketName,
+      subtitle: tt('price_compare_cart_market_totals', 'Market Toplamları'),
+      logoUrl: market.marketLogoUrl,
+      marketKey: market.marketKey,
+      canOpenSource: false,
+      canOpenMap:
+        typeof market.latitude === 'number' && typeof market.longitude === 'number',
+      details,
+    };
+  }, [marketSheetState, preferredLocale, totalRequestedCartQuantity, tt]);
+
+  const handleOpenMarketSource = useCallback(async () => {
+    if (marketSheetState?.kind !== 'offer' || !marketSheetState.offer.sourceUrl) {
+      return;
+    }
+
+    try {
+      const supported = await Linking.canOpenURL(marketSheetState.offer.sourceUrl);
+
+      if (supported) {
+        await Linking.openURL(marketSheetState.offer.sourceUrl);
+      }
+    } catch (error) {
+      console.warn('[PriceCompareScreen] source url open failed:', error);
+    }
+  }, [marketSheetState]);
+
+  const handleOpenMarketMap = useCallback(async () => {
+    const latitude =
+      marketSheetState?.kind === 'offer'
+        ? marketSheetState.offer.latitude
+        : marketSheetState?.kind === 'basket'
+          ? marketSheetState.market.latitude
+          : null;
+    const longitude =
+      marketSheetState?.kind === 'offer'
+        ? marketSheetState.offer.longitude
+        : marketSheetState?.kind === 'basket'
+          ? marketSheetState.market.longitude
+          : null;
+
+    if (typeof latitude !== 'number' || typeof longitude !== 'number') {
+      return;
+    }
+
+    const url = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}`;
+
+    try {
+      const supported = await Linking.canOpenURL(url);
+
+      if (supported) {
+        await Linking.openURL(url);
+      }
+    } catch (error) {
+      console.warn('[PriceCompareScreen] market map open failed:', error);
+    }
+  }, [marketSheetState]);
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <AmbientBackdrop colors={colors} variant="settings" />
@@ -1473,8 +1679,12 @@ export const PriceCompareScreen: React.FC = () => {
                   ]}
                 >
                   {sortedOffers.map((offer) => (
-                    <View
+                    <TouchableOpacity
                       key={`${offer.marketKey || offer.marketName}-${offer.price}-${offer.capturedAt}`}
+                      activeOpacity={0.88}
+                      onPress={() => {
+                        openOfferSheet(offer);
+                      }}
                       style={[
                         styles.offerRow,
                         { borderBottomColor: withAlpha(colors.border, '80') },
@@ -1536,8 +1746,13 @@ export const PriceCompareScreen: React.FC = () => {
                             </Text>
                           ) : null}
                         </View>
+                        <Ionicons
+                          name="chevron-forward-outline"
+                          size={16}
+                          color={colors.mutedText}
+                        />
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </View>
               </>
@@ -1759,8 +1974,12 @@ export const PriceCompareScreen: React.FC = () => {
                   ]}
                 >
                   {basketDisplayTotals.marketTotals.map((market) => (
-                    <View
+                    <TouchableOpacity
                       key={`cart-market-${market.marketKey}-${market.branchId || 'default'}`}
+                      activeOpacity={0.88}
+                      onPress={() => {
+                        openBasketMarketSheet(market);
+                      }}
                       style={[
                         styles.offerRow,
                         { borderBottomColor: withAlpha(colors.border, '80') },
@@ -1805,8 +2024,13 @@ export const PriceCompareScreen: React.FC = () => {
                             </Text>
                           ) : null}
                         </View>
+                        <Ionicons
+                          name="chevron-forward-outline"
+                          size={16}
+                          color={colors.mutedText}
+                        />
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </View>
               </>
@@ -1814,6 +2038,149 @@ export const PriceCompareScreen: React.FC = () => {
           </>
         ) : null}
       </ScrollView>
+
+      <Modal
+        visible={Boolean(marketSheetState && marketSheetDetails)}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={closeMarketSheet}
+      >
+        <View style={styles.marketSheetOverlay}>
+          <TouchableOpacity
+            style={styles.marketSheetBackdrop}
+            activeOpacity={1}
+            onPress={closeMarketSheet}
+          />
+
+          {marketSheetDetails ? (
+            <View style={styles.marketSheetWrap}>
+              <View
+                style={[
+                  styles.marketSheetCard,
+                  {
+                    backgroundColor: withAlpha(colors.cardElevated, isDark ? 'F4' : 'FC'),
+                    borderColor: withAlpha(colors.border, 'BC'),
+                    shadowColor: colors.shadow,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.marketSheetHandle,
+                    { backgroundColor: withAlpha(colors.border, 'A8') },
+                  ]}
+                />
+
+                <View style={styles.marketSheetHeader}>
+                  <View style={styles.marketSheetHeaderMain}>
+                    <MarketBadge
+                      marketKey={marketSheetDetails.marketKey}
+                      marketName={marketSheetDetails.title}
+                      logoUrl={marketSheetDetails.logoUrl}
+                      size={42}
+                    />
+                    <View style={styles.marketSheetHeaderTextWrap}>
+                      <Text style={[styles.marketSheetTitle, { color: colors.text }]}>
+                        {marketSheetDetails.title}
+                      </Text>
+                      <Text
+                        style={[styles.marketSheetSubtitle, { color: colors.mutedText }]}
+                      >
+                        {marketSheetDetails.subtitle}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={closeMarketSheet}
+                    style={[
+                      styles.marketSheetCloseButton,
+                      {
+                        backgroundColor: withAlpha(colors.backgroundMuted, isDark ? '96' : 'F2'),
+                        borderColor: withAlpha(colors.border, 'B8'),
+                      },
+                    ]}
+                  >
+                    <Ionicons name="close-outline" size={20} color={colors.text} />
+                  </TouchableOpacity>
+                </View>
+
+                <View
+                  style={[
+                    styles.marketSheetDetailsWrap,
+                    { borderTopColor: withAlpha(colors.border, '80') },
+                  ]}
+                >
+                  {marketSheetDetails.details.map((detail) => (
+                    <View
+                      key={detail.key}
+                      style={[
+                        styles.marketSheetDetailRow,
+                        { borderBottomColor: withAlpha(colors.border, '80') },
+                      ]}
+                    >
+                      <Text
+                        style={[styles.marketSheetDetailLabel, { color: colors.mutedText }]}
+                      >
+                        {detail.label}
+                      </Text>
+                      <Text style={[styles.marketSheetDetailValue, { color: colors.text }]}>
+                        {detail.value}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.marketSheetActions}>
+                  {marketSheetDetails.canOpenMap ? (
+                    <TouchableOpacity
+                      activeOpacity={0.88}
+                      onPress={() => {
+                        void handleOpenMarketMap();
+                      }}
+                      style={[
+                        styles.marketSheetActionButton,
+                        {
+                          backgroundColor: withAlpha(colors.teal, '12'),
+                          borderColor: withAlpha(colors.teal, '38'),
+                        },
+                      ]}
+                    >
+                      <Ionicons name="navigate-outline" size={16} color={colors.teal} />
+                      <Text style={[styles.marketSheetActionLabel, { color: colors.teal }]}>
+                        {tt('price_compare_market_sheet_open_map', 'Haritada Aç')}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+
+                  {marketSheetDetails.canOpenSource ? (
+                    <TouchableOpacity
+                      activeOpacity={0.88}
+                      onPress={() => {
+                        void handleOpenMarketSource();
+                      }}
+                      style={[
+                        styles.marketSheetActionButton,
+                        {
+                          backgroundColor: withAlpha(colors.primary, '12'),
+                          borderColor: withAlpha(colors.primary, '38'),
+                        },
+                      ]}
+                    >
+                      <Ionicons name="open-outline" size={16} color={colors.primary} />
+                      <Text style={[styles.marketSheetActionLabel, { color: colors.primary }]}>
+                        {tt('price_compare_market_sheet_open_source', 'Kaynağı Aç')}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              </View>
+            </View>
+          ) : null}
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -2259,5 +2626,112 @@ const styles = StyleSheet.create({
   offerStock: {
     fontSize: 11,
     fontWeight: '700',
+  },
+  marketSheetOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  marketSheetBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.36)',
+  },
+  marketSheetWrap: {
+    paddingHorizontal: 12,
+    paddingBottom: 14,
+  },
+  marketSheetCard: {
+    borderWidth: 1,
+    borderRadius: 28,
+    padding: 18,
+    shadowOpacity: 0.12,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 12,
+  },
+  marketSheetHandle: {
+    alignSelf: 'center',
+    width: 44,
+    height: 4,
+    borderRadius: 999,
+    marginBottom: 16,
+  },
+  marketSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 14,
+  },
+  marketSheetHeaderMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  marketSheetHeaderTextWrap: {
+    flex: 1,
+    gap: 4,
+  },
+  marketSheetTitle: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '800',
+  },
+  marketSheetSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  marketSheetCloseButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  marketSheetDetailsWrap: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  marketSheetDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  marketSheetDetailLabel: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '600',
+  },
+  marketSheetDetailValue: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  marketSheetActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 16,
+  },
+  marketSheetActionButton: {
+    minHeight: 42,
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  marketSheetActionLabel: {
+    fontSize: 12,
+    fontWeight: '800',
   },
 });
