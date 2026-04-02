@@ -23,6 +23,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
 import { MarketOfferSheet } from '../../components/MarketOfferSheet';
+import { ProductSummaryCard } from '../../components/ProductSummaryCard';
 import {
   buildBestMarketOfferSummary,
   formatMarketDistance,
@@ -1520,41 +1521,36 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                 </View>
               </View>
 
-              <TouchableOpacity
+              <ProductSummaryCard
+                imageUrl={latestPreview.product?.image_url}
+                fallbackImageUrl={FALLBACK_IMAGE}
+                eyebrow={
+                  latestPreview.product?.brand || tt('unknown_brand', 'Bilinmeyen Marka')
+                }
+                title={
+                  latestPreview.product?.name ||
+                  (latestPreview.status === 'not_found'
+                    ? tt('scanner_not_found_title', 'Ürün bulunamadı')
+                    : tt('scanner_lookup_loading', 'Urun bilgileri getiriliyor...'))
+                }
+                supportingText={
+                  latestPreview.message ||
+                  tt('scanner_preview_ready', 'Hizli sonuc hazir. Detay icin karta dokunun.')
+                }
+                onPress={() => handleOpenPreviewDetail(latestPreview)}
+                disabled={latestPreview.status !== 'found' || latestPreview.isTextAnalysis}
                 activeOpacity={
                   latestPreview.status === 'found' && !latestPreview.isTextAnalysis ? 0.9 : 1
                 }
-                disabled={latestPreview.status !== 'found' || latestPreview.isTextAnalysis}
-                onPress={() => handleOpenPreviewDetail(latestPreview)}
-                style={styles.previewBodyTouchable}
-              >
-                <View style={styles.previewBody}>
-                  <Image
-                    source={{
-                      uri: latestPreview.product?.image_url || FALLBACK_IMAGE,
-                    }}
-                    style={styles.previewImage}
-                  />
-                  <View style={styles.previewTextWrap}>
-                    <Text style={styles.previewBrand} numberOfLines={1}>
-                      {latestPreview.product?.brand ||
-                        tt('unknown_brand', 'Bilinmeyen Marka')}
-                    </Text>
-                    <Text style={styles.previewName} numberOfLines={2}>
-                      {latestPreview.product?.name ||
-                        (latestPreview.status === 'not_found'
-                          ? tt('scanner_not_found_title', 'Ürün bulunamadı')
-                          : tt('scanner_lookup_loading', 'Urun bilgileri getiriliyor...'))}
-                    </Text>
-                    <Text style={styles.previewMessage} numberOfLines={2}>
-                      {latestPreview.message ||
-                        tt(
-                          'scanner_preview_ready',
-                          'Hizli sonuc hazir. Detay icin karta dokunun.'
-                        )}
-                    </Text>
-                  </View>
-                  {latestPreview.status === 'found' ? (
+                eyebrowColor="#FFD34D"
+                titleColor="#FFFFFF"
+                metaColor="rgba(255,255,255,0.72)"
+                supportingColor="rgba(255,255,255,0.76)"
+                imageBackgroundColor="rgba(255,255,255,0.08)"
+                fallbackIconColor="#FFFFFF"
+                containerStyle={styles.previewBodyTouchable}
+                trailing={
+                  latestPreview.status === 'found' ? (
                     <View
                       style={[
                         styles.previewScoreBubble,
@@ -1574,9 +1570,9 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                           : tt('score_short', 'Skor')}
                       </Text>
                     </View>
-                  ) : null}
-                </View>
-              </TouchableOpacity>
+                  ) : null
+                }
+              />
 
               {latestPreview.status === 'not_found' ? (
                 <TouchableOpacity

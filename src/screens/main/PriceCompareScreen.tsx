@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { MarketOfferSheet } from '../../components/MarketOfferSheet';
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
+import { ProductSummaryCard } from '../../components/ProductSummaryCard';
 import { inferMarketDisplayProductType } from '../../config/marketDisplay';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, type ThemeColors } from '../../context/ThemeContext';
@@ -1576,70 +1577,65 @@ export const PriceCompareScreen: React.FC = () => {
                 },
               ]}
             >
-              <View style={styles.selectedInfoRow}>
-                <View style={styles.selectedTextWrap}>
-                  <Text style={[styles.selectedTitle, { color: colors.text }]}>
-                    {selectedProduct.productName}
-                  </Text>
-                  <Text style={[styles.selectedMeta, { color: colors.mutedText }]}>
-                    {[selectedProduct.brand, selectedProduct.category, selectedProduct.barcode]
-                      .filter(Boolean)
-                      .join(' • ')}
-                  </Text>
-                  <Text
+              <ProductSummaryCard
+                imageUrl={selectedProduct.imageUrl}
+                fallbackIconName="pricetags-outline"
+                eyebrow={selectedProduct.brand}
+                title={selectedProduct.productName}
+                meta={[selectedProduct.category, selectedProduct.barcode].filter(Boolean).join(' • ')}
+                supportingText={
+                  selectedProductCartQuantity
+                    ? tt('price_compare_selected_quantity', 'Sepette {{count}} adet var').replace(
+                        '{{count}}',
+                        String(selectedProductCartQuantity)
+                      )
+                    : selectedBestOffer
+                      ? tt('price_compare_selected_best_offer', 'En iyi canlı fiyat: {{value}}').replace(
+                          '{{value}}',
+                          formatLocalizedPrice(
+                            preferredLocale,
+                            selectedBestOffer.price,
+                            selectedBestOffer.currency
+                          )
+                        )
+                      : tt(
+                          'price_compare_selected_pending',
+                          'Canlı market teklifleri bu bölümde görünecek.'
+                        )
+                }
+                supportingColor={
+                  selectedProductCartQuantity ? colors.teal : colors.mutedText
+                }
+                eyebrowColor={colors.primary}
+                titleColor={colors.text}
+                metaColor={colors.mutedText}
+                imageBackgroundColor={withAlpha(colors.primary, '12')}
+                fallbackIconColor={colors.primary}
+                alignItems="flex-start"
+                imageSize={68}
+                imageRadius={20}
+                trailing={
+                  <TouchableOpacity
+                    activeOpacity={0.88}
+                    onPress={handleAddSelectedToCart}
+                    disabled={!offersResponse || offersLoading}
                     style={[
-                      styles.selectedBasketHint,
+                      styles.addToCartButton,
                       {
-                        color: selectedProductCartQuantity
-                          ? colors.teal
-                          : colors.mutedText,
+                        backgroundColor: colors.primary,
+                        opacity: !offersResponse || offersLoading ? 0.65 : 1,
                       },
                     ]}
                   >
-                    {selectedProductCartQuantity
-                      ? tt('price_compare_selected_quantity', 'Sepette {{count}} adet var').replace(
-                          '{{count}}',
-                          String(selectedProductCartQuantity)
-                        )
-                      : selectedBestOffer
-                        ? tt(
-                            'price_compare_selected_best_offer',
-                            'En iyi canlı fiyat: {{value}}'
-                          ).replace(
-                            '{{value}}',
-                            formatLocalizedPrice(
-                              preferredLocale,
-                              selectedBestOffer.price,
-                              selectedBestOffer.currency
-                            )
-                          )
-                        : tt(
-                            'price_compare_selected_pending',
-                            'Canlı market teklifleri bu bölümde görünecek.'
-                          )}
-                  </Text>
-                </View>
-
-                <TouchableOpacity
-                  activeOpacity={0.88}
-                  onPress={handleAddSelectedToCart}
-                  disabled={!offersResponse || offersLoading}
-                  style={[
-                    styles.addToCartButton,
-                    {
-                      backgroundColor: colors.primary,
-                      opacity: !offersResponse || offersLoading ? 0.65 : 1,
-                    },
-                  ]}
-                >
-                  <Ionicons name="basket-outline" size={16} color={colors.primaryContrast} />
-                  <Text
-                    style={[styles.addToCartButtonText, { color: colors.primaryContrast }]}
-                  >
-                    {tt('price_compare_add_to_cart', 'Sepete Ekle')}
-                  </Text>
-                </TouchableOpacity>
-              </View>
+                    <Ionicons name="basket-outline" size={16} color={colors.primaryContrast} />
+                    <Text
+                      style={[styles.addToCartButtonText, { color: colors.primaryContrast }]}
+                    >
+                      {tt('price_compare_add_to_cart', 'Sepete Ekle')}
+                    </Text>
+                  </TouchableOpacity>
+                }
+              />
             </View>
 
             {offersError ? <NoticeCard text={offersError} colors={colors} /> : null}
