@@ -17,7 +17,7 @@ import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { withAlpha } from '../../utils/color';
 
 const NUTRI_SCORE_OVERVIEW_URL =
-  'https://yuka.io/wp-content/uploads/QR_Nutri-Score_EN.pdf';
+  'https://www.santepubliquefrance.fr/en/nutri-score';
 const WHO_FOPNL_GUIDANCE_URL =
   'https://apps.who.int/iris/bitstream/handle/10665/336988/WHO-EURO-2020-1569-41320-56234-eng.pdf?sequence=1&isAllowed=y';
 const OPEN_FOOD_FACTS_URL = 'https://world.openfoodfacts.org';
@@ -105,6 +105,18 @@ export const MethodologySourcesScreen: React.FC = () => {
           'İlaç gibi yüksek güven gerektiren yüzeylerde topluluk verisi yerine resmi kayıt, prospektüs ve düzenleyici belge zinciri esas alınır.'
         ),
       },
+      {
+        key: 'scientific-governance',
+        icon: 'flask-outline',
+        title: tt(
+          'methodology_principle_scientific_title',
+          'Bilimsel yönetişim'
+        ),
+        body: tt(
+          'methodology_principle_scientific_body',
+          'Nutri-Score gibi modeller yalnız skor üretmez; kamu sağlığı çerçevesi, bilimsel komite değerlendirmesi ve kanıta dayalı algoritma güncellemeleriyle birlikte okunur.'
+        ),
+      },
     ],
     [tt]
   );
@@ -137,7 +149,7 @@ export const MethodologySourcesScreen: React.FC = () => {
         title: tt('methodology_link_nutri_title', 'Nutri-Score Özeti'),
         subtitle: tt(
           'methodology_link_nutri_subtitle',
-          'Nutri-Score değerlendirme mantığını açıklayan referans döküman.'
+          'Resmi kamu sağlığı sayfasında Nutri-Score’un A-E ve 5 renkli ön yüz etiketi mantığını açıklar.'
         ),
         url: NUTRI_SCORE_OVERVIEW_URL,
       },
@@ -172,12 +184,13 @@ export const MethodologySourcesScreen: React.FC = () => {
         title: tt('methodology_food_title', 'Gıda'),
         body: tt(
           'methodology_food_body',
-          'Gıda ürünlerinde toplam skor; besinsel kalite, NOVA işlenme seviyesi ve katkı sinyallerinin birlikte okunmasıyla oluşur.'
+          'Gıda ürünlerinde toplam skor; zorunlu besin tablosunun yerine geçmeyen, onu tamamlayan basitleştirilmiş ön yüz besin sinyali, NOVA işlenme seviyesi ve katkı sinyallerinin birlikte okunmasıyla oluşur.'
         ),
         chips: [
           tt('food_signal_nutrition_title', 'Besinsel kalite'),
           tt('food_signal_processing_title', 'İşlenme seviyesi'),
           tt('food_signal_additives_title', 'Katkı riski'),
+          tt('methodology_chip_front_label', 'A-E ön yüz etiketi'),
         ],
       },
       {

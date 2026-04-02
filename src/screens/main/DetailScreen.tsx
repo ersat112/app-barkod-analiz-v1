@@ -295,7 +295,7 @@ const buildProductShareUrl = (
 };
 
 const NUTRI_SCORE_OVERVIEW_URL =
-  'https://yuka.io/wp-content/uploads/QR_Nutri-Score_EN.pdf';
+  'https://www.santepubliquefrance.fr/en/nutri-score';
 const WHO_FOPNL_GUIDANCE_URL =
   'https://apps.who.int/iris/bitstream/handle/10665/336988/WHO-EURO-2020-1569-41320-56234-eng.pdf?sequence=1&isAllowed=y';
 const TITCK_PORTAL_URL = 'https://www.titck.gov.tr/kubkt';
@@ -1484,7 +1484,7 @@ export const DetailScreen: React.FC = () => {
 
     return tt(
       'scientific_basis_food_summary',
-      'Gıda yorumu; ürünün topluluk veri kaydı, resmi besin puanı alanları, NOVA işlenme seviyesi ve içerik taramasından gelen katkı sinyalleri birlikte değerlendirilerek oluşturulur.'
+      'Gıda yorumu; zorunlu besin tablosunu tamamlayan resmi Nutri-Score alanları, NOVA işlenme seviyesi ve içerik taramasından gelen katkı sinyalleri birlikte değerlendirilerek oluşturulur.'
     );
   }, [displayedProduct, tt]);
 
@@ -2144,7 +2144,7 @@ export const DetailScreen: React.FC = () => {
         label: tt('scientific_link_nutri_score', 'Nutri-Score Özeti'),
         helper: tt(
           'scientific_link_nutri_score_helper',
-          'Nutri-Score değerlendirme mantığını özetleyen referans PDF dosyasını açar.'
+          'Resmi kamu sağlığı sayfasında Nutri-Score’un A-E ve 5 renkli ön yüz etiketi mantığını açar.'
         ),
         onPress: () => {
           void openDocumentUrl(NUTRI_SCORE_OVERVIEW_URL);
