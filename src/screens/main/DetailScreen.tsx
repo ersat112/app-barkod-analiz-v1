@@ -42,8 +42,6 @@ import { enqueueRemoteHistorySync } from '../../services/historyRemoteSync.servi
 import {
   buildMarketGelsinAlternativesRequest,
   buildMarketGelsinScanEventRequest,
-  getBestInStockOffer,
-  partitionOffersByPriceSourceType,
 } from '../../services/marketPricingContract.service';
 import {
   fetchMarketAlternativePricing,
@@ -90,10 +88,8 @@ import {
   MethodologySheet,
   NoticeCard,
   NutrientBalanceSection,
-  PricingHighlightsSection,
   ProductHighlightsSection,
   ProductHeadingSection,
-  ScoreBreakdownSection,
   ScoreOverviewCard,
   ShareSheet,
   SummarySection,
@@ -104,13 +100,10 @@ import type {
   MethodologySectionItem,
   NutrientBalanceItem,
   ProductHighlightItem,
-  PricingHighlightItem,
-  ScoreBreakdownItem,
 } from './detail/DetailSections';
 import type { ProductRepositoryCacheTier, ProductRepositoryLookupMeta } from '../../types/productRepository';
 import type {
   MarketAlternativePricingEntry,
-  MarketDataFreshness,
   MarketOffer,
   MarketProductOffersResponse,
 } from '../../types/marketPricing';
@@ -356,18 +349,6 @@ const translateRiskCompound = (tt: TranslateFn, value?: string | null): string =
   }
 };
 
-const getScoreAccentColor = (score: number | null): string => {
-  if (typeof score !== 'number') {
-    return '#8892A6';
-  }
-
-  if (score >= 85) return '#18B56A';
-  if (score >= 70) return '#74C947';
-  if (score >= 55) return '#E3B341';
-  if (score >= 35) return '#F08A24';
-  return '#D94B45';
-};
-
 const getNutrientToneColor = (tone: NutrientGaugeTone): string => {
   switch (tone) {
     case 'darkGreen':
@@ -500,24 +481,6 @@ const translateSignalKey = (tt: TranslateFn, key: 'nutrition' | 'processing' | '
       return tt('food_signal_additives_title', 'Katkı riski');
     default:
       return key;
-  }
-};
-
-const translateNovaDetail = (tt: TranslateFn, novaGroup: number | null): string => {
-  switch (novaGroup) {
-    case 1:
-      return tt('food_signal_processing_nova_1', 'NOVA 1: İşlenmemiş veya çok az işlenmiş ürün.');
-    case 2:
-      return tt('food_signal_processing_nova_2', 'NOVA 2: Mutfak bileşeni veya sınırlı işlenmiş ürün.');
-    case 3:
-      return tt('food_signal_processing_nova_3', 'NOVA 3: İşlenmiş ürün.');
-    case 4:
-      return tt('food_signal_processing_nova_4', 'NOVA 4: Ultra işlenmiş ürün.');
-    default:
-      return tt(
-        'food_signal_processing_missing',
-        'İşlenme seviyesi verisi bulunmadığı için NOVA sinyali sınırlı.'
-      );
   }
 };
 
@@ -1146,119 +1109,6 @@ const formatLocalizedPrice = (
   }
 };
 
-const formatLocalizedDateTime = (locale: string, value?: string | null): string => {
-  if (!value) {
-    return '';
-  }
-
-  const date = new Date(value);
-
-  if (!Number.isFinite(date.getTime())) {
-    return '';
-  }
-
-  try {
-    return new Intl.DateTimeFormat(locale || 'tr-TR', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date);
-  } catch {
-    return value;
-  }
-};
-
-const buildMarketOfferMeta = (
-  tt: TranslateFn,
-  locale: string,
-  offer?: MarketOffer | null
-): string => {
-  if (!offer) {
-    return '';
-  }
-
-  const parts: string[] = [];
-
-  if (typeof offer.unitPrice === 'number' && offer.unitPriceUnit) {
-    parts.push(
-      applyTemplate(
-        tt('market_pricing_unit_price_template', '{{price}} / {{unit}}'),
-        {
-          price: formatLocalizedPrice(locale, offer.unitPrice, offer.currency),
-          unit: offer.unitPriceUnit,
-        }
-      )
-    );
-  }
-
-  const updatedAt = formatLocalizedDateTime(locale, offer.capturedAt);
-
-  if (updatedAt) {
-    parts.push(
-      applyTemplate(tt('market_pricing_updated_template', 'Güncellendi {{value}}'), {
-        value: updatedAt,
-      })
-    );
-  }
-
-  return parts.join(' • ');
-};
-
-const getMarketFreshnessModeLabel = (
-  tt: TranslateFn,
-  freshness?: MarketDataFreshness | null
-): string => {
-  switch (freshness?.mode) {
-    case 'weekly_crawl':
-      return tt('market_pricing_freshness_weekly', 'Haftalık tarama');
-    case 'hot_refresh':
-      return tt('market_pricing_freshness_hot', 'Sıcak yenileme');
-    case 'mixed':
-      return tt('market_pricing_freshness_mixed', 'Karma yenileme');
-    default:
-      return tt('market_pricing_freshness_unknown', 'Güncellik bilgisi');
-  }
-};
-
-const buildMarketFreshnessMeta = (
-  tt: TranslateFn,
-  locale: string,
-  freshness?: MarketDataFreshness | null
-): string => {
-  if (!freshness) {
-    return '';
-  }
-
-  const parts: string[] = [];
-  const fullRefreshAt = formatLocalizedDateTime(locale, freshness.lastFullRefreshAt);
-  const hotRefreshAt = formatLocalizedDateTime(locale, freshness.lastHotRefreshAt);
-
-  if (fullRefreshAt) {
-    parts.push(
-      applyTemplate(
-        tt('market_pricing_full_refresh_template', 'Tam tarama {{value}}'),
-        {
-          value: fullRefreshAt,
-        }
-      )
-    );
-  }
-
-  if (hotRefreshAt) {
-    parts.push(
-      applyTemplate(
-        tt('market_pricing_hot_refresh_template', 'Hot refresh {{value}}'),
-        {
-          value: hotRefreshAt,
-        }
-      )
-    );
-  }
-
-  return parts.join(' • ');
-};
-
 const buildAlternativeMarketHint = (params: {
   tt: TranslateFn;
   locale: string;
@@ -1714,90 +1564,6 @@ export const DetailScreen: React.FC = () => {
       hasApiScore: hasApiScoreSignal,
     });
   }, [displayedAnalysis, displayedProduct?.type, hasApiScoreSignal, tt]);
-
-  const foodScoreBreakdownItems = useMemo<ScoreBreakdownItem[]>(() => {
-    if (!displayedAnalysis || displayedProduct?.type !== 'food') {
-      return [];
-    }
-
-    const normalizedGrade = String(displayedProduct?.grade || '')
-      .trim()
-      .toUpperCase();
-    const hasDisplayGrade = ['A', 'B', 'C', 'D', 'E'].includes(normalizedGrade);
-
-    const nutritionDetail =
-      typeof displayedAnalysis.nutritionScore === 'number'
-        ? hasDisplayGrade
-          ? applyTemplate(
-              tt(
-                'food_signal_nutrition_detail_with_grade',
-                'Resmi besin puanı ve derece sinyali birlikte değerlendirildi. Mevcut harf notu: {{grade}}.'
-              ),
-              { grade: normalizedGrade }
-            )
-          : tt(
-              'food_signal_nutrition_detail',
-              'Resmi besin puanı mevcut; toplam skora besinsel kalite sinyali eklendi.'
-            )
-        : tt(
-            'food_signal_nutrition_missing',
-            'Besin puanı verisi bulunmadığı için bu katman sınırlı kaldı.'
-          );
-
-    const additiveDetail =
-      typeof displayedAnalysis.additiveRiskScore === 'number'
-        ? displayedAnalysis.foundECodes.length > 0
-          ? applyTemplate(
-              tt(
-                'food_signal_additives_detail_detected',
-                '{{count}} katkı sinyali bulundu. Yüksek riskli bileşen sayısı: {{highCount}}.'
-              ),
-              {
-                count: displayedAnalysis.foundECodes.length,
-                highCount: displayedAnalysis.highRiskAdditiveCount,
-              }
-            )
-          : tt(
-              'food_signal_additives_detail_clean',
-              'İçerik ve katkı sinyallerinde belirgin bir risk işareti bulunmadı.'
-            )
-        : tt(
-            'food_signal_additives_missing',
-            'Katkı veya içerik verisi eksik olduğu için bu katman sınırlı kaldı.'
-          );
-
-    return [
-      {
-        key: 'nutrition',
-        title: tt('food_signal_nutrition_title', 'Besinsel kalite'),
-        helper: tt('food_signal_nutrition_helper', 'Nutri-Score / API besin sinyali'),
-        detail: nutritionDetail,
-        score: displayedAnalysis.nutritionScore,
-        accentColor: getScoreAccentColor(displayedAnalysis.nutritionScore),
-      },
-      {
-        key: 'processing',
-        title: tt('food_signal_processing_title', 'İşlenme seviyesi'),
-        helper: tt('food_signal_processing_helper', 'NOVA işlenme sınıfı'),
-        detail: translateNovaDetail(tt, displayedAnalysis.novaGroup),
-        score: displayedAnalysis.processingScore,
-        accentColor: getScoreAccentColor(displayedAnalysis.processingScore),
-      },
-      {
-        key: 'additives',
-        title: tt('food_signal_additives_title', 'Katkı riski'),
-        helper: tt('food_signal_additives_helper', 'E-kod ve içerik sinyali'),
-        detail: additiveDetail,
-        score: displayedAnalysis.additiveRiskScore,
-        accentColor: getScoreAccentColor(displayedAnalysis.additiveRiskScore),
-      },
-    ];
-  }, [
-    displayedAnalysis,
-    displayedProduct?.grade,
-    displayedProduct?.type,
-    tt,
-  ]);
 
   const foodDataTransparencyText = useMemo(() => {
     if (!displayedAnalysis || displayedProduct?.type !== 'food') {
@@ -2358,144 +2124,7 @@ export const DetailScreen: React.FC = () => {
     [marketOffersResponse?.offers]
   );
 
-  const marketPricingSummary = useMemo(() => {
-    if (!marketPricingOffers.length) {
-      return {
-        bestLocalOffer: null as MarketOffer | null,
-        bestReferenceOffer: null as MarketOffer | null,
-        bestFallbackOffer: null as MarketOffer | null,
-      };
-    }
-
-    const partitioned = partitionOffersByPriceSourceType(marketPricingOffers);
-
-    return {
-      bestLocalOffer: getBestInStockOffer(partitioned.localMarketOffers),
-      bestReferenceOffer: getBestInStockOffer(partitioned.nationalReferenceOffers),
-      bestFallbackOffer: getBestInStockOffer(marketPricingOffers),
-    };
-  }, [marketPricingOffers]);
-
-  const pricingHighlightItems = useMemo<PricingHighlightItem[]>(() => {
-    const items: PricingHighlightItem[] = [];
-    const inStockCount = marketPricingOffers.filter((offer) => offer.inStock).length;
-
-    if (marketPricingSummary.bestLocalOffer) {
-      items.push({
-        key: 'local-offer',
-        badge: tt('market_pricing_local_badge', 'Şehrindeki fiyat'),
-        title: marketPricingSummary.bestLocalOffer.marketName,
-        priceLabel: formatLocalizedPrice(
-          preferredLocale,
-          marketPricingSummary.bestLocalOffer.price,
-          marketPricingSummary.bestLocalOffer.currency
-        ),
-        helper: buildMarketOfferMeta(tt, preferredLocale, marketPricingSummary.bestLocalOffer),
-        meta: marketPricingLocationLabel || profileCity || undefined,
-        tone: 'local',
-      });
-    }
-
-    if (marketPricingSummary.bestReferenceOffer) {
-      items.push({
-        key: 'reference-offer',
-        badge: tt('market_pricing_reference_badge', 'Ulusal referans'),
-        title: marketPricingSummary.bestReferenceOffer.marketName,
-        priceLabel: formatLocalizedPrice(
-          preferredLocale,
-          marketPricingSummary.bestReferenceOffer.price,
-          marketPricingSummary.bestReferenceOffer.currency
-        ),
-        helper: buildMarketOfferMeta(
-          tt,
-          preferredLocale,
-          marketPricingSummary.bestReferenceOffer
-        ),
-        meta: tt('market_pricing_reference_meta', 'Referans fiyat'),
-        tone: 'reference',
-      });
-    }
-
-    if (!items.length && marketPricingSummary.bestFallbackOffer) {
-      items.push({
-        key: 'best-offer',
-        badge: tt('market_pricing_best_badge', 'En iyi teklif'),
-        title: marketPricingSummary.bestFallbackOffer.marketName,
-        priceLabel: formatLocalizedPrice(
-          preferredLocale,
-          marketPricingSummary.bestFallbackOffer.price,
-          marketPricingSummary.bestFallbackOffer.currency
-        ),
-        helper: buildMarketOfferMeta(
-          tt,
-          preferredLocale,
-          marketPricingSummary.bestFallbackOffer
-        ),
-        meta: marketPricingLocationLabel || profileCity || undefined,
-        tone: 'best',
-      });
-    }
-
-    if (marketPricingOffers.length) {
-      const freshnessLabel = getMarketFreshnessModeLabel(
-        tt,
-        marketOffersResponse?.dataFreshness
-      );
-      const freshnessMeta = buildMarketFreshnessMeta(
-        tt,
-        preferredLocale,
-        marketOffersResponse?.dataFreshness
-      );
-
-      items.push({
-        key: 'coverage-freshness',
-        badge: tt('market_pricing_coverage_badge', 'Kapsama'),
-        title: applyTemplate(
-          tt('market_pricing_coverage_title', '{{count}} market izlendi'),
-          {
-            count: marketPricingOffers.length,
-          }
-        ),
-        priceLabel: freshnessLabel,
-        helper:
-          freshnessMeta ||
-          applyTemplate(
-            tt(
-              'market_pricing_coverage_helper',
-              '{{inStock}} markette stokta gorunuyor'
-            ),
-            {
-              inStock: inStockCount,
-            }
-          ),
-        meta: applyTemplate(
-          tt(
-            'market_pricing_coverage_meta',
-            '{{location}} icin {{inStock}} markette stok var'
-          ),
-          {
-            location: marketPricingLocationLabel || profileCity || tt('location', 'Konum'),
-            inStock: inStockCount,
-          }
-        ),
-        tone: 'coverage',
-      });
-    }
-
-    return items;
-  }, [
-    marketOffersResponse?.dataFreshness,
-    marketPricingLocationLabel,
-    marketPricingOffers,
-    marketPricingSummary.bestFallbackOffer,
-    marketPricingSummary.bestLocalOffer,
-    marketPricingSummary.bestReferenceOffer,
-    preferredLocale,
-    profileCity,
-    tt,
-  ]);
-
-  const pricingSectionSubtitle = useMemo(() => {
+  const marketPriceTableSubtitle = useMemo(() => {
     if (!profileCity) {
       return null;
     }
@@ -2515,8 +2144,8 @@ export const DetailScreen: React.FC = () => {
 
     return applyTemplate(
       tt(
-        'market_pricing_subtitle',
-        'market_gelsin verisi ile {{location}} için fiyat katmanı gösterilir.'
+        'market_price_table_subtitle_compact',
+        '{{location}} için market fiyatları gösterilir.'
       ),
       {
         location: marketPricingLocationLabel || profileCity,
@@ -3520,6 +3149,26 @@ export const DetailScreen: React.FC = () => {
             />
           ) : null}
 
+          <FamilyHealthAlert items={familyAlerts} style={{ marginBottom: 24 }} />
+
+          <SummarySection
+            title={
+              isMedicineProduct
+                ? tt('medicine_record_title', 'İlaç Kayıt Özeti')
+                : tt('analysis_summary', 'Analiz Özeti')
+            }
+            text={summaryText}
+            colors={colors}
+          />
+
+          {nutritionSuitabilityText ? (
+            <TextSection
+              title={tt('dietary_fit_title', 'Size Uygunluk')}
+              text={nutritionSuitabilityText}
+              colors={colors}
+            />
+          ) : null}
+
           {displayedProduct.type === 'food' ? (
             <>
               <ProductHighlightsSection
@@ -3542,12 +3191,6 @@ export const DetailScreen: React.FC = () => {
                 colors={colors}
               />
 
-              <ScoreBreakdownSection
-                title={tt('food_signal_breakdown_title', 'Skorun Bileşenleri')}
-                items={foodScoreBreakdownItems}
-                colors={colors}
-              />
-
               <NutrientBalanceSection
                 title={tt('nutrient_balance_title', 'Besin Dengesi')}
                 subtitle={tt(
@@ -3564,61 +3207,26 @@ export const DetailScreen: React.FC = () => {
             </>
           ) : null}
 
-          {!isMedicineProduct ? (
-            <InfoActionCard
-              title={tt('score_methodology_action', 'Bu puan nasıl oluştu?')}
-              subtitle={tt(
-                'score_methodology_action_subtitle',
-                'Kullanılan sinyalleri, veri kapsamını ve yorum mantığını açın.'
-              )}
-              onPress={openMethodologySheet}
-              colors={colors}
-            />
-          ) : null}
-
-          <FamilyHealthAlert items={familyAlerts} style={{ marginBottom: 24 }} />
-
-          {nutritionSuitabilityText ? (
-            <TextSection
-              title={tt('dietary_fit_title', 'Size Uygunluk')}
-              text={nutritionSuitabilityText}
-              colors={colors}
-            />
-          ) : null}
-
           {!isMedicineProduct && MARKET_GELSIN_RUNTIME.isEnabled ? (
             profileCityCode ? (
               <>
-                <PricingHighlightsSection
-                  title={tt('market_pricing_title', 'Fiyat ve Bulunabilirlik')}
-                  subtitle={pricingSectionSubtitle ?? undefined}
-                  items={pricingHighlightItems}
-                  loading={marketOffersLoading}
-                  emptyLabel={
-                    !marketOffersLoading && !pricingHighlightItems.length
-                      ? tt(
-                          'market_pricing_empty',
-                          'Bu ürün için şu anda fiyat teklifi bulunamadı.'
-                        )
-                      : undefined
-                  }
-                  colors={colors}
-                />
-
                 {!marketOffersError ? (
                   <MarketPriceTableCard
                     title={tt('market_price_table_title', 'Market Fiyat Tablosu')}
-                    subtitle={tt(
-                      'market_price_table_subtitle',
-                      'Ulusal marketleri ve konumundaki marketleri yana kaydırarak karşılaştır.'
-                    )}
-                  offers={marketPricingOffers}
-                  productType={displayedProduct.type}
-                  locale={preferredLocale}
-                  colors={colors}
-                  tt={tt}
-                  loading={marketOffersLoading}
-                />
+                    subtitle={
+                      marketPriceTableSubtitle ||
+                      tt(
+                        'market_price_table_subtitle',
+                        'Ulusal marketleri ve konumundaki marketleri yana kaydırarak karşılaştır.'
+                      )
+                    }
+                    offers={marketPricingOffers}
+                    productType={displayedProduct.type}
+                    locale={preferredLocale}
+                    colors={colors}
+                    tt={tt}
+                    loading={marketOffersLoading}
+                  />
                 ) : null}
 
                 {marketOffersError ? (
@@ -3692,22 +3300,24 @@ export const DetailScreen: React.FC = () => {
             </View>
           ) : null}
 
-          <SummarySection
-            title={
-              isMedicineProduct
-                ? tt('medicine_record_title', 'İlaç Kayıt Özeti')
-                : tt('analysis_summary', 'Analiz Özeti')
-            }
-            text={summaryText}
-            colors={colors}
-          />
-
           <EvidenceSection
             title={tt('scientific_basis_title', 'Bilimsel Dayanak')}
             summary={scientificEvidenceSummary}
             tags={scientificEvidenceTags}
             colors={colors}
           />
+
+          {!isMedicineProduct ? (
+            <InfoActionCard
+              title={tt('score_methodology_action', 'Bu puan nasıl oluştu?')}
+              subtitle={tt(
+                'score_methodology_action_subtitle',
+                'Kullanılan sinyalleri, veri kapsamını ve yorum mantığını açın.'
+              )}
+              onPress={openMethodologySheet}
+              colors={colors}
+            />
+          ) : null}
 
           <ActionLinksSection
             title={tt('scientific_sources_title', 'Kaynaklar')}
