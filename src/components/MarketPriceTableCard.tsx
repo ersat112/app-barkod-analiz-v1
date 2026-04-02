@@ -26,6 +26,8 @@ type MarketPriceTableCardProps = {
   colors: ThemeColors;
   tt: TranslateFn;
   loading?: boolean;
+  compact?: boolean;
+  onOfferPress?: (offer: MarketOffer) => void;
 };
 
 type DisplayColumn = {
@@ -185,6 +187,8 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
   colors,
   tt,
   loading = false,
+  compact = false,
+  onOfferPress,
 }) => {
   const columns = useMemo<DisplayColumn[]>(() => {
     if (!offers.length) {
@@ -314,7 +318,7 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
         {columns.map((column) => {
           const toneColor = column.scope === 'national' ? colors.primary : colors.teal;
           const hasOffer = Boolean(column.offer?.inStock);
-          const canOpenSource = Boolean(column.offer?.sourceUrl);
+          const canInteract = Boolean(column.offer && (onOfferPress || column.offer.sourceUrl));
           const priceLabel = hasOffer
             ? formatLocalizedPrice(locale, column.offer?.price, column.offer?.currency || 'TRY')
             : loading
@@ -328,15 +332,18 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
           return (
             <TouchableOpacity
               key={column.id}
-              activeOpacity={canOpenSource ? 0.88 : 1}
-              disabled={!canOpenSource}
+              activeOpacity={canInteract ? 0.88 : 1}
+              disabled={!canInteract}
               onPress={() => {
-                if (column.offer?.sourceUrl) {
+                if (column.offer && onOfferPress) {
+                  onOfferPress(column.offer);
+                } else if (column.offer?.sourceUrl) {
                   void Linking.openURL(column.offer.sourceUrl);
                 }
               }}
               style={[
                 styles.columnCard,
+                compact && styles.columnCardCompact,
                 {
                   backgroundColor: withAlpha(colors.card, 'EE'),
                   borderColor: withAlpha(colors.border, 'B8'),
@@ -362,9 +369,9 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
                         : tt('market_price_table_local_badge', 'Yakın')}
                     </Text>
                   </View>
-                  {canOpenSource ? (
+                  {canInteract ? (
                     <Ionicons
-                      name="open-outline"
+                      name={onOfferPress ? 'chevron-forward-outline' : 'open-outline'}
                       size={14}
                       color={colors.mutedText}
                     />
@@ -372,7 +379,14 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
                 </View>
               </View>
 
-              <Text style={[styles.marketName, { color: colors.text }]} numberOfLines={2}>
+              <Text
+                style={[
+                  styles.marketName,
+                  compact && styles.marketNameCompact,
+                  { color: colors.text },
+                ]}
+                numberOfLines={2}
+              >
                 {column.marketName}
               </Text>
 
@@ -380,6 +394,7 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
                 <Text
                   style={[
                     styles.priceText,
+                    compact && styles.priceTextCompact,
                     {
                       color: hasOffer ? colors.text : colors.mutedText,
                       opacity: hasOffer ? 1 : 0.9,
@@ -419,19 +434,21 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
                   {distanceLabel}
                 </Text>
               ) : (
-                <View style={styles.metaSpacer} />
+                        <View style={styles.metaSpacer} />
               )}
             </TouchableOpacity>
           );
         })}
       </ScrollView>
 
-      <Text style={[styles.helperText, { color: colors.mutedText }]}>
-        {tt(
-          'market_price_table_hint',
-          'Sağa kaydırarak ulusal ve bulunduğun konumdaki market tekliflerini görebilirsin.'
-        )}
-      </Text>
+      {!compact ? (
+        <Text style={[styles.helperText, { color: colors.mutedText }]}>
+          {tt(
+            'market_price_table_hint',
+            'Sağa kaydırarak ulusal ve bulunduğun konumdaki market tekliflerini görebilirsin.'
+          )}
+        </Text>
+      ) : null}
     </View>
   );
 };
@@ -468,6 +485,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 18,
     padding: 12,
+  },
+  columnCardCompact: {
+    width: 120,
+    minHeight: 160,
+    padding: 10,
   },
   columnHeader: {
     flexDirection: 'row',
@@ -508,12 +530,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     minHeight: 36,
   },
+  marketNameCompact: {
+    minHeight: 32,
+    fontSize: 12,
+    lineHeight: 16,
+  },
   priceText: {
     marginTop: 10,
     fontSize: 16,
     lineHeight: 22,
     fontWeight: '800',
     minHeight: 44,
+  },
+  priceTextCompact: {
+    marginTop: 8,
+    fontSize: 15,
+    lineHeight: 20,
+    minHeight: 38,
   },
   unavailableWrap: {
     marginTop: 10,
