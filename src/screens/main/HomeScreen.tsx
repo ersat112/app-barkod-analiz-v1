@@ -13,7 +13,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 
-import { AdBanner } from '../../components/AdBanner';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useAuth } from '../../context/AuthContext';
@@ -141,6 +140,14 @@ export const HomeScreen: React.FC = () => {
     });
   }, [profile, tt, user]);
 
+  const trackedSignalCount = useMemo(() => {
+    return (
+      familyHealthProfile.allergens.length +
+      familyHealthProfile.watchedAdditives.length +
+      familyHealthProfile.healthGoals.length
+    );
+  }, [familyHealthProfile]);
+
   const familySummary = useMemo(() => {
     return tt(
       'family_home_summary',
@@ -185,46 +192,48 @@ export const HomeScreen: React.FC = () => {
         }
       >
         <View style={styles.headerWrap}>
-          <Text style={[styles.eyebrow, { color: colors.primary }]}>
-            {tt('home_eyebrow', 'BarkodAnaliz')}
-          </Text>
           <Text style={[styles.headerTitle, { color: colors.text }]}>
             {tt('home_title_simple', 'Bugün neye dikkat etmeliyim?')}
           </Text>
           <Text style={[styles.headerSubtitle, { color: colors.mutedText }]}>
             {tt(
-              'home_subtitle_simple',
-              'En kritik alerjenleri, yüksek riskli katkı kodlarını ve son taramalarını tek ekranda gör.'
+              'home_subtitle_focus',
+              'Alerjenler, riskli katkılar ve son taramalar tek ekranda.'
             )}
           </Text>
         </View>
 
         <TouchableOpacity
           style={[
-            styles.familyCard,
+            styles.familyStrip,
             {
-              backgroundColor: withAlpha(colors.card, isDark ? 'F2' : 'FC'),
+              backgroundColor: withAlpha(colors.cardElevated, isDark ? 'EE' : 'FA'),
               borderColor: withAlpha(colors.border, 'BC'),
-              shadowColor: colors.shadow,
             },
           ]}
           activeOpacity={0.9}
           onPress={() => navigation.navigate('FamilyHealthProfile')}
         >
-          <View style={[styles.familyIcon, { backgroundColor: withAlpha(colors.primary, '14') }]}>
-            <Ionicons name="people-outline" size={20} color={colors.primary} />
-          </View>
+          <Ionicons name="people-outline" size={18} color={colors.primary} />
           <View style={styles.familyTextWrap}>
             <Text style={[styles.familyTitle, { color: colors.text }]}>
-              {displayName
-                ? `${displayName} • ${tt('family_health_profile', 'Aile ve Sağlık Profili')}`
-                : tt('family_health_profile', 'Aile ve Sağlık Profili')}
+              {tt('family_health_profile', 'Aile ve Sağlık Profili')}
             </Text>
             <Text style={[styles.familySubtitle, { color: colors.mutedText }]}>
-              {familySummary}
+              {trackedSignalCount > 0
+                ? familySummary
+                : tt(
+                    'family_home_empty',
+                    'Alerjenlerini ve hassasiyetlerini ekleyerek uyarıları kişiselleştir.'
+                  )}
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+          {displayName ? (
+            <Text style={[styles.familyMeta, { color: colors.mutedText }]} numberOfLines={1}>
+              {displayName}
+            </Text>
+          ) : null}
+          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
         </TouchableOpacity>
 
         <View style={styles.sectionBlock}>
@@ -233,10 +242,10 @@ export const HomeScreen: React.FC = () => {
               <Text style={[styles.sectionTitle, { color: colors.text }]}>
                 {tt('critical_allergens_title', 'Dikkat Gerektiren Alerjenler')}
               </Text>
-              <Text style={[styles.sectionSubtitle, { color: colors.mutedText }]}>
+              <Text style={[styles.sectionSubtitleCompact, { color: colors.mutedText }]}>
                 {tt(
-                  'critical_allergens_subtitle',
-                  'Aile profiline eklemek icin herhangi birine dokun.'
+                  'critical_allergens_subtitle_compact',
+                  'Detay ve ekleme için dokun.'
                 )}
               </Text>
             </View>
@@ -297,10 +306,10 @@ export const HomeScreen: React.FC = () => {
               <Text style={[styles.sectionTitle, { color: colors.text }]}>
                 {tt('critical_additives_title', 'Yüksek Riskli Katki Kodlari')}
               </Text>
-              <Text style={[styles.sectionSubtitle, { color: colors.mutedText }]}>
+              <Text style={[styles.sectionSubtitleCompact, { color: colors.mutedText }]}>
                 {tt(
-                  'critical_additives_subtitle',
-                  'Kodun ne anlama geldigini gormek ve izlemeye almak icin dokun.'
+                  'critical_additives_subtitle_compact',
+                  'Kod detayını açmak için dokun.'
                 )}
               </Text>
             </View>
@@ -363,10 +372,10 @@ export const HomeScreen: React.FC = () => {
               <Text style={[styles.sectionTitle, { color: colors.text }]}>
                 {tt('recent_scans_title', 'Son 10 Tarama')}
               </Text>
-              <Text style={[styles.sectionSubtitle, { color: colors.mutedText }]}>
+              <Text style={[styles.sectionSubtitleCompact, { color: colors.mutedText }]}>
                 {tt(
-                  'recent_scans_subtitle',
-                  'Daha detayli arama icin Gecmis ekranina gec.'
+                  'recent_scans_subtitle_compact',
+                  'Daha detaylı arama için geçmişe geç.'
                 )}
               </Text>
             </View>
@@ -465,10 +474,6 @@ export const HomeScreen: React.FC = () => {
             )}
           </View>
         </View>
-
-        <View style={styles.footerSpace}>
-          <AdBanner placement="home_footer" />
-        </View>
       </ScrollView>
     </View>
   );
@@ -484,60 +489,48 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerWrap: {
-    marginBottom: 20,
-  },
-  eyebrow: {
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 1.1,
-    textTransform: 'uppercase',
+    marginBottom: 16,
   },
   headerTitle: {
-    marginTop: 8,
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '900',
-    lineHeight: 38,
+    lineHeight: 34,
   },
   headerSubtitle: {
-    marginTop: 10,
-    fontSize: 15,
-    lineHeight: 24,
-    maxWidth: 520,
+    marginTop: 6,
+    fontSize: 14,
+    lineHeight: 20,
   },
-  familyCard: {
+  familyStrip: {
     borderWidth: 1,
-    borderRadius: 26,
-    padding: 18,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 6,
-  },
-  familyIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
+    gap: 10,
   },
   familyTextWrap: {
     flex: 1,
   },
   familyTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '800',
-    lineHeight: 22,
+    lineHeight: 20,
   },
   familySubtitle: {
-    marginTop: 4,
-    fontSize: 13,
-    lineHeight: 19,
+    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  familyMeta: {
+    maxWidth: 84,
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: 'right',
   },
   sectionBlock: {
-    marginTop: 28,
+    marginTop: 24,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -550,13 +543,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '900',
   },
-  sectionSubtitle: {
-    marginTop: 6,
-    fontSize: 13,
-    lineHeight: 19,
+  sectionSubtitleCompact: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
   },
   sectionAction: {
     flexDirection: 'row',
@@ -572,21 +565,21 @@ const styles = StyleSheet.create({
   },
   listCard: {
     borderWidth: 1,
-    borderRadius: 24,
+    borderRadius: 20,
     overflow: 'hidden',
   },
   listRow: {
-    minHeight: 72,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    minHeight: 68,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
   listRowAccent: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -594,56 +587,56 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listRowTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
-    lineHeight: 20,
+    lineHeight: 19,
   },
   listRowSubtitle: {
-    marginTop: 4,
+    marginTop: 3,
     fontSize: 12,
-    lineHeight: 18,
+    lineHeight: 17,
   },
   inlineBadge: {
     borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
   },
   inlineBadgeText: {
     fontSize: 11,
     fontWeight: '800',
   },
   scanRow: {
-    minHeight: 76,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    minHeight: 72,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
   },
   scanRowTextWrap: {
     flex: 1,
   },
   scanRowName: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
-    lineHeight: 21,
+    lineHeight: 20,
   },
   scanRowMeta: {
-    marginTop: 5,
+    marginTop: 4,
     fontSize: 12,
-    lineHeight: 18,
+    lineHeight: 17,
   },
   scoreBubble: {
-    minWidth: 58,
-    height: 58,
-    borderRadius: 18,
+    minWidth: 52,
+    height: 52,
+    borderRadius: 16,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,
   },
   scoreValue: {
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '900',
   },
   emptyHistoryWrap: {
@@ -671,8 +664,5 @@ const styles = StyleSheet.create({
   inlinePrimaryText: {
     fontSize: 14,
     fontWeight: '900',
-  },
-  footerSpace: {
-    marginTop: 28,
   },
 });
