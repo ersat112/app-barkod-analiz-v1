@@ -884,7 +884,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       hintTitle: tt('scanner_mode_text_title', 'Metin modunda analiz'),
       hintBody: tt(
         'scanner_mode_text_body',
-        'İçindekiler, ingredients, INCI veya ne için kullanılır bölümünü okut. İlk sürümde metni elle de girebilirsin.'
+        'Gıdada hem içindekiler hem besin değerleri tablosunu okut. Kozmetikte INCI, ilaçta ne için kullanılır bölümü okunabilir. Eksik metin sınırlı sonuç üretir.'
       ),
     },
   ];
@@ -1219,9 +1219,18 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               <Text style={styles.textCaptureHint}>
                 {tt(
                   'text_mode_capture_hint',
-                  'İçindekiler veya kullanım metnini kareye hizalayın, sonra kameradan okutun.'
+                  'Gıda için önce içindekiler, sonra besin değerleri tablosunu kareye hizalayın. Yalnız içerik metni okunursa sonuç sınırlı ve hatalı olabilir.'
                 )}
               </Text>
+              <View style={styles.textCaptureWarning}>
+                <Ionicons name="information-circle-outline" size={16} color="#FCD34D" />
+                <Text style={styles.textCaptureWarningText}>
+                  {tt(
+                    'text_mode_capture_warning',
+                    'Tam gıda yorumu için içerik ve besin değerleri birlikte okunmalıdır. Kozmetik ve ilaçta ilgili bölüm tek başına yeterli olabilir.'
+                  )}
+                </Text>
+              </View>
               <View style={styles.textCaptureActions}>
                 <TouchableOpacity
                   style={[
@@ -1528,7 +1537,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               {manualEntryMode === 'text'
                 ? tt(
                     'manual_text_help',
-                    'İçindekiler, ingredients, INCI veya ne için kullanılır bölümünü yapıştırabilirsiniz.'
+                    'Gıda için içindekiler ve besin değerleri tablosunu birlikte yapıştırın. Sadece içerik metni girilirse sonuç sınırlı olabilir.'
                   )
                 : tt(
                     'manual_barcode_help',
@@ -1857,6 +1866,23 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.82)',
     fontSize: 13,
     lineHeight: 19,
+    fontWeight: '700',
+  },
+  textCaptureWarning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    padding: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(252,211,77,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(252,211,77,0.26)',
+  },
+  textCaptureWarningText: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.84)',
+    fontSize: 12,
+    lineHeight: 18,
     fontWeight: '700',
   },
   textCaptureActions: {

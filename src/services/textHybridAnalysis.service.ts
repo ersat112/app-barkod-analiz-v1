@@ -81,6 +81,31 @@ const INGREDIENT_MARKERS = [
   'inci',
 ];
 
+const NUTRITION_MARKERS = [
+  'besin degerleri',
+  'besin değerleri',
+  'nutrition facts',
+  'nutrition declaration',
+  'enerji',
+  'energy',
+  'kcal',
+  'kj',
+  'yag',
+  'yağ',
+  'fat',
+  'doymus yag',
+  'doymuş yağ',
+  'saturated fat',
+  'karbonhidrat',
+  'carbohydrate',
+  'seker',
+  'şeker',
+  'sugar',
+  'protein',
+  'tuz',
+  'salt',
+];
+
 const normalizeForMatch = (value?: string | null): string =>
   String(value || '')
     .toLocaleLowerCase('tr')
@@ -96,6 +121,23 @@ const tokenize = (value?: string | null): string[] =>
     .split(' ')
     .map((item) => item.trim())
     .filter((item) => item.length >= 2 && !QUERY_STOP_WORDS.has(item));
+
+const hasNutritionTableSignals = (value: string): boolean => {
+  const normalized = normalizeForMatch(value);
+  const markerHits = NUTRITION_MARKERS.filter((marker) =>
+    normalized.includes(normalizeForMatch(marker))
+  ).length;
+
+  if (markerHits >= 3) {
+    return true;
+  }
+
+  if (markerHits >= 2 && /\b100\s?(g|ml)\b/.test(normalized)) {
+    return true;
+  }
+
+  return false;
+};
 
 export const inferTextProductType = (value: string): ProductType => {
   const normalized = normalizeForMatch(value);
@@ -352,6 +394,8 @@ export const resolveHybridTextAnalysis = async (params: {
   }
 
   const inferredType = inferTextProductType(trimmedText);
+  const includesNutritionSignals =
+    inferredType === 'food' ? hasNutritionTableSignals(trimmedText) : false;
   const structuredMatch = await findStructuredCandidate({
     rawText: trimmedText,
     inferredType,
@@ -405,6 +449,24 @@ export const resolveHybridTextAnalysis = async (params: {
             'text_mode_medicine_message',
             'Metinden resmi kullanım sinyali yorumlandı. Prospektüs yerine geçmez.'
           )
+        : inferredType === 'food' && !includesNutritionSignals
+          ? tt(
+              inputSource === 'ocr'
+                ? 'text_mode_food_ocr_ingredients_only_message'
+                : 'text_mode_food_manual_ingredients_only_message',
+              inputSource === 'ocr'
+                ? 'Yalnız içerik metni okunabildi. Besin değerleri tablosu okunmadığı için sonuç sınırlı olabilir ve resmi besin puanı yerine geçmez.'
+                : 'Yalnız içerik metni girildi. Besin değerleri tablosu olmadan çıkan sonuç sınırlı olabilir ve resmi besin puanı yerine geçmez.'
+            )
+        : inferredType === 'food'
+          ? tt(
+              inputSource === 'ocr'
+                ? 'text_mode_food_ocr_with_nutrition_message'
+                : 'text_mode_food_manual_with_nutrition_message',
+              inputSource === 'ocr'
+                ? 'İçerik ve besin değerleri birlikte okundu. Güçlü ürün eşleşmesi bulunamadığı için sonuç yine yönlendiricidir.'
+                : 'İçerik ve besin değerleri birlikte girildi. Güçlü ürün eşleşmesi bulunamadığı için sonuç yine yönlendiricidir.'
+            )
         : inputSource === 'ocr'
           ? tt(
               'text_mode_ocr_preview_message',
