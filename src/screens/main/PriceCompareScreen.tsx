@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Image,
   Linking,
-  Modal,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -17,6 +16,7 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import { useTranslation } from 'react-i18next';
 
 import type { RootStackParamList } from '../../navigation/AppNavigator';
+import { MarketOfferSheet } from '../../components/MarketOfferSheet';
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
 import { inferMarketDisplayProductType } from '../../config/marketDisplay';
 import { useAuth } from '../../context/AuthContext';
@@ -2039,148 +2039,46 @@ export const PriceCompareScreen: React.FC = () => {
         ) : null}
       </ScrollView>
 
-      <Modal
+      <MarketOfferSheet
         visible={Boolean(marketSheetState && marketSheetDetails)}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={closeMarketSheet}
-      >
-        <View style={styles.marketSheetOverlay}>
-          <TouchableOpacity
-            style={styles.marketSheetBackdrop}
-            activeOpacity={1}
-            onPress={closeMarketSheet}
-          />
-
-          {marketSheetDetails ? (
-            <View style={styles.marketSheetWrap}>
-              <View
-                style={[
-                  styles.marketSheetCard,
-                  {
-                    backgroundColor: withAlpha(colors.cardElevated, isDark ? 'F4' : 'FC'),
-                    borderColor: withAlpha(colors.border, 'BC'),
-                    shadowColor: colors.shadow,
+        title={marketSheetDetails?.title || tt('price_compare_market_sheet_subtitle', 'Market detayı')}
+        subtitle={marketSheetDetails?.subtitle || tt('price_compare_market_sheet_subtitle', 'Market detayı')}
+        marketName={marketSheetDetails?.title}
+        marketKey={marketSheetDetails?.marketKey}
+        marketLogoUrl={marketSheetDetails?.logoUrl}
+        details={marketSheetDetails?.details ?? []}
+        actions={[
+          ...(marketSheetDetails?.canOpenMap
+            ? [
+                {
+                  key: 'map',
+                  label: tt('price_compare_market_sheet_open_map', 'Haritada Aç'),
+                  iconName: 'navigate-outline' as const,
+                  tone: 'teal' as const,
+                  onPress: () => {
+                    void handleOpenMarketMap();
                   },
-                ]}
-              >
-                <View
-                  style={[
-                    styles.marketSheetHandle,
-                    { backgroundColor: withAlpha(colors.border, 'A8') },
-                  ]}
-                />
-
-                <View style={styles.marketSheetHeader}>
-                  <View style={styles.marketSheetHeaderMain}>
-                    <MarketBadge
-                      marketKey={marketSheetDetails.marketKey}
-                      marketName={marketSheetDetails.title}
-                      logoUrl={marketSheetDetails.logoUrl}
-                      size={42}
-                    />
-                    <View style={styles.marketSheetHeaderTextWrap}>
-                      <Text style={[styles.marketSheetTitle, { color: colors.text }]}>
-                        {marketSheetDetails.title}
-                      </Text>
-                      <Text
-                        style={[styles.marketSheetSubtitle, { color: colors.mutedText }]}
-                      >
-                        {marketSheetDetails.subtitle}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={closeMarketSheet}
-                    style={[
-                      styles.marketSheetCloseButton,
-                      {
-                        backgroundColor: withAlpha(colors.backgroundMuted, isDark ? '96' : 'F2'),
-                        borderColor: withAlpha(colors.border, 'B8'),
-                      },
-                    ]}
-                  >
-                    <Ionicons name="close-outline" size={20} color={colors.text} />
-                  </TouchableOpacity>
-                </View>
-
-                <View
-                  style={[
-                    styles.marketSheetDetailsWrap,
-                    { borderTopColor: withAlpha(colors.border, '80') },
-                  ]}
-                >
-                  {marketSheetDetails.details.map((detail) => (
-                    <View
-                      key={detail.key}
-                      style={[
-                        styles.marketSheetDetailRow,
-                        { borderBottomColor: withAlpha(colors.border, '80') },
-                      ]}
-                    >
-                      <Text
-                        style={[styles.marketSheetDetailLabel, { color: colors.mutedText }]}
-                      >
-                        {detail.label}
-                      </Text>
-                      <Text style={[styles.marketSheetDetailValue, { color: colors.text }]}>
-                        {detail.value}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-
-                <View style={styles.marketSheetActions}>
-                  {marketSheetDetails.canOpenMap ? (
-                    <TouchableOpacity
-                      activeOpacity={0.88}
-                      onPress={() => {
-                        void handleOpenMarketMap();
-                      }}
-                      style={[
-                        styles.marketSheetActionButton,
-                        {
-                          backgroundColor: withAlpha(colors.teal, '12'),
-                          borderColor: withAlpha(colors.teal, '38'),
-                        },
-                      ]}
-                    >
-                      <Ionicons name="navigate-outline" size={16} color={colors.teal} />
-                      <Text style={[styles.marketSheetActionLabel, { color: colors.teal }]}>
-                        {tt('price_compare_market_sheet_open_map', 'Haritada Aç')}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-
-                  {marketSheetDetails.canOpenSource ? (
-                    <TouchableOpacity
-                      activeOpacity={0.88}
-                      onPress={() => {
-                        void handleOpenMarketSource();
-                      }}
-                      style={[
-                        styles.marketSheetActionButton,
-                        {
-                          backgroundColor: withAlpha(colors.primary, '12'),
-                          borderColor: withAlpha(colors.primary, '38'),
-                        },
-                      ]}
-                    >
-                      <Ionicons name="open-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.marketSheetActionLabel, { color: colors.primary }]}>
-                        {tt('price_compare_market_sheet_open_source', 'Kaynağı Aç')}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </View>
-            </View>
-          ) : null}
-        </View>
-      </Modal>
+                },
+              ]
+            : []),
+          ...(marketSheetDetails?.canOpenSource
+            ? [
+                {
+                  key: 'source',
+                  label: tt('price_compare_market_sheet_open_source', 'Kaynağı Aç'),
+                  iconName: 'open-outline' as const,
+                  tone: 'primary' as const,
+                  onPress: () => {
+                    void handleOpenMarketSource();
+                  },
+                },
+              ]
+            : []),
+        ]}
+        onClose={closeMarketSheet}
+        colors={colors}
+        isDark={isDark}
+      />
     </View>
   );
 };

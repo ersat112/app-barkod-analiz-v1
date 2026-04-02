@@ -7,7 +7,6 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   Linking,
-  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -23,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
+import { MarketOfferSheet } from '../../components/MarketOfferSheet';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { MARKET_GELSIN_RUNTIME } from '../../config/marketGelsinRuntime';
@@ -1757,112 +1757,55 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         </Animated.View>
       ) : null}
 
-      <Modal
+      <MarketOfferSheet
         visible={Boolean(previewMarketSheetOffer)}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={closePreviewMarketSheet}
-      >
-        <View style={styles.marketSheetOverlay}>
-          <TouchableOpacity
-            style={styles.marketSheetBackdrop}
-            activeOpacity={1}
-            onPress={closePreviewMarketSheet}
-          />
-
-          {previewMarketSheetOffer ? (
-            <View style={styles.marketSheetWrap}>
-              <View
-                style={[
-                  styles.marketSheetCard,
-                  {
-                    backgroundColor: colors.card,
-                    borderColor: colors.border,
+        title={previewMarketSheetOffer?.marketName || tt('price_compare_market_sheet_subtitle', 'Market detayı')}
+        subtitle={
+          [
+            previewMarketSheetOffer?.branchName,
+            previewMarketSheetOffer?.districtName,
+            previewMarketSheetOffer?.cityName,
+          ]
+            .filter(Boolean)
+            .join(' • ') || tt('price_compare_market_sheet_subtitle', 'Market detayı')
+        }
+        marketName={previewMarketSheetOffer?.marketName}
+        marketKey={previewMarketSheetOffer?.marketKey}
+        marketLogoUrl={previewMarketSheetOffer?.marketLogoUrl}
+        details={previewMarketSheetDetails ?? []}
+        actions={[
+          ...(previewMarketSheetOffer?.latitude && previewMarketSheetOffer?.longitude
+            ? [
+                {
+                  key: 'map',
+                  label: tt('price_compare_market_sheet_open_map', 'Haritada Aç'),
+                  iconName: 'navigate-outline' as const,
+                  tone: 'primary' as const,
+                  onPress: () => {
+                    void Linking.openURL(
+                      `https://www.google.com/maps/search/?api=1&query=${previewMarketSheetOffer.latitude},${previewMarketSheetOffer.longitude}`
+                    );
                   },
-                ]}
-              >
-                <View style={[styles.marketSheetHandle, { backgroundColor: `${colors.border}AA` }]} />
-
-                <View style={styles.marketSheetHeader}>
-                  <View style={styles.marketSheetHeaderTextWrap}>
-                    <Text style={[styles.marketSheetTitle, { color: colors.text }]}>
-                      {previewMarketSheetOffer.marketName}
-                    </Text>
-                    <Text style={[styles.marketSheetSubtitle, { color: colors.text }]}>
-                      {[
-                        previewMarketSheetOffer.branchName,
-                        previewMarketSheetOffer.districtName,
-                        previewMarketSheetOffer.cityName,
-                      ]
-                        .filter(Boolean)
-                        .join(' • ') || tt('price_compare_market_sheet_subtitle', 'Market detayı')}
-                    </Text>
-                  </View>
-
-                  <TouchableOpacity
-                    style={[styles.marketSheetCloseButton, { borderColor: colors.border }]}
-                    onPress={closePreviewMarketSheet}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="close-outline" size={20} color={colors.text} />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={[styles.marketSheetDetailsWrap, { borderTopColor: `${colors.border}99` }]}>
-                  {previewMarketSheetDetails?.map((detail) => (
-                    <View
-                      key={detail.key}
-                      style={[styles.marketSheetDetailRow, { borderBottomColor: `${colors.border}99` }]}
-                    >
-                      <Text style={[styles.marketSheetDetailLabel, { color: colors.text }]}>
-                        {detail.label}
-                      </Text>
-                      <Text style={[styles.marketSheetDetailValue, { color: colors.text }]}>
-                        {detail.value}
-                      </Text>
-                    </View>
-                  ))}
-                </View>
-
-                <View style={styles.marketSheetActions}>
-                  {previewMarketSheetOffer.latitude && previewMarketSheetOffer.longitude ? (
-                    <TouchableOpacity
-                      style={[styles.marketSheetActionButton, { borderColor: colors.primary }]}
-                      activeOpacity={0.88}
-                      onPress={() => {
-                        void Linking.openURL(
-                          `https://www.google.com/maps/search/?api=1&query=${previewMarketSheetOffer.latitude},${previewMarketSheetOffer.longitude}`
-                        );
-                      }}
-                    >
-                      <Ionicons name="navigate-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.marketSheetActionText, { color: colors.primary }]}>
-                        {tt('price_compare_market_sheet_open_map', 'Haritada Aç')}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-
-                  {previewMarketSheetOffer.sourceUrl ? (
-                    <TouchableOpacity
-                      style={[styles.marketSheetActionButton, { borderColor: colors.primary }]}
-                      activeOpacity={0.88}
-                      onPress={() => {
-                        void Linking.openURL(previewMarketSheetOffer.sourceUrl);
-                      }}
-                    >
-                      <Ionicons name="open-outline" size={16} color={colors.primary} />
-                      <Text style={[styles.marketSheetActionText, { color: colors.primary }]}>
-                        {tt('price_compare_market_sheet_open_source', 'Kaynağı Aç')}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : null}
-                </View>
-              </View>
-            </View>
-          ) : null}
-        </View>
-      </Modal>
+                },
+              ]
+            : []),
+          ...(previewMarketSheetOffer?.sourceUrl
+            ? [
+                {
+                  key: 'source',
+                  label: tt('price_compare_market_sheet_open_source', 'Kaynağı Aç'),
+                  iconName: 'open-outline' as const,
+                  tone: 'primary' as const,
+                  onPress: () => {
+                    void Linking.openURL(previewMarketSheetOffer.sourceUrl);
+                  },
+                },
+              ]
+            : []),
+        ]}
+        onClose={closePreviewMarketSheet}
+        colors={colors}
+      />
 
       {isManualMode && (
         <KeyboardAvoidingView

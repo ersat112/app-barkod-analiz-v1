@@ -72,6 +72,7 @@ import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
 import { AdBanner } from '../../components/AdBanner';
 import { AlternativeCard } from '../../components/AlternativeCard';
+import { MarketOfferSheet } from '../../components/MarketOfferSheet';
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
 import { FamilyHealthAlert } from '../../components/organisms/FamilyHealthAlert';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
@@ -3719,130 +3720,52 @@ export const DetailScreen: React.FC = () => {
         </View>
       </Modal>
 
-      <Modal
+      <MarketOfferSheet
         visible={Boolean(marketOfferSheet)}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={closeMarketOfferSheet}
-      >
-        <View style={styles.shareOverlay}>
-          <TouchableOpacity
-            style={styles.shareOverlayBackdrop}
-            activeOpacity={1}
-            onPress={closeMarketOfferSheet}
-          />
-
-          <View style={styles.shareSheetWrap}>
-            <View
-              style={[
-                styles.marketSheetCard,
+        title={marketOfferSheet?.marketName || tt('price_compare_market_sheet_subtitle', 'Market detayı')}
+        subtitle={
+          [
+            marketOfferSheet?.branchName,
+            marketOfferSheet?.districtName,
+            marketOfferSheet?.cityName,
+          ]
+            .filter(Boolean)
+            .join(' • ') || tt('price_compare_market_sheet_subtitle', 'Market detayı')
+        }
+        marketName={marketOfferSheet?.marketName}
+        marketKey={marketOfferSheet?.marketKey}
+        marketLogoUrl={marketOfferSheet?.marketLogoUrl}
+        details={marketOfferSheetDetails}
+        actions={[
+          ...(typeof marketOfferSheet?.latitude === 'number' &&
+          typeof marketOfferSheet?.longitude === 'number'
+            ? [
                 {
-                  backgroundColor: colors.card,
-                  borderColor: colors.border,
+                  key: 'map',
+                  label: tt('price_compare_market_sheet_open_map', 'Haritada Aç'),
+                  tone: 'primary' as const,
+                  onPress: () => {
+                    void openMarketOfferMap();
+                  },
                 },
-              ]}
-            >
-              <View
-                style={[
-                  styles.marketSheetHandle,
-                  { backgroundColor: `${colors.border}AA` },
-                ]}
-              />
-
-              <View style={styles.marketSheetHeader}>
-                <View style={styles.marketSheetHeaderTextWrap}>
-                  <Text style={[styles.marketSheetTitle, { color: colors.text }]}>
-                    {marketOfferSheet?.marketName}
-                  </Text>
-                  <Text style={[styles.marketSheetSubtitle, { color: colors.mutedText }]}>
-                    {[
-                      marketOfferSheet?.branchName,
-                      marketOfferSheet?.districtName,
-                      marketOfferSheet?.cityName,
-                    ]
-                      .filter(Boolean)
-                      .join(' • ') ||
-                      tt('price_compare_market_sheet_subtitle', 'Market detayı')}
-                  </Text>
-                </View>
-
-                <TouchableOpacity
-                  style={[
-                    styles.marketSheetCloseButton,
-                    { borderColor: colors.border },
-                  ]}
-                  onPress={closeMarketOfferSheet}
-                  activeOpacity={0.85}
-                >
-                  <Text style={[styles.marketSheetCloseText, { color: colors.text }]}>×</Text>
-                </TouchableOpacity>
-              </View>
-
-              <View
-                style={[
-                  styles.marketSheetDetailsWrap,
-                  { borderTopColor: `${colors.border}99` },
-                ]}
-              >
-                {marketOfferSheetDetails.map((detail) => (
-                  <View
-                    key={detail.key}
-                    style={[
-                      styles.marketSheetDetailRow,
-                      { borderBottomColor: `${colors.border}99` },
-                    ]}
-                  >
-                    <Text style={[styles.marketSheetDetailLabel, { color: colors.mutedText }]}>
-                      {detail.label}
-                    </Text>
-                    <Text style={[styles.marketSheetDetailValue, { color: colors.text }]}>
-                      {detail.value}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-
-              <View style={styles.marketSheetActions}>
-                {typeof marketOfferSheet?.latitude === 'number' &&
-                typeof marketOfferSheet?.longitude === 'number' ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.marketSheetActionButton,
-                      { borderColor: colors.primary },
-                    ]}
-                    onPress={() => {
-                      void openMarketOfferMap();
-                    }}
-                    activeOpacity={0.88}
-                  >
-                    <Text style={[styles.marketSheetActionText, { color: colors.primary }]}>
-                      {tt('price_compare_market_sheet_open_map', 'Haritada Aç')}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-
-                {marketOfferSheet?.sourceUrl ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.marketSheetActionButton,
-                      { borderColor: colors.primary },
-                    ]}
-                    onPress={() => {
-                      void openMarketOfferSource();
-                    }}
-                    activeOpacity={0.88}
-                  >
-                    <Text style={[styles.marketSheetActionText, { color: colors.primary }]}>
-                      {tt('price_compare_market_sheet_open_source', 'Kaynağı Aç')}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            </View>
-          </View>
-        </View>
-      </Modal>
+              ]
+            : []),
+          ...(marketOfferSheet?.sourceUrl
+            ? [
+                {
+                  key: 'source',
+                  label: tt('price_compare_market_sheet_open_source', 'Kaynağı Aç'),
+                  tone: 'primary' as const,
+                  onPress: () => {
+                    void openMarketOfferSource();
+                  },
+                },
+              ]
+            : []),
+        ]}
+        onClose={closeMarketOfferSheet}
+        colors={colors}
+      />
     </View>
   );
 };
