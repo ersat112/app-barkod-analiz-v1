@@ -23,7 +23,6 @@ import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import {
   getBestInStockOffer,
-  partitionOffersByPriceSourceType,
 } from '../../services/marketPricingContract.service';
 import {
   fetchLegacyMarketOfferSearch,
@@ -46,12 +45,9 @@ import {
 import {
   InfoActionCard,
   NoticeCard,
-  PricingHighlightsSection,
-  type PricingHighlightItem,
 } from './detail/DetailSections';
 import type {
   MarketBasketCompareResponse,
-  MarketDataFreshness,
   MarketOffer,
   MarketProductOffersResponse,
   MarketSearchProduct,
@@ -205,56 +201,6 @@ const buildMarketOfferMeta = (
       tt('market_pricing_updated_template', 'Güncellendi {{value}}').replace(
         '{{value}}',
         updatedAt
-      )
-    );
-  }
-
-  return parts.join(' • ');
-};
-
-const getMarketFreshnessModeLabel = (
-  tt: TranslateFn,
-  freshness?: MarketDataFreshness | null
-): string => {
-  switch (freshness?.mode) {
-    case 'weekly_crawl':
-      return tt('market_pricing_freshness_weekly', 'Haftalık tarama');
-    case 'hot_refresh':
-      return tt('market_pricing_freshness_hot', 'Sıcak yenileme');
-    case 'mixed':
-      return tt('market_pricing_freshness_mixed', 'Karma yenileme');
-    default:
-      return tt('market_pricing_freshness_unknown', 'Güncellik bilgisi');
-  }
-};
-
-const buildMarketFreshnessMeta = (
-  tt: TranslateFn,
-  locale: string,
-  freshness?: MarketDataFreshness | null
-): string => {
-  if (!freshness) {
-    return '';
-  }
-
-  const parts: string[] = [];
-  const fullRefreshAt = formatLocalizedDateTime(locale, freshness.lastFullRefreshAt);
-  const hotRefreshAt = formatLocalizedDateTime(locale, freshness.lastHotRefreshAt);
-
-  if (fullRefreshAt) {
-    parts.push(
-      tt('market_pricing_full_refresh_template', 'Tam tarama {{value}}').replace(
-        '{{value}}',
-        fullRefreshAt
-      )
-    );
-  }
-
-  if (hotRefreshAt) {
-    parts.push(
-      tt('market_pricing_hot_refresh_template', 'Hot refresh {{value}}').replace(
-        '{{value}}',
-        hotRefreshAt
       )
     );
   }
@@ -934,113 +880,6 @@ export const PriceCompareScreen: React.FC = () => {
 
   const offerItems = useMemo(() => offersResponse?.offers ?? [], [offersResponse?.offers]);
 
-  const pricingSummary = useMemo(() => {
-    if (!offerItems.length) {
-      return {
-        bestLocalOffer: null as MarketOffer | null,
-        bestReferenceOffer: null as MarketOffer | null,
-        bestFallbackOffer: null as MarketOffer | null,
-      };
-    }
-
-    const partitioned = partitionOffersByPriceSourceType(offerItems);
-
-    return {
-      bestLocalOffer: getBestInStockOffer(partitioned.localMarketOffers),
-      bestReferenceOffer: getBestInStockOffer(partitioned.nationalReferenceOffers),
-      bestFallbackOffer: getBestInStockOffer(offerItems),
-    };
-  }, [offerItems]);
-
-  const pricingHighlightItems = useMemo<PricingHighlightItem[]>(() => {
-    const items: PricingHighlightItem[] = [];
-    const inStockCount = offerItems.filter((offer) => offer.inStock).length;
-
-    if (pricingSummary.bestLocalOffer) {
-      items.push({
-        key: 'local-offer',
-        badge: tt('market_pricing_local_badge', 'Şehrindeki fiyat'),
-        title: pricingSummary.bestLocalOffer.marketName,
-        priceLabel: formatLocalizedPrice(
-          preferredLocale,
-          pricingSummary.bestLocalOffer.price,
-          pricingSummary.bestLocalOffer.currency
-        ),
-        helper: buildMarketOfferMeta(tt, preferredLocale, pricingSummary.bestLocalOffer),
-        meta: locationLabel || undefined,
-        tone: 'local',
-      });
-    }
-
-    if (pricingSummary.bestReferenceOffer) {
-      items.push({
-        key: 'reference-offer',
-        badge: tt('market_pricing_reference_badge', 'Ulusal referans'),
-        title: pricingSummary.bestReferenceOffer.marketName,
-        priceLabel: formatLocalizedPrice(
-          preferredLocale,
-          pricingSummary.bestReferenceOffer.price,
-          pricingSummary.bestReferenceOffer.currency
-        ),
-        helper: buildMarketOfferMeta(tt, preferredLocale, pricingSummary.bestReferenceOffer),
-        meta: tt('market_pricing_reference_meta', 'Referans fiyat'),
-        tone: 'reference',
-      });
-    }
-
-    if (!items.length && pricingSummary.bestFallbackOffer) {
-      items.push({
-        key: 'best-offer',
-        badge: tt('market_pricing_best_badge', 'En iyi teklif'),
-        title: pricingSummary.bestFallbackOffer.marketName,
-        priceLabel: formatLocalizedPrice(
-          preferredLocale,
-          pricingSummary.bestFallbackOffer.price,
-          pricingSummary.bestFallbackOffer.currency
-        ),
-        helper: buildMarketOfferMeta(tt, preferredLocale, pricingSummary.bestFallbackOffer),
-        meta: locationLabel || undefined,
-        tone: 'best',
-      });
-    }
-
-    if (offerItems.length) {
-      items.push({
-        key: 'coverage',
-        badge: tt('market_pricing_coverage_badge', 'Kapsama'),
-        title: tt('market_pricing_coverage_title', '{{count}} market izlendi').replace(
-          '{{count}}',
-          String(offerItems.length)
-        ),
-        priceLabel: getMarketFreshnessModeLabel(tt, offersResponse?.dataFreshness),
-        helper:
-          buildMarketFreshnessMeta(tt, preferredLocale, offersResponse?.dataFreshness) ||
-          tt('market_pricing_coverage_helper', '{{inStock}} markette stokta görünüyor').replace(
-            '{{inStock}}',
-            String(inStockCount)
-          ),
-        meta: tt(
-          'market_pricing_coverage_meta',
-          '{{location}} için {{inStock}} markette stok var'
-        )
-          .replace('{{location}}', locationLabel || tt('location', 'Konum'))
-          .replace('{{inStock}}', String(inStockCount)),
-        tone: 'coverage',
-      });
-    }
-
-    return items;
-  }, [
-    locationLabel,
-    offerItems,
-    offersResponse?.dataFreshness,
-    preferredLocale,
-    pricingSummary.bestFallbackOffer,
-    pricingSummary.bestLocalOffer,
-    pricingSummary.bestReferenceOffer,
-    tt,
-  ]);
-
   const sortedOffers = useMemo(() => {
     const rankByType = (offer: MarketOffer): number => {
       if (offer.priceSourceType === 'local_market_price') return 0;
@@ -1085,6 +924,10 @@ export const PriceCompareScreen: React.FC = () => {
       'Seçilen ürün için market teklifleri burada sıralanır.'
     );
   }, [locationLabel, offerItems.length, selectedProduct, tt]);
+
+  const selectedBestOffer = useMemo(() => {
+    return getBestInStockOffer(offerItems.filter((offer) => offer.inStock));
+  }, [offerItems]);
 
   const cartSummary = useMemo(() => {
     if (!comparisonCart.length) {
@@ -1270,6 +1113,33 @@ export const PriceCompareScreen: React.FC = () => {
     [comparisonCart, selectedProduct]
   );
 
+  const cartSummaryRows = useMemo(
+    () => [
+      {
+        key: 'mix',
+        label: tt('price_compare_cart_best_mix', 'En ucuz karışık sepet'),
+        value: formatLocalizedPrice(preferredLocale, basketDisplayTotals.mixedCheapestTotal, 'TRY'),
+      },
+      {
+        key: 'single',
+        label: tt('price_compare_cart_single_market', 'Tek market toplamı'),
+        value:
+          typeof basketDisplayTotals.bestSingleMarketTotal === 'number'
+            ? formatLocalizedPrice(preferredLocale, basketDisplayTotals.bestSingleMarketTotal, 'TRY')
+            : '-',
+      },
+      {
+        key: 'nearest',
+        label: tt('price_compare_cart_nearest_market', 'En yakın market'),
+        value:
+          typeof basketDisplayTotals.nearestMarketTotal === 'number'
+            ? formatLocalizedPrice(preferredLocale, basketDisplayTotals.nearestMarketTotal, 'TRY')
+            : tt('price_compare_nearest_pending', 'Hazır değil'),
+      },
+    ],
+    [basketDisplayTotals, preferredLocale, tt]
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <AmbientBackdrop colors={colors} variant="settings" />
@@ -1293,29 +1163,30 @@ export const PriceCompareScreen: React.FC = () => {
             },
           ]}
         >
-          <TouchableOpacity
-            style={[styles.backButton, { backgroundColor: withAlpha(colors.primary, '10') }]}
-            onPress={() => navigation.goBack()}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="chevron-back" size={18} color={colors.primary} />
-            <Text style={[styles.backButtonText, { color: colors.primary }]}>
-              {tt('back', 'Geri')}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.headerRow}>
+            <TouchableOpacity
+              style={[
+                styles.backButtonCompact,
+                { backgroundColor: withAlpha(colors.primary, '10') },
+              ]}
+              onPress={() => navigation.goBack()}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="chevron-back" size={18} color={colors.primary} />
+            </TouchableOpacity>
 
-          <Text style={[styles.heroEyebrow, { color: colors.primary }]}>
-            {tt('price_compare_title', 'Fiyat Karşılaştır')}
-          </Text>
-          <Text style={[styles.heroTitle, { color: colors.text }]}>
-            {tt('price_compare_screen_title', 'Market bazında fiyat kıyasla')}
-          </Text>
-          <Text style={[styles.heroSubtitle, { color: colors.mutedText }]}>
-            {tt(
-              'price_compare_screen_subtitle',
-              'Barkod veya ürün adıyla arama yap, ardından market tekliflerini tek ekranda karşılaştır.'
-            )}
-          </Text>
+            <View style={styles.headerTextWrap}>
+              <Text style={[styles.headerTitle, { color: colors.text }]}>
+                {tt('price_compare_screen_title', 'Market bazında fiyat kıyasla')}
+              </Text>
+              <Text style={[styles.headerSubtitle, { color: colors.mutedText }]}>
+                {tt(
+                  'price_compare_screen_subtitle',
+                  'Barkod veya ürün adıyla arama yap, ardından market tekliflerini tek ekranda karşılaştır.'
+                )}
+              </Text>
+            </View>
+          </View>
 
           <View style={styles.locationPillRow}>
             <View
@@ -1555,68 +1426,84 @@ export const PriceCompareScreen: React.FC = () => {
                 },
               ]}
             >
-              <Text style={[styles.selectedTitle, { color: colors.text }]}>
-                {selectedProduct.productName}
-              </Text>
-              <Text style={[styles.selectedMeta, { color: colors.mutedText }]}>
-                {[selectedProduct.brand, selectedProduct.category, selectedProduct.barcode]
-                  .filter(Boolean)
-                  .join(' • ')}
-              </Text>
-              {selectedProductCartQuantity ? (
-                <Text style={[styles.selectedBasketHint, { color: colors.teal }]}>
-                  {tt('price_compare_selected_quantity', 'Sepette {{count}} adet var').replace(
-                    '{{count}}',
-                    String(selectedProductCartQuantity)
-                  )}
-                </Text>
-              ) : null}
-              <TouchableOpacity
-                activeOpacity={0.88}
-                onPress={handleAddSelectedToCart}
-                disabled={!offersResponse || offersLoading}
-                style={[
-                  styles.addToCartButton,
-                  {
-                    backgroundColor: colors.primary,
-                    opacity: !offersResponse || offersLoading ? 0.65 : 1,
-                  },
-                ]}
-              >
-                <Ionicons name="basket-outline" size={16} color={colors.primaryContrast} />
-                <Text
-                  style={[styles.addToCartButtonText, { color: colors.primaryContrast }]}
+              <View style={styles.selectedInfoRow}>
+                <View style={styles.selectedTextWrap}>
+                  <Text style={[styles.selectedTitle, { color: colors.text }]}>
+                    {selectedProduct.productName}
+                  </Text>
+                  <Text style={[styles.selectedMeta, { color: colors.mutedText }]}>
+                    {[selectedProduct.brand, selectedProduct.category, selectedProduct.barcode]
+                      .filter(Boolean)
+                      .join(' • ')}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.selectedBasketHint,
+                      {
+                        color: selectedProductCartQuantity
+                          ? colors.teal
+                          : colors.mutedText,
+                      },
+                    ]}
+                  >
+                    {selectedProductCartQuantity
+                      ? tt('price_compare_selected_quantity', 'Sepette {{count}} adet var').replace(
+                          '{{count}}',
+                          String(selectedProductCartQuantity)
+                        )
+                      : selectedBestOffer
+                        ? tt(
+                            'price_compare_selected_best_offer',
+                            'En iyi canlı fiyat: {{value}}'
+                          ).replace(
+                            '{{value}}',
+                            formatLocalizedPrice(
+                              preferredLocale,
+                              selectedBestOffer.price,
+                              selectedBestOffer.currency
+                            )
+                          )
+                        : tt(
+                            'price_compare_selected_pending',
+                            'Canlı market teklifleri bu bölümde görünecek.'
+                          )}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  activeOpacity={0.88}
+                  onPress={handleAddSelectedToCart}
+                  disabled={!offersResponse || offersLoading}
+                  style={[
+                    styles.addToCartButton,
+                    {
+                      backgroundColor: colors.primary,
+                      opacity: !offersResponse || offersLoading ? 0.65 : 1,
+                    },
+                  ]}
                 >
-                  {tt('price_compare_add_to_cart', 'Sepete Ekle')}
-                </Text>
-              </TouchableOpacity>
+                  <Ionicons name="basket-outline" size={16} color={colors.primaryContrast} />
+                  <Text
+                    style={[styles.addToCartButtonText, { color: colors.primaryContrast }]}
+                  >
+                    {tt('price_compare_add_to_cart', 'Sepete Ekle')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {offersError ? <NoticeCard text={offersError} colors={colors} /> : null}
 
-            <PricingHighlightsSection
-              title={tt('market_pricing_title', 'Fiyat ve Bulunabilirlik')}
-              subtitle={pricingSubtitle ?? undefined}
-              items={pricingHighlightItems}
-              loading={offersLoading}
-              emptyLabel={
-                !offersLoading
-                  ? tt(
-                      'market_pricing_empty',
-                      'Bu ürün için şu anda fiyat teklifi bulunamadı.'
-                    )
-                  : undefined
-              }
-              colors={colors}
-            />
-
             {!offersError ? (
               <MarketPriceTableCard
                 title={tt('market_price_table_title', 'Market Fiyat Tablosu')}
-                subtitle={tt(
-                  'market_price_table_subtitle',
-                  'Ulusal marketleri ve konumundaki marketleri yana kaydırarak karşılaştır.'
-                )}
+                subtitle={
+                  pricingSubtitle ??
+                  tt(
+                    'market_price_table_subtitle',
+                    'Ulusal marketleri ve konumundaki marketleri yana kaydırarak karşılaştır.'
+                  )
+                }
                 offers={offersResponse?.offers ?? []}
                 productType={pricingTableProductType}
                 locale={preferredLocale}
@@ -1712,47 +1599,44 @@ export const PriceCompareScreen: React.FC = () => {
                 },
               ]}
             >
-              <View style={styles.cartMetricsRow}>
-                <View style={styles.cartMetricBox}>
-                  <Text style={[styles.cartMetricLabel, { color: colors.mutedText }]}>
-                    {tt('price_compare_cart_best_mix', 'En ucuz karışık sepet')}
+              <View style={styles.cartSummaryTopRow}>
+                <View style={styles.cartSummaryHeadingWrap}>
+                  <Text style={[styles.cartSummaryTitle, { color: colors.text }]}>
+                    {tt('price_compare_cart_title', 'Karşılaştırma Sepeti')}
                   </Text>
-                  <Text style={[styles.cartMetricValue, { color: colors.text }]}>
-                    {formatLocalizedPrice(
-                      preferredLocale,
-                      basketDisplayTotals.mixedCheapestTotal,
-                      'TRY'
+                  <Text style={[styles.cartSummarySubtitle, { color: colors.mutedText }]}>
+                    {tt(
+                      'price_compare_cart_subtitle_compact',
+                      'Karışık sepet, tek market ve yakın market toplamlarını tek yerde gör.'
                     )}
                   </Text>
                 </View>
-                <View style={styles.cartMetricBox}>
-                  <Text style={[styles.cartMetricLabel, { color: colors.mutedText }]}>
-                    {tt('price_compare_cart_single_market', 'Tek market toplamı')}
-                  </Text>
-                  <Text style={[styles.cartMetricValue, { color: colors.text }]}>
-                    {typeof basketDisplayTotals.bestSingleMarketTotal === 'number'
-                      ? formatLocalizedPrice(
-                          preferredLocale,
-                          basketDisplayTotals.bestSingleMarketTotal,
-                          'TRY'
-                        )
-                      : '-'}
-                  </Text>
-                </View>
-                <View style={styles.cartMetricBox}>
-                  <Text style={[styles.cartMetricLabel, { color: colors.mutedText }]}>
-                    {tt('price_compare_cart_nearest_market', 'En yakın market')}
-                  </Text>
-                  <Text style={[styles.cartMetricValue, { color: colors.text }]}>
-                    {typeof basketDisplayTotals.nearestMarketTotal === 'number'
-                      ? formatLocalizedPrice(
-                          preferredLocale,
-                          basketDisplayTotals.nearestMarketTotal,
-                          'TRY'
-                        )
-                      : tt('price_compare_nearest_pending', 'Hazır değil')}
-                  </Text>
-                </View>
+              </View>
+
+              <View
+                style={[
+                  styles.cartMetricsStack,
+                  { borderTopColor: withAlpha(colors.border, '80') },
+                ]}
+              >
+                {cartSummaryRows.map((row) => (
+                  <View
+                    key={row.key}
+                    style={[
+                      styles.cartMetricRow,
+                      {
+                        borderBottomColor: withAlpha(colors.border, '80'),
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.cartMetricLabel, { color: colors.mutedText }]}>
+                      {row.label}
+                    </Text>
+                    <Text style={[styles.cartMetricValue, { color: colors.text }]}>
+                      {row.value}
+                    </Text>
+                  </View>
+                ))}
               </View>
 
               {typeof cartDifferenceValue === 'number' ? (
@@ -1977,49 +1861,44 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     borderWidth: 1,
-    borderRadius: 28,
-    padding: 22,
-    marginBottom: 18,
-    shadowOpacity: 0.1,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 10,
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 16,
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
   },
-  backButton: {
-    alignSelf: 'flex-start',
+  headerRow: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  backButtonCompact: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTextWrap: {
+    flex: 1,
     gap: 4,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 18,
   },
-  backButtonText: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  heroEyebrow: {
-    fontSize: 13,
+  headerTitle: {
+    fontSize: 21,
+    lineHeight: 27,
     fontWeight: '800',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    marginBottom: 10,
   },
-  heroTitle: {
-    fontSize: 26,
-    lineHeight: 32,
-    fontWeight: '800',
-    marginBottom: 10,
-  },
-  heroSubtitle: {
-    fontSize: 14,
-    lineHeight: 22,
+  headerSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
   },
   locationPillRow: {
-    marginTop: 16,
+    marginTop: 14,
     flexDirection: 'row',
     flexWrap: 'wrap',
+    gap: 8,
   },
   locationPill: {
     flexDirection: 'row',
@@ -2202,13 +2081,21 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 5,
   },
+  selectedInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  selectedTextWrap: {
+    flex: 1,
+  },
   selectedTitle: {
     fontSize: 16,
     lineHeight: 22,
     fontWeight: '800',
-    marginBottom: 4,
   },
   selectedMeta: {
+    marginTop: 4,
     fontSize: 12,
     lineHeight: 18,
   },
@@ -2219,14 +2106,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   addToCartButton: {
-    marginTop: 14,
-    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     borderRadius: 999,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 11,
   },
   addToCartButtonText: {
     fontSize: 12,
@@ -2242,18 +2127,31 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 10 },
     elevation: 6,
   },
-  cartMetricsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
+  cartSummaryTopRow: {
+    marginBottom: 8,
   },
-  cartMetricBox: {
-    minWidth: '30%',
-    flexGrow: 1,
-    gap: 6,
-    padding: 12,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.03)',
+  cartSummaryHeadingWrap: {
+    gap: 4,
+  },
+  cartSummaryTitle: {
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '800',
+  },
+  cartSummarySubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  cartMetricsStack: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  cartMetricRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   cartMetricLabel: {
     fontSize: 12,
@@ -2261,9 +2159,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   cartMetricValue: {
-    fontSize: 18,
-    lineHeight: 24,
+    fontSize: 15,
+    lineHeight: 21,
     fontWeight: '800',
+    textAlign: 'right',
   },
   cartDifferenceText: {
     marginTop: 12,
