@@ -56,6 +56,7 @@ import {
   type NutritionPreferenceEvaluation,
   type NutritionPreferenceKey,
 } from '../../services/nutritionPreferences.service';
+import { buildFamilyHealthAlerts } from '../../services/familyHealthProfile.service';
 import {
   resolveCanonicalCity,
   resolveCanonicalDistrict,
@@ -836,6 +837,7 @@ export const DetailScreen: React.FC = () => {
   const { t, i18n } = useTranslation();
   const { profile } = useAuth();
   const nutritionPreferences = usePreferenceStore((state) => state.nutritionPreferences);
+  const familyHealthProfile = usePreferenceStore((state) => state.familyHealthProfile);
   const { colors, isDark } = useTheme();
   const navigation = useNavigation<any>();
   const route = useRoute<DetailRoute>();
@@ -1516,49 +1518,12 @@ export const DetailScreen: React.FC = () => {
   const familyAlerts = useMemo(() => {
     if (!displayedProduct || !displayedAnalysis) return [];
 
-    if (displayedProduct.type === 'medicine') {
-      return [
-        {
-          id: 'medicine-official',
-          title: tt('medicine_alert_title', 'Resmi ilaç kaydı'),
-          description: tt(
-            'medicine_alert_desc',
-            'Bu bilgi TITCK ilaç kayıtlarından çözümlendi. Kullanım öncesi prospektüs ve sağlık profesyoneli yönlendirmesi dikkate alınmalıdır.'
-          ),
-          severity: 'info' as const,
-        },
-      ];
-    }
-
-    const alerts = [];
-
-    if (normalizeRiskLevelKey(displayedAnalysis.riskLevel) === 'high') {
-      alerts.push({
-        id: 'high-risk',
-        title: tt('family_high_risk_title', 'Çocuklar ve hassas bireyler için dikkat'),
-        description: tt(
-          'family_high_risk_desc',
-          'Bu ürünün genel analiz sonucu yüksek risk seviyesinde görünüyor. Düzenli tüketim veya kullanım öncesi içerik dikkatle incelenmelidir.'
-        ),
-        severity: 'danger' as const,
-      });
-    }
-
-    if (
-      displayedAnalysis.foundECodes?.some(
-        (item) => String(item.risk || '').toLowerCase() === 'yüksek'
-      )
-    ) {
-      alerts.push({
-        id: 'ecode-risk',
-        title: tt('family_ecode_title', 'Katkı maddesi hassasiyeti olabilir'),
-        description: tt(
-          'family_ecode_desc',
-          'Üründe yüksek riskli katkı maddeleri tespit edildi. Özellikle çocuklar, alerjik bireyler ve özel beslenme takibi yapanlar dikkat etmelidir.'
-        ),
-        severity: 'warning' as const,
-      });
-    }
+    const alerts = buildFamilyHealthAlerts({
+      product: displayedProduct,
+      analysis: displayedAnalysis,
+      profile: familyHealthProfile,
+      tt,
+    });
 
     if (displayedProduct.type === 'beauty' && displayedProduct.usage_instructions) {
       alerts.push({
@@ -1573,7 +1538,7 @@ export const DetailScreen: React.FC = () => {
     }
 
     return alerts;
-  }, [displayedAnalysis, displayedProduct, tt]);
+  }, [displayedAnalysis, displayedProduct, familyHealthProfile, tt]);
 
   const showAlternativeCard = useMemo(() => {
     if (!displayedAnalysis || displayedProduct?.type === 'medicine') return false;
@@ -3087,7 +3052,11 @@ export const DetailScreen: React.FC = () => {
                       entrySource: 'home',
                       prefetchedProduct: item.product,
                       lookupMode:
-                        item.product.type === 'medicine' ? 'medicine' : undefined,
+                        item.product.type === 'medicine'
+                          ? 'medicine'
+                          : item.product.type === 'beauty'
+                            ? 'beauty'
+                            : 'food',
                     });
                   }}
                 />

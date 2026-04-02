@@ -572,6 +572,10 @@ export const SettingsScreen: React.FC = () => {
     navigation.navigate('NutritionPreferences');
   }, [navigation]);
 
+  const handleOpenFamilyHealthProfile = useCallback(() => {
+    navigation.navigate('FamilyHealthProfile');
+  }, [navigation]);
+
   const handleOpenPriceCompare = useCallback(() => {
     navigation.navigate('PriceCompare');
   }, [navigation]);
@@ -1071,6 +1075,18 @@ export const SettingsScreen: React.FC = () => {
           setLanguagePickerSearch('');
           setLanguagePickerVisible(true);
         }}
+      />
+
+      <SettingsActionCard
+        icon="people-outline"
+        title={tt('family_health_profile', 'Aile ve Sağlık Profili')}
+        subtitle={tt(
+          'family_health_profile_settings_subtitle',
+          'Alerjen, katkı takibi ve sağlık odaklarını ayarlayarak detay ekranındaki uyarıları kişiselleştirin.'
+        )}
+        badgeLabel={tt('family_health_profile_badge', 'Aile odaklı')}
+        onPress={handleOpenFamilyHealthProfile}
+        colors={colors}
       />
 
       <SettingsActionCard

@@ -14,7 +14,7 @@ import type {
 import type { Product } from '../utils/analysis';
 
 export type ProductLookupResult = ProductRepositoryLookupResult;
-export type ProductLookupMode = 'auto' | 'medicine';
+export type ProductLookupMode = 'auto' | 'food' | 'beauty' | 'medicine';
 export type ProductLookupOptions = {
   lookupMode?: ProductLookupMode;
 };
@@ -233,7 +233,45 @@ export const lookupProductByBarcode = async (
               reason: 'not_found',
             };
           }
-        : fetchConsumerProduct,
+        : options?.lookupMode === 'food'
+          ? async (normalizedBarcode) => {
+              const foodProduct = await fetchFoodProduct(normalizedBarcode);
+
+              if (!foodProduct) {
+                return {
+                  found: false,
+                  barcode: normalizedBarcode,
+                  reason: 'not_found',
+                };
+              }
+
+              return {
+                found: true,
+                barcode: normalizedBarcode,
+                product: foodProduct,
+                source: 'food',
+              };
+            }
+          : options?.lookupMode === 'beauty'
+            ? async (normalizedBarcode) => {
+                const beautyProduct = await fetchBeautyProduct(normalizedBarcode);
+
+                if (!beautyProduct) {
+                  return {
+                    found: false,
+                    barcode: normalizedBarcode,
+                    reason: 'not_found',
+                  };
+                }
+
+                return {
+                  found: true,
+                  barcode: normalizedBarcode,
+                  product: beautyProduct,
+                  source: 'beauty',
+                };
+              }
+            : fetchConsumerProduct,
   });
   return mapRepositoryResultToLookupResult(repositoryResult);
 };

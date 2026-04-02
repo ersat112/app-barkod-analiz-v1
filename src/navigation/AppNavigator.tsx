@@ -39,8 +39,11 @@ import { NutritionPreferencesScreen } from '../screens/main/NutritionPreferences
 import { MissingProductScreen } from '../screens/main/MissingProductScreen';
 import { PaywallScreen } from '../screens/main/PaywallScreen';
 import { PriceCompareScreen } from '../screens/main/PriceCompareScreen';
+import { FamilyHealthProfileScreen } from '../screens/main/FamilyHealthProfileScreen';
+import { RiskInsightDetailScreen } from '../screens/main/RiskInsightDetailScreen';
 import type { PaywallEntrySource } from '../types/monetization';
 import type { Product } from '../utils/analysis';
+import type { FamilyAllergenKey } from '../services/familyHealthProfile.service';
 
 export type MainTabParamList = {
   Home: undefined;
@@ -55,7 +58,7 @@ export type RootStackParamList = {
   Detail: {
     barcode: string;
     entrySource?: 'scanner' | 'history' | 'home' | 'unknown';
-    lookupMode?: 'auto' | 'medicine';
+    lookupMode?: 'auto' | 'food' | 'beauty' | 'medicine';
     prefetchedProduct?: Product;
     historyAlreadySaved?: boolean;
   };
@@ -69,6 +72,16 @@ export type RootStackParamList = {
         initialQuery?: string;
       }
     | undefined;
+  FamilyHealthProfile: undefined;
+  RiskInsightDetail:
+    | {
+        kind: 'allergen';
+        id: FamilyAllergenKey;
+      }
+    | {
+        kind: 'additive';
+        id: string;
+      };
   NutritionPreferences: undefined;
   ProfileSettings: undefined;
   MissingProduct: { barcode: string };
@@ -259,7 +272,7 @@ const PersistentBottomNav: React.FC<{
             iconName={
               activeSection === 'Settings' ? 'settings' : 'settings-outline'
             }
-            label={tt('settings', 'Ayarlar')}
+            label={tt('profile', 'Profil')}
             onPress={onOpenSettings}
           />
         </View>
@@ -308,7 +321,7 @@ const MainTabNavigator: React.FC = () => {
       <Tab.Screen
         name="Settings"
         component={SettingsScreen}
-        options={{ title: tt('settings', 'Ayarlar') }}
+        options={{ title: tt('profile', 'Profil') }}
       />
     </Tab.Navigator>
   );
@@ -361,6 +374,16 @@ const AppStack = () => (
     <Stack.Screen
       name="PriceCompare"
       component={PriceCompareScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="FamilyHealthProfile"
+      component={FamilyHealthProfileScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="RiskInsightDetail"
+      component={RiskInsightDetailScreen}
       options={{ animation: 'slide_from_right' }}
     />
     <Stack.Screen

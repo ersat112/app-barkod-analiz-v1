@@ -6,6 +6,13 @@ import {
   type NutritionPreferenceKey,
   type NutritionPreferences,
 } from '../services/nutritionPreferences.service';
+import {
+  DEFAULT_FAMILY_HEALTH_PROFILE,
+  normalizeWatchedAdditiveCode,
+  type FamilyAllergenKey,
+  type FamilyHealthGoalKey,
+  type FamilyHealthProfile,
+} from '../services/familyHealthProfile.service';
 
 export type AppLanguage = 'tr' | 'en' | 'de' | 'fr';
 
@@ -17,6 +24,7 @@ type PreferenceState = {
   locationPermissionPrompted: boolean;
   locationPermissionGranted: boolean;
   nutritionPreferences: NutritionPreferences;
+  familyHealthProfile: FamilyHealthProfile;
 };
 
 type PreferenceActions = {
@@ -29,6 +37,12 @@ type PreferenceActions = {
   setNutritionPreference: (key: NutritionPreferenceKey, value: boolean) => void;
   setNutritionPreferences: (value: NutritionPreferences) => void;
   resetNutritionPreferences: () => void;
+  toggleFamilyAllergen: (key: FamilyAllergenKey) => void;
+  toggleWatchedAdditive: (code: string) => void;
+  toggleFamilyHealthGoal: (key: FamilyHealthGoalKey) => void;
+  addFamilyAllergen: (key: FamilyAllergenKey) => void;
+  setFamilyHealthProfile: (value: FamilyHealthProfile) => void;
+  resetFamilyHealthProfile: () => void;
   completeOnboarding: () => void;
   resetOnboarding: () => void;
   setFirstLaunch: (value: boolean) => void;
@@ -45,6 +59,7 @@ const DEFAULT_PREFERENCES: PreferenceState = {
   locationPermissionPrompted: false,
   locationPermissionGranted: false,
   nutritionPreferences: DEFAULT_NUTRITION_PREFERENCES,
+  familyHealthProfile: DEFAULT_FAMILY_HEALTH_PROFILE,
 };
 
 export const usePreferenceStore = create<PreferenceStore>()(
@@ -103,6 +118,86 @@ export const usePreferenceStore = create<PreferenceStore>()(
           nutritionPreferences: DEFAULT_NUTRITION_PREFERENCES,
         }),
 
+      toggleFamilyAllergen: (key) =>
+        set((state) => {
+          const hasKey = state.familyHealthProfile.allergens.includes(key);
+
+          return {
+            familyHealthProfile: {
+              ...state.familyHealthProfile,
+              allergens: hasKey
+                ? state.familyHealthProfile.allergens.filter((item) => item !== key)
+                : [...state.familyHealthProfile.allergens, key],
+            },
+          };
+        }),
+
+      addFamilyAllergen: (key) =>
+        set((state) => {
+          if (state.familyHealthProfile.allergens.includes(key)) {
+            return state;
+          }
+
+          return {
+            familyHealthProfile: {
+              ...state.familyHealthProfile,
+              allergens: [...state.familyHealthProfile.allergens, key],
+            },
+          };
+        }),
+
+      toggleWatchedAdditive: (code) =>
+        set((state) => {
+          const normalizedCode = normalizeWatchedAdditiveCode(code);
+
+          if (!normalizedCode) {
+            return state;
+          }
+
+          const hasCode = state.familyHealthProfile.watchedAdditives.includes(normalizedCode);
+
+          return {
+            familyHealthProfile: {
+              ...state.familyHealthProfile,
+              watchedAdditives: hasCode
+                ? state.familyHealthProfile.watchedAdditives.filter(
+                    (item) => item !== normalizedCode
+                  )
+                : [...state.familyHealthProfile.watchedAdditives, normalizedCode],
+            },
+          };
+        }),
+
+      toggleFamilyHealthGoal: (key) =>
+        set((state) => {
+          const hasKey = state.familyHealthProfile.healthGoals.includes(key);
+
+          return {
+            familyHealthProfile: {
+              ...state.familyHealthProfile,
+              healthGoals: hasKey
+                ? state.familyHealthProfile.healthGoals.filter((item) => item !== key)
+                : [...state.familyHealthProfile.healthGoals, key],
+            },
+          };
+        }),
+
+      setFamilyHealthProfile: (value) =>
+        set({
+          familyHealthProfile: {
+            allergens: Array.from(new Set(value.allergens || [])),
+            watchedAdditives: Array.from(
+              new Set((value.watchedAdditives || []).map(normalizeWatchedAdditiveCode).filter(Boolean))
+            ),
+            healthGoals: Array.from(new Set(value.healthGoals || [])),
+          },
+        }),
+
+      resetFamilyHealthProfile: () =>
+        set({
+          familyHealthProfile: DEFAULT_FAMILY_HEALTH_PROFILE,
+        }),
+
       completeOnboarding: () =>
         set({
           isFirstLaunch: false,
@@ -135,6 +230,7 @@ export const usePreferenceStore = create<PreferenceStore>()(
         locationPermissionPrompted: state.locationPermissionPrompted,
         locationPermissionGranted: state.locationPermissionGranted,
         nutritionPreferences: state.nutritionPreferences,
+        familyHealthProfile: state.familyHealthProfile,
       }),
     }
   )

@@ -52,6 +52,7 @@ import { analyzeProduct, type AnalysisResult, type Product } from '../../utils/a
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
 type ScanPreviewStatus = 'loading' | 'found' | 'not_found' | 'error';
+type ScannerUiMode = 'food' | 'beauty' | 'medicine' | 'text';
 
 type ScanPreviewItem = {
   id: string;
@@ -62,10 +63,11 @@ type ScanPreviewItem = {
   product?: Product;
   analysis?: AnalysisResult;
   message?: string;
+  isTextAnalysis?: boolean;
 };
 
 export const ScannerScreen: React.FC = () => {
-  return <ScannerExperience initialMode="auto" />;
+  return <ScannerExperience initialMode="food" />;
 };
 
 export const MedicineScannerScreen: React.FC = () => {
@@ -73,14 +75,52 @@ export const MedicineScannerScreen: React.FC = () => {
 };
 
 type ScannerExperienceProps = {
-  initialMode?: ProductLookupMode;
+  initialMode?: ScannerUiMode;
 };
 
 const PREVIEW_QUEUE_LIMIT = 6;
 const FALLBACK_IMAGE = 'https://via.placeholder.com/240?text=No+Image';
+const MODE_ICON_MAP: Record<ScannerUiMode, keyof typeof Ionicons.glyphMap> = {
+  food: 'nutrition-outline',
+  beauty: 'sparkles-outline',
+  medicine: 'medkit-outline',
+  text: 'document-text-outline',
+};
 
 const buildPreviewId = (): string => {
   return `preview_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+};
+
+const inferTextProductType = (value: string): Product['type'] => {
+  const normalized = String(value || '').toLocaleLowerCase('tr');
+
+  if (
+    /ne icin kullanilir|prospektus|tablet|kapsul|film kapli|etken madde|\bmg\b/u.test(
+      normalized
+    )
+  ) {
+    return 'medicine';
+  }
+
+  if (
+    /inci|aqua|parfum|glycerin|linalool|limonene|benzyl|sodium laureth/u.test(
+      normalized
+    )
+  ) {
+    return 'beauty';
+  }
+
+  return 'food';
+};
+
+const buildMedicineSummaryFromText = (value: string): string => {
+  const cleaned = value.replace(/\s+/g, ' ').trim();
+
+  if (!cleaned) {
+    return '';
+  }
+
+  return cleaned.slice(0, 260);
 };
 
 const getScoreTone = (score?: number): string => {
@@ -108,7 +148,7 @@ const getScoreTone = (score?: number): string => {
 };
 
 const ScannerExperience: React.FC<ScannerExperienceProps> = ({
-  initialMode = 'auto',
+  initialMode = 'food',
 }) => {
   const { t, i18n } = useTranslation();
   const { colors } = useTheme();
@@ -143,8 +183,12 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const [previewOffersError, setPreviewOffersError] = useState<string | null>(null);
 
   const [isManualMode, setIsManualMode] = useState(false);
+  const [manualEntryMode, setManualEntryMode] = useState<'barcode' | 'text'>('barcode');
   const [manualBarcode, setManualBarcode] = useState('');
+  const [manualText, setManualText] = useState('');
   const [manualError, setManualError] = useState('');
+  const [selectedMode, setSelectedMode] = useState<ScannerUiMode>(initialMode);
+  const [showModeHint, setShowModeHint] = useState(true);
 
   const { setAnalysis, markNotFound, previewCacheByBarcode } = useScanStore();
   const lineAnim = useRef(new Animated.Value(0)).current;
@@ -152,8 +196,21 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const scanResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animationRef = useRef<Animated.CompositeAnimation | null>(null);
   const recentScanMapRef = useRef<Record<string, number>>({});
+  const dismissedModeHintsRef = useRef<Record<ScannerUiMode, boolean>>({
+    food: false,
+    beauty: false,
+    medicine: false,
+    text: false,
+  });
   const scanMode: ProductLookupMode =
-    route?.name === 'MedicineScanner' ? 'medicine' : initialMode;
+    selectedMode === 'medicine'
+      ? 'medicine'
+      : selectedMode === 'beauty'
+        ? 'beauty'
+        : selectedMode === 'food'
+          ? 'food'
+          : 'auto';
+  const isTextMode = selectedMode === 'text';
   const profileCity = resolveCanonicalCity(profile?.city);
   const profileDistrict = profileCity
     ? resolveCanonicalDistrict(profileCity, profile?.district) ??
@@ -222,9 +279,15 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     console.log('[ScannerScreen] mode ready:', {
       routeName: route?.name,
       initialMode,
+      selectedMode,
       resolvedMode: scanMode,
     });
-  }, [initialMode, route?.name, scanMode]);
+  }, [initialMode, route?.name, scanMode, selectedMode]);
+
+  useEffect(() => {
+    setSelectedMode(initialMode);
+    setShowModeHint(!dismissedModeHintsRef.current[initialMode]);
+  }, [initialMode]);
 
   useEffect(() => {
     if (isFocused && !isManualMode) {
@@ -289,8 +352,10 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
   const closeManualMode = useCallback(() => {
     setIsManualMode(false);
+    setManualEntryMode('barcode');
     setManualError('');
     setManualBarcode('');
+    setManualText('');
     Keyboard.dismiss();
   }, []);
 
@@ -303,9 +368,32 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     navigation.navigate('Main');
   }, [navigation]);
 
+  const handleSelectMode = useCallback((nextMode: ScannerUiMode) => {
+    setSelectedMode(nextMode);
+    setShowModeHint(!dismissedModeHintsRef.current[nextMode]);
+    setScanned(false);
+  }, []);
+
+  const dismissModeHint = useCallback(() => {
+    dismissedModeHintsRef.current[selectedMode] = true;
+    setShowModeHint(false);
+  }, [selectedMode]);
+
+  const openInfoHint = useCallback(() => {
+    setShowModeHint(true);
+  }, []);
+
+  const openManualEntry = useCallback(() => {
+    setManualEntryMode(selectedMode === 'text' ? 'text' : 'barcode');
+    setManualError('');
+    setIsManualMode(true);
+  }, [selectedMode]);
+
   const resetTransientState = useCallback(() => {
     setIsManualMode(false);
+    setManualEntryMode('barcode');
     setManualBarcode('');
+    setManualText('');
     setManualError('');
   }, []);
 
@@ -345,7 +433,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
   const handleOpenPreviewDetail = useCallback(
     (item: ScanPreviewItem) => {
-      if (!item.product) {
+      if (!item.product || item.isTextAnalysis) {
         return;
       }
 
@@ -613,9 +701,75 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     ]
   );
 
+  const processTextInput = useCallback(async () => {
+    Keyboard.dismiss();
+    setManualError('');
+
+    const trimmedValue = manualText.trim();
+
+    if (trimmedValue.length < 12) {
+      setManualError(
+        tt(
+          'manual_text_min_length',
+          'Lütfen analiz etmek istediğiniz metni biraz daha uzun girin.'
+        )
+      );
+      return;
+    }
+
+    resetTransientState();
+
+    const inferredType = inferTextProductType(trimmedValue);
+    const previewId = pushLoadingPreview(`TEXT-${Date.now()}`, 'auto');
+    const inferredName =
+      inferredType === 'medicine'
+        ? tt('text_mode_medicine_name', 'Metin Analizi • İlaç')
+        : inferredType === 'beauty'
+          ? tt('text_mode_beauty_name', 'Metin Analizi • Kozmetik')
+          : tt('text_mode_food_name', 'Metin Analizi • Gıda');
+
+    const textBackedProduct: Product = {
+      barcode: `TEXT-${Date.now()}`,
+      name: inferredName,
+      brand: tt('text_mode_brand', 'Elle girilen metin'),
+      image_url: FALLBACK_IMAGE,
+      type: inferredType,
+      ingredients_text: inferredType === 'medicine' ? trimmedValue : trimmedValue,
+      intended_use_summary:
+        inferredType === 'medicine' ? buildMedicineSummaryFromText(trimmedValue) : undefined,
+      sourceName:
+        inferredType === 'medicine'
+          ? 'titck'
+          : inferredType === 'beauty'
+            ? 'openbeautyfacts'
+            : 'openfoodfacts',
+    };
+
+    const analysis = analyzeProduct(textBackedProduct);
+    setAnalysis(textBackedProduct, analysis);
+
+    updatePreviewItem(previewId, (current) => ({
+      ...current,
+      status: 'found',
+      product: textBackedProduct,
+      analysis,
+      isTextAnalysis: true,
+      message:
+        inferredType === 'medicine'
+          ? tt(
+              'text_mode_medicine_message',
+              'Metinden resmi kullanim sinyali yorumlandi. Prospektus yerine gecmez.'
+            )
+          : tt(
+              'text_mode_preview_message',
+              'Metin uzerinden hizli icerik analizi hazirlandi. Bu ilk surum barkod kadar kesin degildir.'
+            ),
+    }));
+  }, [manualText, pushLoadingPreview, resetTransientState, setAnalysis, tt, updatePreviewItem]);
+
   const handleBarCodeScanned = useCallback(
     ({ data, type }: { data: string; type?: string }) => {
-      if (scanned || activeLookupBarcode || !isFocused || isManualMode) {
+      if (scanned || activeLookupBarcode || !isFocused || isManualMode || isTextMode) {
         return;
       }
 
@@ -636,10 +790,15 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
       void processBarcode(decoded.normalizedData);
     },
-    [activeLookupBarcode, isFocused, isManualMode, processBarcode, scanned]
+    [activeLookupBarcode, isFocused, isManualMode, isTextMode, processBarcode, scanned]
   );
 
   const handleManualSubmit = useCallback(() => {
+    if (manualEntryMode === 'text') {
+      void processTextInput();
+      return;
+    }
+
     Keyboard.dismiss();
     setManualError('');
 
@@ -658,17 +817,62 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     }
 
     void processBarcode(decoded.normalizedData);
-  }, [manualBarcode, processBarcode, tt]);
+  }, [manualBarcode, manualEntryMode, processBarcode, processTextInput, tt]);
 
   const hasPreviewSurface = previewItems.length > 0 || Boolean(activeLookupBarcode);
   const latestPreview = previewItems[0] ?? null;
   const previewHistory = previewItems.slice(1);
+  const modeOptions: {
+    key: ScannerUiMode;
+    label: string;
+    hintTitle: string;
+    hintBody: string;
+  }[] = [
+    {
+      key: 'food',
+      label: tt('food_label', 'Gıda'),
+      hintTitle: tt('scanner_mode_food_title', 'Gıda modunda tarama'),
+      hintBody: tt(
+        'scanner_mode_food_body',
+        'Paketli gıdanın barkodunu kare içine hizala. Skor, alerjen ve katkı sinyalleri gelir.'
+      ),
+    },
+    {
+      key: 'beauty',
+      label: tt('beauty_label', 'Kozmetik'),
+      hintTitle: tt('scanner_mode_beauty_title', 'Kozmetik modunda tarama'),
+      hintBody: tt(
+        'scanner_mode_beauty_body',
+        'Kozmetik barkodunu okut. İçerik sinyali ve uygun marketlerde fiyat kıyası gösterilir.'
+      ),
+    },
+    {
+      key: 'medicine',
+      label: tt('medicine_label', 'İlaç'),
+      hintTitle: tt('scanner_mode_medicine_title', 'İlaç modunda tarama'),
+      hintBody: tt(
+        'scanner_mode_medicine_body',
+        'İlaç kutusunun barkodunu okut. Resmi kayıt, prospektüs ve kullanım özeti gelir.'
+      ),
+    },
+    {
+      key: 'text',
+      label: tt('text_mode_label', 'Metin'),
+      hintTitle: tt('scanner_mode_text_title', 'Metin modunda analiz'),
+      hintBody: tt(
+        'scanner_mode_text_body',
+        'İçindekiler, ingredients, INCI veya ne için kullanılır bölümünü okut. İlk sürümde metni elle de girebilirsin.'
+      ),
+    },
+  ];
+  const selectedModeMeta = modeOptions.find((item) => item.key === selectedMode) ?? modeOptions[0];
 
   useEffect(() => {
     if (
       !MARKET_GELSIN_RUNTIME.isEnabled ||
       !latestPreview?.product ||
       latestPreview.status !== 'found' ||
+      latestPreview.isTextAnalysis ||
       latestPreview.product.type === 'medicine' ||
       !profileCityCode
     ) {
@@ -800,48 +1004,158 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       <View style={styles.overlay} pointerEvents="box-none">
         <View style={[styles.topDarkArea, { paddingTop: topInsetPadding }]}>
           {!isManualMode ? (
-            <View style={styles.topControlsRow}>
-              <TouchableOpacity
-                style={styles.topManualButton}
-                onPress={() => setIsManualMode(true)}
-                activeOpacity={0.88}
-              >
-                <Ionicons name="keypad-outline" size={16} color="#FFFFFF" />
-                <Text style={styles.topManualButtonText}>
-                  {tt('manual_entry_short', 'Elle Gir')}
-                </Text>
-              </TouchableOpacity>
-
-              <View style={styles.topActionsGroup}>
-                <TouchableOpacity
-                  style={styles.topIconButton}
-                  onPress={() => setTorch((prev) => !prev)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons
-                    name={torch ? 'flash' : 'flash-off'}
-                    size={17}
-                    color={torch ? colors.primary : '#FFFFFF'}
-                  />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.topIconButton}
-                  onPress={() => setScanned(false)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="refresh-outline" size={17} color="#FFFFFF" />
-                </TouchableOpacity>
-
+            <>
+              <View style={styles.topControlsRow}>
                 <TouchableOpacity
                   style={styles.topIconButton}
                   onPress={handleCloseScanner}
                   activeOpacity={0.85}
                 >
-                  <Ionicons name="close" size={17} color="#FFFFFF" />
+                  <Ionicons name="chevron-back" size={18} color="#FFFFFF" />
                 </TouchableOpacity>
+
+                <View style={styles.topActionsGroup}>
+                  <TouchableOpacity
+                    style={styles.topManualButton}
+                    onPress={openManualEntry}
+                    activeOpacity={0.88}
+                  >
+                    <Ionicons
+                      name={selectedMode === 'text' ? 'document-text-outline' : 'keypad-outline'}
+                      size={16}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.topManualButtonText}>
+                      {selectedMode === 'text'
+                        ? tt('text_mode_manual_short', 'Metni Gir')
+                        : tt('manual_entry_short', 'Elle Gir')}
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.topIconButton}
+                    onPress={openInfoHint}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="information-outline" size={17} color="#FFFFFF" />
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.topIconButton}
+                    onPress={() => setTorch((prev) => !prev)}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons
+                      name={torch ? 'flash' : 'flash-off'}
+                      size={17}
+                      color={torch ? colors.primary : '#FFFFFF'}
+                    />
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.topIconButton}
+                    onPress={() => setScanned(false)}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="refresh-outline" size={17} color="#FFFFFF" />
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
+
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.modeSelectorRow}
+              >
+                {modeOptions.map((mode) => {
+                  const selected = mode.key === selectedMode;
+
+                  return (
+                    <TouchableOpacity
+                      key={mode.key}
+                      style={[
+                        styles.modeChip,
+                        {
+                          backgroundColor: selected
+                            ? `${colors.primary}26`
+                            : 'rgba(255,255,255,0.08)',
+                          borderColor: selected
+                            ? `${colors.primary}88`
+                            : 'rgba(255,255,255,0.16)',
+                        },
+                      ]}
+                      activeOpacity={0.88}
+                      onPress={() => handleSelectMode(mode.key)}
+                    >
+                      <Ionicons
+                        name={MODE_ICON_MAP[mode.key]}
+                        size={15}
+                        color={selected ? colors.primary : '#FFFFFF'}
+                      />
+                      <Text
+                        style={[
+                          styles.modeChipText,
+                          { color: selected ? colors.primary : '#FFFFFF' },
+                        ]}
+                      >
+                        {mode.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              {showModeHint ? (
+                <View style={styles.modeHintCard}>
+                  <View style={styles.modeHintHeader}>
+                    <View style={styles.modeHintTitleWrap}>
+                      <View
+                        style={[
+                          styles.modeHintIcon,
+                          { backgroundColor: `${colors.primary}18` },
+                        ]}
+                      >
+                        <Ionicons
+                          name={MODE_ICON_MAP[selectedModeMeta.key]}
+                          size={16}
+                          color={colors.primary}
+                        />
+                      </View>
+                      <Text style={styles.modeHintTitle}>{selectedModeMeta.hintTitle}</Text>
+                    </View>
+                    <TouchableOpacity
+                      style={styles.modeHintClose}
+                      onPress={dismissModeHint}
+                      activeOpacity={0.86}
+                    >
+                      <Ionicons name="close" size={16} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.modeHintBody}>{selectedModeMeta.hintBody}</Text>
+                  {selectedMode === 'text' ? (
+                    <TouchableOpacity
+                      style={[styles.modeHintAction, { backgroundColor: colors.primary }]}
+                      activeOpacity={0.88}
+                      onPress={openManualEntry}
+                    >
+                      <Ionicons
+                        name="create-outline"
+                        size={16}
+                        color={colors.primaryContrast}
+                      />
+                      <Text
+                        style={[
+                          styles.modeHintActionText,
+                          { color: colors.primaryContrast },
+                        ]}
+                      >
+                        {tt('text_mode_manual_action', 'Metni elle gir')}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              ) : null}
+            </>
           ) : null}
         </View>
 
@@ -939,8 +1253,10 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               </View>
 
               <TouchableOpacity
-                activeOpacity={latestPreview.status === 'found' ? 0.9 : 1}
-                disabled={latestPreview.status !== 'found'}
+                activeOpacity={
+                  latestPreview.status === 'found' && !latestPreview.isTextAnalysis ? 0.9 : 1
+                }
+                disabled={latestPreview.status !== 'found' || latestPreview.isTextAnalysis}
                 onPress={() => handleOpenPreviewDetail(latestPreview)}
                 style={styles.previewBodyTouchable}
               >
@@ -1050,10 +1366,15 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                   ) : null}
 
                   <Text style={styles.previewHintText}>
-                    {tt(
-                      'scanner_open_detail_hint',
-                      'Detay ekranını açmak için karta dokunun, kamera taramaya devam eder.'
-                    )}
+                    {latestPreview.isTextAnalysis
+                      ? tt(
+                          'scanner_text_preview_hint',
+                          'Bu ilk sürümde metin analizi kart üzerinde özetlenir. Barkod akışları detay ekranına açılır.'
+                        )
+                      : tt(
+                          'scanner_open_detail_hint',
+                          'Detay ekranını açmak için karta dokunun, kamera taramaya devam eder.'
+                        )}
                   </Text>
                 </>
               ) : null}
@@ -1112,7 +1433,9 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
           >
             <View style={styles.manualHeader}>
               <Text style={[styles.manualTitle, { color: colors.text }]}>
-                {tt('manual_entry_title', 'Barkodu Elle Girin')}
+                {manualEntryMode === 'text'
+                  ? tt('manual_text_title', 'Analiz edilecek metni girin')
+                  : tt('manual_entry_title', 'Barkodu Elle Girin')}
               </Text>
 
               <TouchableOpacity onPress={closeManualMode}>
@@ -1121,32 +1444,50 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
             </View>
 
             <Text style={[styles.manualSubtitle, { color: colors.text }]}>
-              {tt(
-                'manual_barcode_help',
-                '8, 12 veya 13 haneli barkod numarasını girin.'
-              )}
+              {manualEntryMode === 'text'
+                ? tt(
+                    'manual_text_help',
+                    'İçindekiler, ingredients, INCI veya ne için kullanılır bölümünü yapıştırabilirsiniz.'
+                  )
+                : tt(
+                    'manual_barcode_help',
+                    '8, 12 veya 13 haneli barkod numarasını girin.'
+                  )}
             </Text>
 
             <TextInput
               style={[
                 styles.input,
+                manualEntryMode === 'text' && styles.inputMultiline,
                 {
                   color: colors.text,
                   borderColor: manualError ? '#FF4444' : colors.border,
+                  textAlign: manualEntryMode === 'text' ? 'left' : 'center',
+                  letterSpacing: manualEntryMode === 'text' ? 0 : 1.5,
                 },
               ]}
-              placeholder="8690000000000"
+              placeholder={
+                manualEntryMode === 'text'
+                  ? tt('manual_text_placeholder', 'Örnek: İçindekiler: su, şeker, E330...')
+                  : '8690000000000'
+              }
               placeholderTextColor={`${colors.text}55`}
-              keyboardType="number-pad"
-              value={manualBarcode}
+              keyboardType={manualEntryMode === 'text' ? 'default' : 'number-pad'}
+              value={manualEntryMode === 'text' ? manualText : manualBarcode}
               onChangeText={(text) => {
-                setManualBarcode(text.replace(/[^\d]/g, ''));
+                if (manualEntryMode === 'text') {
+                  setManualText(text);
+                } else {
+                  setManualBarcode(text.replace(/[^\d]/g, ''));
+                }
                 setManualError('');
               }}
               autoFocus
               returnKeyType="done"
               onSubmitEditing={handleManualSubmit}
-              maxLength={14}
+              maxLength={manualEntryMode === 'text' ? 2000 : 14}
+              multiline={manualEntryMode === 'text'}
+              textAlignVertical={manualEntryMode === 'text' ? 'top' : 'center'}
             />
 
             {manualError ? <Text style={styles.errorText}>{manualError}</Text> : null}
@@ -1170,7 +1511,9 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                 onPress={handleManualSubmit}
               >
                 <Text style={styles.submitBtnText}>
-                  {tt('search', 'Sorgula')}
+                  {manualEntryMode === 'text'
+                    ? tt('analyze', 'Analiz Et')
+                    : tt('search', 'Sorgula')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1252,6 +1595,24 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
+  modeSelectorRow: {
+    gap: 10,
+    paddingTop: 16,
+    paddingBottom: 14,
+  },
+  modeChip: {
+    minHeight: 38,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modeChipText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
   topManualButton: {
     minHeight: 38,
     paddingHorizontal: 14,
@@ -1272,6 +1633,66 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  modeHintCard: {
+    borderRadius: 22,
+    padding: 14,
+    backgroundColor: 'rgba(11,14,20,0.84)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  modeHintHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  modeHintTitleWrap: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  modeHintIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeHintTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
+    flex: 1,
+  },
+  modeHintClose: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  modeHintBody: {
+    color: 'rgba(255,255,255,0.76)',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 10,
+  },
+  modeHintAction: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    minHeight: 40,
+    paddingHorizontal: 14,
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  modeHintActionText: {
+    fontSize: 12,
+    fontWeight: '800',
   },
   topIconButton: {
     width: 38,
@@ -1562,6 +1983,13 @@ const styles = StyleSheet.create({
     letterSpacing: 1.5,
     textAlign: 'center',
     marginBottom: 10,
+  },
+  inputMultiline: {
+    minHeight: 150,
+    paddingTop: 14,
+    paddingBottom: 14,
+    fontSize: 15,
+    lineHeight: 22,
   },
   errorText: {
     color: '#FF4444',

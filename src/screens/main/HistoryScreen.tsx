@@ -26,6 +26,20 @@ import {
   HistorySectionHeader,
 } from './history/HistorySections';
 
+const resolveLookupModeFromType = (
+  type: 'food' | 'beauty' | 'medicine'
+): 'food' | 'beauty' | 'medicine' => {
+  if (type === 'medicine') {
+    return 'medicine';
+  }
+
+  if (type === 'beauty') {
+    return 'beauty';
+  }
+
+  return 'food';
+};
+
 export const HistoryScreen: React.FC = () => {
   const { t } = useTranslation();
   const { colors } = useTheme();
@@ -184,7 +198,7 @@ export const HistoryScreen: React.FC = () => {
                     barcode: item.barcode,
                     entrySource: 'history',
                     prefetchedProduct: item,
-                    lookupMode: item.type === 'medicine' ? 'medicine' : undefined,
+                    lookupMode: resolveLookupModeFromType(item.type),
                   })
                 }
                 onDelete={() => handleDelete(item.id)}
@@ -193,7 +207,7 @@ export const HistoryScreen: React.FC = () => {
                     barcode: item.barcode,
                     entrySource: 'history',
                     prefetchedProduct: item,
-                    lookupMode: item.type === 'medicine' ? 'medicine' : undefined,
+                    lookupMode: resolveLookupModeFromType(item.type),
                   })
                 }
                 onToggleFavorite={() => {
