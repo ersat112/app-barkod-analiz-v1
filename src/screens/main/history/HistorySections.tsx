@@ -28,16 +28,19 @@ type HistoryListItemProps = {
   beautyLabel: string;
   foodLabel: string;
   medicineLabel: string;
+  officialLabel: string;
+  excellentLabel: string;
+  goodLabel: string;
+  poorLabel: string;
+  badLabel: string;
   favoriteLabel: string;
   unfavoriteLabel: string;
-  rescanLabel: string;
   fallbackBrand: string;
   fallbackName: string;
   isFavorite: boolean;
   onPress: () => void;
   onDelete: () => void;
   onToggleFavorite: () => void;
-  onRescan: () => void;
   colors: ThemeColors;
 };
 
@@ -80,16 +83,7 @@ type HistoryFilterBarProps = {
 
 const FALLBACK_IMAGE = 'https://via.placeholder.com/100?text=No+Image';
 
-const getScoreBubblePalette = (
-  item: HistoryEntry,
-  colors: ThemeColors
-): {
-  backgroundColor: string;
-  borderColor: string;
-  textColor: string;
-  value: string;
-  label: string;
-} => {
+const getScoreBubblePalette = (item: HistoryEntry, colors: ThemeColors) => {
   if (item.type === 'medicine') {
     return {
       backgroundColor: `${colors.primary}14`,
@@ -149,6 +143,42 @@ const getScoreBubblePalette = (
     value: String(score),
     label: '/100',
   };
+};
+
+const getHistoryStatusMeta = (
+  item: HistoryEntry,
+  labels: {
+    officialLabel: string;
+    excellentLabel: string;
+    goodLabel: string;
+    poorLabel: string;
+    badLabel: string;
+  }
+): {
+  label: string;
+  color: string;
+  scoreText: string;
+} => {
+  if (item.type === 'medicine') {
+    return {
+      label: labels.officialLabel,
+      color: '#3B82F6',
+      scoreText: 'TITCK',
+    };
+  }
+
+  const score = typeof item.score === 'number' ? item.score : 0;
+  if (score >= 85) {
+    return { label: labels.excellentLabel, color: '#18B56A', scoreText: `${score}/100` };
+  }
+  if (score >= 70) {
+    return { label: labels.goodLabel, color: '#74C947', scoreText: `${score}/100` };
+  }
+  if (score >= 35) {
+    return { label: labels.poorLabel, color: '#E38B2D', scoreText: `${score}/100` };
+  }
+
+  return { label: labels.badLabel, color: '#D94B45', scoreText: `${score}/100` };
 };
 
 export const HistoryListHeader: React.FC<HistoryHeaderProps> = ({
@@ -284,19 +314,29 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
   beautyLabel,
   foodLabel,
   medicineLabel,
+  officialLabel,
+  excellentLabel,
+  goodLabel,
+  poorLabel,
+  badLabel,
   favoriteLabel,
   unfavoriteLabel,
-  rescanLabel,
   fallbackBrand,
   fallbackName,
   isFavorite,
   onPress,
   onDelete,
   onToggleFavorite,
-  onRescan,
   colors,
 }) => {
   const scoreBubble = getScoreBubblePalette(item, colors);
+  const statusMeta = getHistoryStatusMeta(item, {
+    officialLabel,
+    excellentLabel,
+    goodLabel,
+    poorLabel,
+    badLabel,
+  });
 
   return (
     <Swipeable
@@ -324,90 +364,71 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
         <View style={styles.itemDetails}>
           <View style={styles.itemHeaderRow}>
             <View style={styles.itemHeaderTextWrap}>
-              <Text style={[styles.itemBrand, { color: colors.primary }]} numberOfLines={1}>
+              <Text style={[styles.itemBrand, { color: colors.text }]} numberOfLines={1}>
                 {item.brand || fallbackBrand}
               </Text>
 
               <Text style={[styles.itemName, { color: colors.text }]} numberOfLines={2}>
                 {item.name || fallbackName}
               </Text>
-            </View>
-
-            <View style={styles.itemRightArea}>
-              <View
-                style={[
-                  styles.scoreBubble,
-                  {
-                    backgroundColor: scoreBubble.backgroundColor,
-                    borderColor: scoreBubble.borderColor,
-                  },
-                ]}
-              >
-                <Text style={[styles.scoreBubbleValue, { color: scoreBubble.textColor }]}>
-                  {scoreBubble.value}
+              <View style={styles.itemStatusRow}>
+                <View style={[styles.statusDot, { backgroundColor: statusMeta.color }]} />
+                <Text style={[styles.itemStatusLabel, { color: statusMeta.color }]}>
+                  {statusMeta.label}
                 </Text>
-                <Text style={[styles.scoreBubbleLabel, { color: scoreBubble.textColor }]}>
-                  {scoreBubble.label}
+                <Text style={[styles.itemScoreInline, { color: colors.text }]}>
+                  {statusMeta.scoreText}
                 </Text>
               </View>
-              <View style={styles.itemTimeRow}>
-                <Text style={[styles.itemTime, { color: colors.text }]}>{timeLabel}</Text>
-                <Ionicons name="chevron-forward" size={16} color={colors.border} />
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.itemMetaRow}>
-            <View style={[styles.inlineBadge, { backgroundColor: `${colors.primary}12` }]}>
-              <Text
-                style={[styles.inlineBadgeText, { color: colors.primary }]}
-                numberOfLines={1}
-              >
+              <Text style={[styles.itemMetaLine, { color: colors.text }]}>
                 {item.type === 'beauty'
                   ? beautyLabel
                   : item.type === 'medicine'
                     ? medicineLabel
-                    : foodLabel}
+                    : foodLabel}{' '}
+                • {timeLabel}
               </Text>
+            </View>
+            <View style={styles.itemRightArea}>
+              <TouchableOpacity
+                style={[
+                  styles.favoriteIconButton,
+                  {
+                    backgroundColor: isFavorite ? `${colors.primary}12` : 'transparent',
+                    borderColor: colors.border,
+                  },
+                ]}
+                onPress={onToggleFavorite}
+                activeOpacity={0.88}
+                accessibilityLabel={isFavorite ? unfavoriteLabel : favoriteLabel}
+              >
+                <Ionicons
+                  name={isFavorite ? 'star' : 'star-outline'}
+                  size={16}
+                  color={colors.primary}
+                />
+              </TouchableOpacity>
+              <Ionicons name="chevron-forward" size={18} color={colors.border} />
             </View>
           </View>
 
-          <View style={styles.itemActionsRow}>
+          <View style={styles.itemMetaRow}>
             <TouchableOpacity
               style={[
-                styles.secondaryActionButton,
+                styles.scoreBubble,
                 {
-                  borderColor: colors.border,
-                  backgroundColor: isFavorite ? `${colors.primary}12` : 'transparent',
+                  backgroundColor: scoreBubble.backgroundColor,
+                  borderColor: scoreBubble.borderColor,
                 },
               ]}
-              onPress={onToggleFavorite}
-              activeOpacity={0.88}
+              activeOpacity={1}
+              disabled
             >
-              <Ionicons
-                name={isFavorite ? 'star' : 'star-outline'}
-                size={16}
-                color={colors.primary}
-              />
-              <Text
-                style={[
-                  styles.secondaryActionText,
-                  { color: isFavorite ? colors.primary : colors.text },
-                ]}
-                numberOfLines={1}
-              >
-                {isFavorite ? unfavoriteLabel : favoriteLabel}
+              <Text style={[styles.scoreBubbleValue, { color: scoreBubble.textColor }]}>
+                {scoreBubble.value}
               </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.primaryActionButton, { backgroundColor: colors.primary }]}
-              onPress={onRescan}
-              activeOpacity={0.9}
-            >
-              <Ionicons name="refresh-outline" size={16} color="#000" />
-              <Text style={styles.primaryActionText} numberOfLines={1}>
-                {rescanLabel}
+              <Text style={[styles.scoreBubbleLabel, { color: scoreBubble.textColor }]}>
+                {scoreBubble.label}
               </Text>
             </TouchableOpacity>
           </View>
@@ -505,9 +526,9 @@ const styles = StyleSheet.create({
   },
   headerSubtitle: {
     marginTop: 8,
-    fontSize: 14,
-    lineHeight: 22,
-    opacity: 0.68,
+    fontSize: 13,
+    lineHeight: 20,
+    opacity: 0.64,
   },
   filterWrap: {
     paddingHorizontal: 16,
@@ -570,9 +591,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderRadius: 16,
     borderWidth: 1,
-    padding: 12,
+    padding: 14,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   itemImage: {
     width: 58,
@@ -587,108 +608,87 @@ const styles = StyleSheet.create({
   itemHeaderRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
+    gap: 10,
   },
   itemHeaderTextWrap: {
     flex: 1,
-    minHeight: 40,
   },
   itemBrand: {
-    fontSize: 10,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    fontSize: 13,
+    fontWeight: '600',
+    opacity: 0.66,
   },
   itemName: {
     marginTop: 4,
+    fontSize: 17,
+    fontWeight: '800',
+    lineHeight: 22,
+  },
+  itemStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 8,
+    flexWrap: 'wrap',
+  },
+  statusDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  itemStatusLabel: {
     fontSize: 14,
     fontWeight: '800',
-    lineHeight: 19,
+  },
+  itemScoreInline: {
+    fontSize: 13,
+    fontWeight: '700',
+    opacity: 0.72,
+  },
+  itemMetaLine: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+    opacity: 0.62,
   },
   itemMetaRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
-    marginTop: 8,
-  },
-  inlineBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 9,
-    maxWidth: '100%',
-  },
-  inlineBadgeText: {
-    fontSize: 10,
-    fontWeight: '800',
+    marginTop: 12,
   },
   itemRightArea: {
     alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    minHeight: 58,
+    gap: 12,
+    paddingTop: 2,
   },
-  itemTimeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  itemTime: {
-    fontSize: 11,
-    fontWeight: '700',
-    opacity: 0.7,
-  },
-  scoreBubble: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
+  favoriteIconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  scoreBubble: {
+    minWidth: 64,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 4,
+    paddingHorizontal: 10,
+  },
   scoreBubbleValue: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '900',
-    lineHeight: 18,
   },
   scoreBubbleLabel: {
-    marginTop: 1,
     fontSize: 9,
     fontWeight: '900',
     letterSpacing: 0.5,
-  },
-  itemActionsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 10,
-  },
-  secondaryActionButton: {
-    flex: 1,
-    minHeight: 34,
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  secondaryActionText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  primaryActionButton: {
-    flex: 1.1,
-    minHeight: 34,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  primaryActionText: {
-    color: '#000',
-    fontSize: 11,
-    fontWeight: '900',
   },
   deleteAction: {
     marginRight: 16,

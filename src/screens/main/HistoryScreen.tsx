@@ -187,9 +187,13 @@ export const HistoryScreen: React.FC = () => {
                 beautyLabel={tt('beauty_label', 'Kozmetik')}
                 foodLabel={tt('food_label', 'Gıda')}
                 medicineLabel={tt('medicine_label', 'İlaç')}
+                officialLabel={tt('history_status_official', 'Resmi kayıt')}
+                excellentLabel={tt('history_status_excellent', 'Mükemmel')}
+                goodLabel={tt('history_status_good', 'İyi')}
+                poorLabel={tt('history_status_poor', 'Orta')}
+                badLabel={tt('history_status_bad', 'Kötü')}
                 favoriteLabel={tt('favorite', 'Favori')}
                 unfavoriteLabel={tt('remove_favorite', 'Favoriden Çıkar')}
-                rescanLabel={tt('rescan_now', 'Yeniden Sorgula')}
                 fallbackBrand={tt('unknown_brand', 'Bilinmeyen Marka')}
                 fallbackName={tt('unnamed_product', 'İsimsiz Ürün')}
                 isFavorite={isFavorite(item.barcode)}
@@ -202,14 +206,6 @@ export const HistoryScreen: React.FC = () => {
                   })
                 }
                 onDelete={() => handleDelete(item.id)}
-                onRescan={() =>
-                  navigation.navigate('Detail', {
-                    barcode: item.barcode,
-                    entrySource: 'history',
-                    prefetchedProduct: item,
-                    lookupMode: resolveLookupModeFromType(item.type),
-                  })
-                }
                 onToggleFavorite={() => {
                   void toggleFavorite(item.barcode);
                 }}
@@ -226,7 +222,7 @@ export const HistoryScreen: React.FC = () => {
                 title={tt('history', 'Geçmiş')}
                 subtitle={tt(
                   'history_swipe_hint',
-                  'Önceki barkod analizlerinizi burada görebilir, sağa kaydırarak silebilir, favori ekleyebilir ve yeniden sorgulayabilirsiniz.'
+                  'Son taramalarını burada görebilir, arayabilir ve sağa kaydırarak silebilirsin.'
                 )}
                 colors={colors}
                 topPadding={layout.headerTopPadding}
