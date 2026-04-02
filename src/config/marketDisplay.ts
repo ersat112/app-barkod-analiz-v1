@@ -110,3 +110,19 @@ export const getNationalMarketDefinitions = (
   productType?: Product['type']
 ): MarketDisplayDefinition[] =>
   productType === 'beauty' ? BEAUTY_NATIONAL_MARKETS : GROCERY_NATIONAL_MARKETS;
+
+export const inferMarketDisplayProductType = (marketKeys: (string | null | undefined)[]) => {
+  const normalizedBeautyKeys = new Set(
+    BEAUTY_NATIONAL_MARKETS.flatMap((item) =>
+      [item.key, item.name, ...(item.aliases || [])].map((value) =>
+        normalizeMarketDisplayValue(value)
+      )
+    ).filter(Boolean)
+  );
+
+  const hasBeautyKey = marketKeys.some((key) =>
+    normalizedBeautyKeys.has(normalizeMarketDisplayValue(key))
+  );
+
+  return hasBeautyKey ? ('beauty' as const) : undefined;
+};

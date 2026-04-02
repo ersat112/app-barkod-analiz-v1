@@ -110,7 +110,7 @@ const getScoreTone = (score?: number): string => {
 const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   initialMode = 'auto',
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { colors } = useTheme();
   const { profile } = useAuth();
   const navigation = useNavigation<any>();
@@ -1032,7 +1032,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                             }
                             offers={previewOffersResponse?.offers ?? []}
                             productType={latestPreview.product?.type}
-                            locale="tr-TR"
+                            locale={i18n.resolvedLanguage || 'tr-TR'}
                             colors={colors}
                             tt={tt}
                             loading={previewOffersLoading}

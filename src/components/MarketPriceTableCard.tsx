@@ -1,11 +1,14 @@
 import React, { useMemo } from 'react';
 import {
   Image,
+  Linking,
   ScrollView,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 
 import { getNationalMarketDefinitions, normalizeMarketDisplayValue } from '../config/marketDisplay';
 import type { ThemeColors } from '../context/ThemeContext';
@@ -311,6 +314,7 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
         {columns.map((column) => {
           const toneColor = column.scope === 'national' ? colors.primary : colors.teal;
           const hasOffer = Boolean(column.offer?.inStock);
+          const canOpenSource = Boolean(column.offer?.sourceUrl);
           const priceLabel = hasOffer
             ? formatLocalizedPrice(locale, column.offer?.price, column.offer?.currency || 'TRY')
             : loading
@@ -322,8 +326,15 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
               : '';
 
           return (
-            <View
+            <TouchableOpacity
               key={column.id}
+              activeOpacity={canOpenSource ? 0.88 : 1}
+              disabled={!canOpenSource}
+              onPress={() => {
+                if (column.offer?.sourceUrl) {
+                  void Linking.openURL(column.offer.sourceUrl);
+                }
+              }}
               style={[
                 styles.columnCard,
                 {
@@ -338,17 +349,26 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
                   marketName={column.marketName}
                   logoUrl={column.logoUrl}
                 />
-                <View
-                  style={[
-                    styles.scopeBadge,
-                    { backgroundColor: withAlpha(toneColor, '14') },
-                  ]}
-                >
-                  <Text style={[styles.scopeBadgeText, { color: toneColor }]}>
-                    {column.scope === 'national'
-                      ? tt('market_price_table_national_badge', 'Ulusal')
-                      : tt('market_price_table_local_badge', 'Yakın')}
-                  </Text>
+                <View style={styles.headerBadges}>
+                  <View
+                    style={[
+                      styles.scopeBadge,
+                      { backgroundColor: withAlpha(toneColor, '14') },
+                    ]}
+                  >
+                    <Text style={[styles.scopeBadgeText, { color: toneColor }]}>
+                      {column.scope === 'national'
+                        ? tt('market_price_table_national_badge', 'Ulusal')
+                        : tt('market_price_table_local_badge', 'Yakın')}
+                    </Text>
+                  </View>
+                  {canOpenSource ? (
+                    <Ionicons
+                      name="open-outline"
+                      size={14}
+                      color={colors.mutedText}
+                    />
+                  ) : null}
                 </View>
               </View>
 
@@ -356,18 +376,34 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
                 {column.marketName}
               </Text>
 
-              <Text
-                style={[
-                  styles.priceText,
-                  {
-                    color: hasOffer ? colors.text : colors.mutedText,
-                    opacity: hasOffer ? 1 : 0.9,
-                  },
-                ]}
-                numberOfLines={2}
-              >
-                {priceLabel}
-              </Text>
+              {hasOffer || loading ? (
+                <Text
+                  style={[
+                    styles.priceText,
+                    {
+                      color: hasOffer ? colors.text : colors.mutedText,
+                      opacity: hasOffer ? 1 : 0.9,
+                    },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {priceLabel}
+                </Text>
+              ) : (
+                <View style={styles.unavailableWrap}>
+                  <Ionicons
+                    name="remove-circle-outline"
+                    size={18}
+                    color={colors.mutedText}
+                  />
+                  <Text
+                    style={[styles.unavailableText, { color: colors.mutedText }]}
+                    numberOfLines={2}
+                  >
+                    {priceLabel}
+                  </Text>
+                </View>
+              )}
 
               {column.offer?.unitPrice && column.offer.unitPriceUnit ? (
                 <Text style={[styles.metaText, { color: colors.mutedText }]} numberOfLines={1}>
@@ -385,7 +421,7 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
               ) : (
                 <View style={styles.metaSpacer} />
               )}
-            </View>
+            </TouchableOpacity>
           );
         })}
       </ScrollView>
@@ -440,6 +476,11 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 10,
   },
+  headerBadges: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   marketLogoImage: {
     backgroundColor: '#E5E7EB',
   },
@@ -473,6 +514,19 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontWeight: '800',
     minHeight: 44,
+  },
+  unavailableWrap: {
+    marginTop: 10,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  unavailableText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
   },
   metaText: {
     marginTop: 8,

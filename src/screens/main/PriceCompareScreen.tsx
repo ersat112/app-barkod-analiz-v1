@@ -15,6 +15,8 @@ import { useNavigation, useRoute, type RouteProp } from '@react-navigation/nativ
 import { useTranslation } from 'react-i18next';
 
 import type { RootStackParamList } from '../../navigation/AppNavigator';
+import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
+import { inferMarketDisplayProductType } from '../../config/marketDisplay';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, type ThemeColors } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
@@ -1061,6 +1063,12 @@ export const PriceCompareScreen: React.FC = () => {
     });
   }, [offerItems]);
 
+  const pricingTableProductType = useMemo(() => {
+    return inferMarketDisplayProductType(
+      offerItems.flatMap((offer) => [offer.marketKey, offer.marketName])
+    );
+  }, [offerItems]);
+
   const pricingSubtitle = useMemo(() => {
     if (!selectedProduct) {
       return null;
@@ -1601,6 +1609,22 @@ export const PriceCompareScreen: React.FC = () => {
               }
               colors={colors}
             />
+
+            {!offersError ? (
+              <MarketPriceTableCard
+                title={tt('market_price_table_title', 'Market Fiyat Tablosu')}
+                subtitle={tt(
+                  'market_price_table_subtitle',
+                  'Ulusal marketleri ve konumundaki marketleri yana kaydırarak karşılaştır.'
+                )}
+                offers={offersResponse?.offers ?? []}
+                productType={pricingTableProductType}
+                locale={preferredLocale}
+                colors={colors}
+                tt={tt}
+                loading={offersLoading}
+              />
+            ) : null}
 
             {sortedOffers.length ? (
               <>
