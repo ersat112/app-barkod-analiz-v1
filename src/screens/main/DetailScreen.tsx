@@ -1109,6 +1109,44 @@ const formatLocalizedPrice = (
   }
 };
 
+const formatDistanceMeters = (tt: TranslateFn, value?: number | null): string => {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return '';
+  }
+
+  if (value < 1000) {
+    return tt('price_compare_distance_meters', '{{value}} m').replace(
+      '{{value}}',
+      Math.round(value).toString()
+    );
+  }
+
+  return tt('price_compare_distance_km', '{{value}} km').replace(
+    '{{value}}',
+    (value / 1000).toFixed(1)
+  );
+};
+
+const pickBestMarketOffer = (offers: MarketOffer[]): MarketOffer | null => {
+  if (!offers.length) {
+    return null;
+  }
+
+  const sorted = [...offers].sort((left, right) => {
+    if (left.inStock !== right.inStock) {
+      return left.inStock ? -1 : 1;
+    }
+
+    if (left.price !== right.price) {
+      return left.price - right.price;
+    }
+
+    return left.marketName.localeCompare(right.marketName, 'tr');
+  });
+
+  return sorted[0] ?? null;
+};
+
 const buildAlternativeMarketHint = (params: {
   tt: TranslateFn;
   locale: string;
@@ -1327,6 +1365,7 @@ export const DetailScreen: React.FC = () => {
   const [imageError, setImageError] = useState(false);
   const [shareSheetVisible, setShareSheetVisible] = useState(false);
   const [methodologySheetVisible, setMethodologySheetVisible] = useState(false);
+  const [marketOfferSheet, setMarketOfferSheet] = useState<MarketOffer | null>(null);
   const [notFoundReason, setNotFoundReason] = useState<'not_found' | 'invalid_barcode' | 'unknown' | null>(null);
   const [marketOffersLoading, setMarketOffersLoading] = useState(false);
   const [marketOffersError, setMarketOffersError] = useState<string | null>(null);
@@ -2123,6 +2162,10 @@ export const DetailScreen: React.FC = () => {
     () => marketOffersResponse?.offers ?? [],
     [marketOffersResponse?.offers]
   );
+  const bestMarketOffer = useMemo(
+    () => pickBestMarketOffer(marketPricingOffers),
+    [marketPricingOffers]
+  );
 
   const marketPriceTableSubtitle = useMemo(() => {
     if (!profileCity) {
@@ -2152,6 +2195,98 @@ export const DetailScreen: React.FC = () => {
       }
     );
   }, [marketPricingLocationLabel, marketPricingOffers.length, profileCity, tt]);
+
+  const marketPriceSummaryText = useMemo(() => {
+    if (marketOffersLoading) {
+      return tt('scanner_market_prices_loading', 'Market teklifleri yükleniyor...');
+    }
+
+    if (marketOffersError) {
+      return marketOffersError;
+    }
+
+    if (bestMarketOffer) {
+      return applyTemplate(
+        tt(
+          'scanner_market_prices_summary_best',
+          '{{market}} içinde en iyi canlı fiyat {{price}}'
+        ),
+        {
+          market: bestMarketOffer.marketName,
+          price: formatLocalizedPrice(preferredLocale, bestMarketOffer.price, bestMarketOffer.currency),
+        }
+      );
+    }
+
+    return tt(
+      'scanner_market_prices_summary_empty',
+      'Bu ürün için market teklifi bulunursa burada özetlenecek.'
+    );
+  }, [bestMarketOffer, marketOffersError, marketOffersLoading, preferredLocale, tt]);
+
+  const marketOfferSheetDetails = useMemo(() => {
+    if (!marketOfferSheet) {
+      return [];
+    }
+
+    return [
+      {
+        key: 'price',
+        label: tt('price_compare_market_sheet_price', 'Fiyat'),
+        value: formatLocalizedPrice(preferredLocale, marketOfferSheet.price, marketOfferSheet.currency),
+      },
+      typeof marketOfferSheet.unitPrice === 'number' && marketOfferSheet.unitPriceUnit
+        ? {
+            key: 'unit',
+            label: tt('price_compare_market_sheet_unit_price', 'Birim fiyat'),
+            value: `${formatLocalizedPrice(
+              preferredLocale,
+              marketOfferSheet.unitPrice,
+              marketOfferSheet.currency
+            )} / ${marketOfferSheet.unitPriceUnit}`,
+          }
+        : null,
+      {
+        key: 'stock',
+        label: tt('price_compare_market_sheet_stock', 'Durum'),
+        value: marketOfferSheet.inStock
+          ? tt('price_compare_stock_in', 'Stokta')
+          : tt('price_compare_stock_out', 'Stokta değil'),
+      },
+      formatDistanceMeters(tt, marketOfferSheet.distanceMeters)
+        ? {
+            key: 'distance',
+            label: tt('price_compare_market_sheet_distance', 'Mesafe'),
+            value: formatDistanceMeters(tt, marketOfferSheet.distanceMeters),
+          }
+        : null,
+      marketOfferSheet.branchName
+        ? {
+            key: 'branch',
+            label: tt('price_compare_market_sheet_branch', 'Şube'),
+            value: marketOfferSheet.branchName,
+          }
+        : null,
+      marketOfferSheet.districtName
+        ? {
+            key: 'district',
+            label: tt('price_compare_market_sheet_district', 'İlçe'),
+            value: marketOfferSheet.districtName,
+          }
+        : null,
+      marketOfferSheet.cityName
+        ? {
+            key: 'city',
+            label: tt('price_compare_market_sheet_city', 'Şehir'),
+            value: marketOfferSheet.cityName,
+          }
+        : null,
+    ].filter(Boolean) as { key: string; label: string; value: string }[];
+  }, [marketOfferSheet, preferredLocale, tt]);
+
+  useEffect(() => {
+    setMarketOfferSheet(null);
+  }, [displayedProduct?.barcode]);
 
   const productImageUri = imageError
     ? 'https://via.placeholder.com/400?text=No+Image'
@@ -2461,6 +2596,43 @@ export const DetailScreen: React.FC = () => {
   const closeMethodologySheet = useCallback(() => {
     setMethodologySheetVisible(false);
   }, []);
+
+  const openMarketOfferSheet = useCallback((offer: MarketOffer) => {
+    setMarketOfferSheet(offer);
+  }, []);
+
+  const closeMarketOfferSheet = useCallback(() => {
+    setMarketOfferSheet(null);
+  }, []);
+
+  const openMarketOfferSource = useCallback(async () => {
+    if (!marketOfferSheet?.sourceUrl) {
+      return;
+    }
+
+    try {
+      await Linking.openURL(marketOfferSheet.sourceUrl);
+    } catch (error) {
+      console.warn('[DetailScreen] market source open failed:', error);
+    }
+  }, [marketOfferSheet]);
+
+  const openMarketOfferMap = useCallback(async () => {
+    if (
+      typeof marketOfferSheet?.latitude !== 'number' ||
+      typeof marketOfferSheet?.longitude !== 'number'
+    ) {
+      return;
+    }
+
+    const url = `https://www.google.com/maps/search/?api=1&query=${marketOfferSheet.latitude},${marketOfferSheet.longitude}`;
+
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      console.warn('[DetailScreen] market map open failed:', error);
+    }
+  }, [marketOfferSheet]);
 
   const openLinkOrFallback = useCallback(
     async (url: string) => {
@@ -3211,22 +3383,29 @@ export const DetailScreen: React.FC = () => {
             profileCityCode ? (
               <>
                 {!marketOffersError ? (
-                  <MarketPriceTableCard
-                    title={tt('market_price_table_title', 'Market Fiyat Tablosu')}
-                    subtitle={
-                      marketPriceTableSubtitle ||
-                      tt(
-                        'market_price_table_subtitle',
-                        'Ulusal marketleri ve konumundaki marketleri yana kaydırarak karşılaştır.'
-                      )
-                    }
-                    offers={marketPricingOffers}
-                    productType={displayedProduct.type}
-                    locale={preferredLocale}
-                    colors={colors}
-                    tt={tt}
-                    loading={marketOffersLoading}
-                  />
+                  <>
+                    <Text style={[styles.marketPriceSummaryText, { color: colors.mutedText }]}>
+                      {marketPriceSummaryText}
+                    </Text>
+                    <MarketPriceTableCard
+                      title={tt('market_price_table_title', 'Market Fiyat Tablosu')}
+                      subtitle={
+                        marketPriceTableSubtitle ||
+                        tt(
+                          'market_price_table_subtitle_compact',
+                          '{{location}} için market fiyatları gösterilir.'
+                        )
+                      }
+                      offers={marketPricingOffers}
+                      productType={displayedProduct.type}
+                      locale={preferredLocale}
+                      colors={colors}
+                      tt={tt}
+                      loading={marketOffersLoading}
+                      compact
+                      onOfferPress={openMarketOfferSheet}
+                    />
+                  </>
                 ) : null}
 
                 {marketOffersError ? (
@@ -3539,6 +3718,131 @@ export const DetailScreen: React.FC = () => {
           </View>
         </View>
       </Modal>
+
+      <Modal
+        visible={Boolean(marketOfferSheet)}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={closeMarketOfferSheet}
+      >
+        <View style={styles.shareOverlay}>
+          <TouchableOpacity
+            style={styles.shareOverlayBackdrop}
+            activeOpacity={1}
+            onPress={closeMarketOfferSheet}
+          />
+
+          <View style={styles.shareSheetWrap}>
+            <View
+              style={[
+                styles.marketSheetCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.marketSheetHandle,
+                  { backgroundColor: `${colors.border}AA` },
+                ]}
+              />
+
+              <View style={styles.marketSheetHeader}>
+                <View style={styles.marketSheetHeaderTextWrap}>
+                  <Text style={[styles.marketSheetTitle, { color: colors.text }]}>
+                    {marketOfferSheet?.marketName}
+                  </Text>
+                  <Text style={[styles.marketSheetSubtitle, { color: colors.mutedText }]}>
+                    {[
+                      marketOfferSheet?.branchName,
+                      marketOfferSheet?.districtName,
+                      marketOfferSheet?.cityName,
+                    ]
+                      .filter(Boolean)
+                      .join(' • ') ||
+                      tt('price_compare_market_sheet_subtitle', 'Market detayı')}
+                  </Text>
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.marketSheetCloseButton,
+                    { borderColor: colors.border },
+                  ]}
+                  onPress={closeMarketOfferSheet}
+                  activeOpacity={0.85}
+                >
+                  <Text style={[styles.marketSheetCloseText, { color: colors.text }]}>×</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View
+                style={[
+                  styles.marketSheetDetailsWrap,
+                  { borderTopColor: `${colors.border}99` },
+                ]}
+              >
+                {marketOfferSheetDetails.map((detail) => (
+                  <View
+                    key={detail.key}
+                    style={[
+                      styles.marketSheetDetailRow,
+                      { borderBottomColor: `${colors.border}99` },
+                    ]}
+                  >
+                    <Text style={[styles.marketSheetDetailLabel, { color: colors.mutedText }]}>
+                      {detail.label}
+                    </Text>
+                    <Text style={[styles.marketSheetDetailValue, { color: colors.text }]}>
+                      {detail.value}
+                    </Text>
+                  </View>
+                ))}
+              </View>
+
+              <View style={styles.marketSheetActions}>
+                {typeof marketOfferSheet?.latitude === 'number' &&
+                typeof marketOfferSheet?.longitude === 'number' ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.marketSheetActionButton,
+                      { borderColor: colors.primary },
+                    ]}
+                    onPress={() => {
+                      void openMarketOfferMap();
+                    }}
+                    activeOpacity={0.88}
+                  >
+                    <Text style={[styles.marketSheetActionText, { color: colors.primary }]}>
+                      {tt('price_compare_market_sheet_open_map', 'Haritada Aç')}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {marketOfferSheet?.sourceUrl ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.marketSheetActionButton,
+                      { borderColor: colors.primary },
+                    ]}
+                    onPress={() => {
+                      void openMarketOfferSource();
+                    }}
+                    activeOpacity={0.88}
+                  >
+                    <Text style={[styles.marketSheetActionText, { color: colors.primary }]}>
+                      {tt('price_compare_market_sheet_open_source', 'Kaynağı Aç')}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -3570,6 +3874,105 @@ const styles = StyleSheet.create({
     maxWidth: 460,
     alignSelf: 'center',
     marginBottom: 8,
+  },
+  marketPriceSummaryText: {
+    marginBottom: 10,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  marketSheetCard: {
+    borderWidth: 1,
+    borderRadius: 26,
+    padding: 18,
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
+  },
+  marketSheetHandle: {
+    alignSelf: 'center',
+    width: 44,
+    height: 4,
+    borderRadius: 999,
+    marginBottom: 16,
+  },
+  marketSheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 14,
+  },
+  marketSheetHeaderTextWrap: {
+    flex: 1,
+    gap: 4,
+  },
+  marketSheetTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    lineHeight: 22,
+  },
+  marketSheetSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  marketSheetCloseButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  marketSheetCloseText: {
+    fontSize: 20,
+    lineHeight: 22,
+    fontWeight: '700',
+  },
+  marketSheetDetailsWrap: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  marketSheetDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  marketSheetDetailLabel: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '600',
+  },
+  marketSheetDetailValue: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+    textAlign: 'right',
+  },
+  marketSheetActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 16,
+  },
+  marketSheetActionButton: {
+    minHeight: 42,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  marketSheetActionText: {
+    fontSize: 12,
+    fontWeight: '800',
   },
   alternativeSection: {
     gap: 12,
