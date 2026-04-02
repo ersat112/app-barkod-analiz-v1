@@ -43,6 +43,7 @@ import {
   isMlKitTextRecognitionAvailable,
   recognizeTextFromImage,
 } from '../../services/mlKitTextRecognition.service';
+import { resolveHybridTextAnalysis } from '../../services/textHybridAnalysis.service';
 import { saveProductToHistory } from '../../services/db';
 import { prewarmMedicineCatalog } from '../../services/titckMedicine.service';
 import {
@@ -93,38 +94,6 @@ const MODE_ICON_MAP: Record<ScannerUiMode, keyof typeof Ionicons.glyphMap> = {
 
 const buildPreviewId = (): string => {
   return `preview_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-};
-
-const inferTextProductType = (value: string): Product['type'] => {
-  const normalized = String(value || '').toLocaleLowerCase('tr');
-
-  if (
-    /ne icin kullanilir|prospektus|tablet|kapsul|film kapli|etken madde|\bmg\b/u.test(
-      normalized
-    )
-  ) {
-    return 'medicine';
-  }
-
-  if (
-    /inci|aqua|parfum|glycerin|linalool|limonene|benzyl|sodium laureth/u.test(
-      normalized
-    )
-  ) {
-    return 'beauty';
-  }
-
-  return 'food';
-};
-
-const buildMedicineSummaryFromText = (value: string): string => {
-  const cleaned = value.replace(/\s+/g, ' ').trim();
-
-  if (!cleaned) {
-    return '';
-  }
-
-  return cleaned.slice(0, 260);
 };
 
 const getScoreTone = (score?: number): string => {
@@ -448,60 +417,21 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       }
 
       resetTransientState();
-
-      const inferredType = inferTextProductType(trimmedValue);
       const previewId = pushLoadingPreview(`TEXT-${Date.now()}`, 'auto');
-      const inferredName =
-        inferredType === 'medicine'
-          ? tt('text_mode_medicine_name', 'Metin Analizi • İlaç')
-          : inferredType === 'beauty'
-            ? tt('text_mode_beauty_name', 'Metin Analizi • Kozmetik')
-            : tt('text_mode_food_name', 'Metin Analizi • Gıda');
-
-      const textBackedProduct: Product = {
-        barcode: `TEXT-${Date.now()}`,
-        name: inferredName,
-        brand:
-          source === 'ocr'
-            ? tt('text_mode_brand_ocr', 'Kameradan okunan metin')
-            : tt('text_mode_brand', 'Elle girilen metin'),
-        image_url: FALLBACK_IMAGE,
-        type: inferredType,
-        ingredients_text: trimmedValue,
-        intended_use_summary:
-          inferredType === 'medicine' ? buildMedicineSummaryFromText(trimmedValue) : undefined,
-        sourceName:
-          inferredType === 'medicine'
-            ? 'titck'
-            : inferredType === 'beauty'
-              ? 'openbeautyfacts'
-              : 'openfoodfacts',
-      };
-
-      const analysis = analyzeProduct(textBackedProduct);
-      setAnalysis(textBackedProduct, analysis);
+      const hybridResult = await resolveHybridTextAnalysis({
+        rawText: trimmedValue,
+        inputSource: source,
+        tt,
+      });
+      setAnalysis(hybridResult.product, hybridResult.analysis);
 
       updatePreviewItem(previewId, (current) => ({
         ...current,
         status: 'found',
-        product: textBackedProduct,
-        analysis,
+        product: hybridResult.product,
+        analysis: hybridResult.analysis,
         isTextAnalysis: true,
-        message:
-          inferredType === 'medicine'
-            ? tt(
-                'text_mode_medicine_message',
-                'Metinden resmi kullanim sinyali yorumlandi. Prospektus yerine gecmez.'
-              )
-            : source === 'ocr'
-              ? tt(
-                  'text_mode_ocr_preview_message',
-                  'Kameradan okunan metinle hizli icerik analizi hazirlandi. Sonucu ambalajla tekrar kontrol edin.'
-                )
-              : tt(
-                  'text_mode_preview_message',
-                  'Metin uzerinden hizli icerik analizi hazirlandi. Bu ilk surum barkod kadar kesin degildir.'
-                ),
+        message: hybridResult.previewMessage,
       }));
     },
     [pushLoadingPreview, resetTransientState, setAnalysis, tt, updatePreviewItem]
