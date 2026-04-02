@@ -74,6 +74,12 @@ import { AdBanner } from '../../components/AdBanner';
 import { AlternativeCard } from '../../components/AlternativeCard';
 import { MarketOfferSheet } from '../../components/MarketOfferSheet';
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
+import {
+  buildBestMarketOfferSummary,
+  formatMarketDistance,
+  formatMarketPrice,
+  pickBestMarketOffer,
+} from '../../components/marketPricingSummary';
 import { FamilyHealthAlert } from '../../components/organisms/FamilyHealthAlert';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import {
@@ -1090,64 +1096,6 @@ const buildAlternativeBadge = (
   return tt('alternative_badge', 'Öneri');
 };
 
-const formatLocalizedPrice = (
-  locale: string,
-  amount?: number | null,
-  currency: string = 'TRY'
-): string => {
-  if (typeof amount !== 'number' || !Number.isFinite(amount)) {
-    return '--';
-  }
-
-  try {
-    return new Intl.NumberFormat(locale || 'tr-TR', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${currency}`;
-  }
-};
-
-const formatDistanceMeters = (tt: TranslateFn, value?: number | null): string => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-    return '';
-  }
-
-  if (value < 1000) {
-    return tt('price_compare_distance_meters', '{{value}} m').replace(
-      '{{value}}',
-      Math.round(value).toString()
-    );
-  }
-
-  return tt('price_compare_distance_km', '{{value}} km').replace(
-    '{{value}}',
-    (value / 1000).toFixed(1)
-  );
-};
-
-const pickBestMarketOffer = (offers: MarketOffer[]): MarketOffer | null => {
-  if (!offers.length) {
-    return null;
-  }
-
-  const sorted = [...offers].sort((left, right) => {
-    if (left.inStock !== right.inStock) {
-      return left.inStock ? -1 : 1;
-    }
-
-    if (left.price !== right.price) {
-      return left.price - right.price;
-    }
-
-    return left.marketName.localeCompare(right.marketName, 'tr');
-  });
-
-  return sorted[0] ?? null;
-};
-
 const buildAlternativeMarketHint = (params: {
   tt: TranslateFn;
   locale: string;
@@ -1168,7 +1116,7 @@ const buildAlternativeMarketHint = (params: {
     {
       location,
       market: params.offer.marketName,
-      price: formatLocalizedPrice(params.locale, params.offer.price, params.offer.currency),
+      price: formatMarketPrice(params.locale, params.offer.price, params.offer.currency),
     }
   );
 };
@@ -2198,31 +2146,13 @@ export const DetailScreen: React.FC = () => {
   }, [marketPricingLocationLabel, marketPricingOffers.length, profileCity, tt]);
 
   const marketPriceSummaryText = useMemo(() => {
-    if (marketOffersLoading) {
-      return tt('scanner_market_prices_loading', 'Market teklifleri yükleniyor...');
-    }
-
-    if (marketOffersError) {
-      return marketOffersError;
-    }
-
-    if (bestMarketOffer) {
-      return applyTemplate(
-        tt(
-          'scanner_market_prices_summary_best',
-          '{{market}} içinde en iyi canlı fiyat {{price}}'
-        ),
-        {
-          market: bestMarketOffer.marketName,
-          price: formatLocalizedPrice(preferredLocale, bestMarketOffer.price, bestMarketOffer.currency),
-        }
-      );
-    }
-
-    return tt(
-      'scanner_market_prices_summary_empty',
-      'Bu ürün için market teklifi bulunursa burada özetlenecek.'
-    );
+    return buildBestMarketOfferSummary({
+      tt,
+      locale: preferredLocale,
+      bestOffer: bestMarketOffer,
+      loading: marketOffersLoading,
+      error: marketOffersError,
+    });
   }, [bestMarketOffer, marketOffersError, marketOffersLoading, preferredLocale, tt]);
 
   const marketOfferSheetDetails = useMemo(() => {
@@ -2234,13 +2164,13 @@ export const DetailScreen: React.FC = () => {
       {
         key: 'price',
         label: tt('price_compare_market_sheet_price', 'Fiyat'),
-        value: formatLocalizedPrice(preferredLocale, marketOfferSheet.price, marketOfferSheet.currency),
+        value: formatMarketPrice(preferredLocale, marketOfferSheet.price, marketOfferSheet.currency),
       },
       typeof marketOfferSheet.unitPrice === 'number' && marketOfferSheet.unitPriceUnit
         ? {
             key: 'unit',
             label: tt('price_compare_market_sheet_unit_price', 'Birim fiyat'),
-            value: `${formatLocalizedPrice(
+            value: `${formatMarketPrice(
               preferredLocale,
               marketOfferSheet.unitPrice,
               marketOfferSheet.currency
@@ -2254,11 +2184,11 @@ export const DetailScreen: React.FC = () => {
           ? tt('price_compare_stock_in', 'Stokta')
           : tt('price_compare_stock_out', 'Stokta değil'),
       },
-      formatDistanceMeters(tt, marketOfferSheet.distanceMeters)
+      formatMarketDistance(tt, marketOfferSheet.distanceMeters)
         ? {
             key: 'distance',
             label: tt('price_compare_market_sheet_distance', 'Mesafe'),
-            value: formatDistanceMeters(tt, marketOfferSheet.distanceMeters),
+            value: formatMarketDistance(tt, marketOfferSheet.distanceMeters),
           }
         : null,
       marketOfferSheet.branchName

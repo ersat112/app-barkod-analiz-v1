@@ -14,6 +14,10 @@ import { getNationalMarketDefinitions, normalizeMarketDisplayValue } from '../co
 import type { ThemeColors } from '../context/ThemeContext';
 import type { MarketOffer } from '../types/marketPricing';
 import type { Product } from '../utils/analysis';
+import {
+  formatMarketDistance,
+  formatMarketPrice,
+} from './marketPricingSummary';
 
 type TranslateFn = (key: string, fallback: string) => string;
 
@@ -56,40 +60,6 @@ const withAlpha = (hex: string, alpha: string): string => {
 
   const normalized = hex.length === 7 ? hex : '#0F172A';
   return `${normalized}${alpha}`;
-};
-
-const formatLocalizedPrice = (locale: string, amount?: number | null, currency = 'TRY'): string => {
-  if (typeof amount !== 'number' || !Number.isFinite(amount)) {
-    return '--';
-  }
-
-  try {
-    return new Intl.NumberFormat(locale || 'tr-TR', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${currency}`;
-  }
-};
-
-const formatDistanceMeters = (tt: TranslateFn, value?: number | null): string => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-    return '';
-  }
-
-  if (value < 1000) {
-    return tt('price_compare_distance_meters', '{{value}} m').replace(
-      '{{value}}',
-      Math.round(value).toString()
-    );
-  }
-
-  return tt('price_compare_distance_km', '{{value}} km').replace(
-    '{{value}}',
-    (value / 1000).toFixed(1)
-  );
 };
 
 const resolveMarketAccent = (marketKey?: string | null, marketName?: string | null): string => {
@@ -320,13 +290,13 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
           const hasOffer = Boolean(column.offer?.inStock);
           const canInteract = Boolean(column.offer && (onOfferPress || column.offer.sourceUrl));
           const priceLabel = hasOffer
-            ? formatLocalizedPrice(locale, column.offer?.price, column.offer?.currency || 'TRY')
+            ? formatMarketPrice(locale, column.offer?.price, column.offer?.currency || 'TRY')
             : loading
               ? tt('market_price_table_loading', 'Yükleniyor...')
               : tt('market_price_table_missing', 'Ürün bulunamadı');
           const distanceLabel =
             column.scope === 'local'
-              ? formatDistanceMeters(tt, column.offer?.distanceMeters)
+              ? formatMarketDistance(tt, column.offer?.distanceMeters)
               : '';
 
           return (
@@ -422,7 +392,7 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
 
               {column.offer?.unitPrice && column.offer.unitPriceUnit ? (
                 <Text style={[styles.metaText, { color: colors.mutedText }]} numberOfLines={1}>
-                  {formatLocalizedPrice(locale, column.offer.unitPrice, column.offer.currency)} /{' '}
+                  {formatMarketPrice(locale, column.offer.unitPrice, column.offer.currency)} /{' '}
                   {column.offer.unitPriceUnit}
                 </Text>
               ) : (

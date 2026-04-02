@@ -23,6 +23,12 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
 import { MarketOfferSheet } from '../../components/MarketOfferSheet';
+import {
+  buildBestMarketOfferSummary,
+  formatMarketDistance,
+  formatMarketPrice,
+  pickBestMarketOffer,
+} from '../../components/marketPricingSummary';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { MARKET_GELSIN_RUNTIME } from '../../config/marketGelsinRuntime';
@@ -120,60 +126,6 @@ const getScoreTone = (score?: number): string => {
   }
 
   return '#EF4444';
-};
-
-const formatLocalizedPrice = (locale: string, amount?: number | null, currency = 'TRY'): string => {
-  if (typeof amount !== 'number' || !Number.isFinite(amount)) {
-    return '--';
-  }
-
-  try {
-    return new Intl.NumberFormat(locale || 'tr-TR', {
-      style: 'currency',
-      currency,
-      maximumFractionDigits: 2,
-    }).format(amount);
-  } catch {
-    return `${amount.toFixed(2)} ${currency}`;
-  }
-};
-
-const formatDistanceMeters = (tt: (key: string, fallback: string) => string, value?: number | null): string => {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
-    return '';
-  }
-
-  if (value < 1000) {
-    return tt('price_compare_distance_meters', '{{value}} m').replace(
-      '{{value}}',
-      Math.round(value).toString()
-    );
-  }
-
-  return tt('price_compare_distance_km', '{{value}} km').replace(
-    '{{value}}',
-    (value / 1000).toFixed(1)
-  );
-};
-
-const pickBestMarketOffer = (offers: MarketOffer[]): MarketOffer | null => {
-  if (!offers.length) {
-    return null;
-  }
-
-  const sorted = [...offers].sort((left, right) => {
-    if (left.inStock !== right.inStock) {
-      return left.inStock ? -1 : 1;
-    }
-
-    if (left.price !== right.price) {
-      return left.price - right.price;
-    }
-
-    return left.marketName.localeCompare(right.marketName, 'tr');
-  });
-
-  return sorted[0] ?? null;
 };
 
 const ScannerExperience: React.FC<ScannerExperienceProps> = ({
@@ -916,34 +868,13 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   );
   const previewBestOffer = useMemo(() => pickBestMarketOffer(previewOffers), [previewOffers]);
   const previewMarketSummary = useMemo(() => {
-    if (previewOffersLoading) {
-      return tt('scanner_market_prices_loading', 'Market teklifleri yükleniyor...');
-    }
-
-    if (previewOffersError) {
-      return previewOffersError;
-    }
-
-    if (previewBestOffer) {
-      return tt(
-        'scanner_market_prices_summary_best',
-        '{{market}} içinde en iyi canlı fiyat {{price}}'
-      )
-        .replace('{{market}}', previewBestOffer.marketName)
-        .replace(
-          '{{price}}',
-          formatLocalizedPrice(
-            i18n.resolvedLanguage || 'tr-TR',
-            previewBestOffer.price,
-            previewBestOffer.currency
-          )
-        );
-    }
-
-    return tt(
-      'scanner_market_prices_summary_empty',
-      'Bu ürün için market teklifi bulunursa burada özetlenecek.'
-    );
+    return buildBestMarketOfferSummary({
+      tt,
+      locale: i18n.resolvedLanguage || 'tr-TR',
+      bestOffer: previewBestOffer,
+      loading: previewOffersLoading,
+      error: previewOffersError,
+    });
   }, [i18n.resolvedLanguage, previewBestOffer, previewOffersError, previewOffersLoading, tt]);
 
   const previewMarketSheetDetails = useMemo(() => {
@@ -955,7 +886,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       {
         key: 'price',
         label: tt('price_compare_market_sheet_price', 'Fiyat'),
-        value: formatLocalizedPrice(
+        value: formatMarketPrice(
           i18n.resolvedLanguage || 'tr-TR',
           previewMarketSheetOffer.price,
           previewMarketSheetOffer.currency
@@ -966,7 +897,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         ? {
             key: 'unit',
             label: tt('price_compare_market_sheet_unit_price', 'Birim fiyat'),
-            value: `${formatLocalizedPrice(
+            value: `${formatMarketPrice(
               i18n.resolvedLanguage || 'tr-TR',
               previewMarketSheetOffer.unitPrice,
               previewMarketSheetOffer.currency
@@ -980,11 +911,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
           ? tt('price_compare_stock_in', 'Stokta')
           : tt('price_compare_stock_out', 'Stokta değil'),
       },
-      formatDistanceMeters(tt, previewMarketSheetOffer.distanceMeters)
+      formatMarketDistance(tt, previewMarketSheetOffer.distanceMeters)
         ? {
             key: 'distance',
             label: tt('price_compare_market_sheet_distance', 'Mesafe'),
-            value: formatDistanceMeters(tt, previewMarketSheetOffer.distanceMeters),
+            value: formatMarketDistance(tt, previewMarketSheetOffer.distanceMeters),
           }
         : null,
       previewMarketSheetOffer.branchName
