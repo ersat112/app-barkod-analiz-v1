@@ -87,6 +87,7 @@ import {
   MetaChipsSection,
   MethodologySheet,
   NoticeCard,
+  NutrientBalanceSection,
   PricingHighlightsSection,
   ProductHeadingSection,
   ScoreBreakdownSection,
@@ -97,6 +98,7 @@ import {
 } from './detail/DetailSections';
 import type {
   MethodologySectionItem,
+  NutrientBalanceItem,
   PricingHighlightItem,
   ScoreBreakdownItem,
 } from './detail/DetailSections';
@@ -124,6 +126,8 @@ type DetailLookupContext = {
 
 type RiskLevelKey = 'low' | 'medium' | 'high';
 type TranslateFn = (key: string, fallback: string) => string;
+
+type NutrientGaugeTone = 'darkGreen' | 'lightGreen' | 'orange' | 'red';
 
 const getNutritionPreferenceLabel = (
   tt: TranslateFn,
@@ -359,6 +363,128 @@ const getScoreAccentColor = (score: number | null): string => {
   return '#D94B45';
 };
 
+const getNutrientToneColor = (tone: NutrientGaugeTone): string => {
+  switch (tone) {
+    case 'darkGreen':
+      return '#18B56A';
+    case 'lightGreen':
+      return '#74C947';
+    case 'orange':
+      return '#E38B2D';
+    case 'red':
+    default:
+      return '#D94B45';
+  }
+};
+
+const getNumericNutriment = (
+  nutriments: Record<string, unknown> | undefined,
+  ...keys: string[]
+): number | null => {
+  for (const key of keys) {
+    const value = nutriments?.[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+
+  return null;
+};
+
+const formatNutrientValue = (
+  value: number,
+  unit: 'kcal' | 'g' | '%',
+  locale: string
+): string => {
+  const maximumFractionDigits = unit === '%' ? 0 : value >= 10 ? 1 : 2;
+  const formatted = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits,
+  }).format(value);
+
+  return `${formatted} ${unit}`;
+};
+
+const buildLimitNutrientTone = (
+  value: number,
+  lowThreshold: number,
+  lightThreshold: number,
+  orangeThreshold: number
+): NutrientGaugeTone => {
+  if (value <= lowThreshold) return 'darkGreen';
+  if (value <= lightThreshold) return 'lightGreen';
+  if (value <= orangeThreshold) return 'orange';
+  return 'red';
+};
+
+const buildEncourageNutrientTone = (
+  value: number,
+  lightThreshold: number,
+  darkThreshold: number
+): NutrientGaugeTone => {
+  if (value >= darkThreshold) return 'darkGreen';
+  if (value >= lightThreshold) return 'lightGreen';
+  if (value > 0) return 'orange';
+  return 'red';
+};
+
+const getNutrientEnvelope = (
+  tt: TranslateFn,
+  tone: NutrientGaugeTone,
+  mode: 'limit' | 'encourage',
+  subject: string
+): string => {
+  if (mode === 'limit') {
+    switch (tone) {
+      case 'darkGreen':
+        return applyTemplate(
+          tt('nutrient_envelope_limit_dark_green', 'Düşük {{subject}}'),
+          { subject }
+        );
+      case 'lightGreen':
+        return applyTemplate(
+          tt('nutrient_envelope_limit_light_green', 'Düşük etkili {{subject}}'),
+          { subject }
+        );
+      case 'orange':
+        return applyTemplate(
+          tt('nutrient_envelope_limit_orange', 'Biraz fazla {{subject}}'),
+          { subject }
+        );
+      case 'red':
+      default:
+        return applyTemplate(
+          tt('nutrient_envelope_limit_red', 'Çok {{subject}}'),
+          { subject }
+        );
+    }
+  }
+
+  switch (tone) {
+    case 'darkGreen':
+      return applyTemplate(
+        tt('nutrient_envelope_encourage_dark_green', 'Mükemmel miktarda {{subject}}'),
+        { subject }
+      );
+    case 'lightGreen':
+      return applyTemplate(
+        tt('nutrient_envelope_encourage_light_green', 'İyi miktarda {{subject}}'),
+        { subject }
+      );
+    case 'orange':
+      return applyTemplate(
+        tt('nutrient_envelope_encourage_orange', 'Az miktarda {{subject}}'),
+        { subject }
+      );
+    case 'red':
+    default:
+      return applyTemplate(
+        tt('nutrient_envelope_encourage_red', 'Çok düşük {{subject}}'),
+        { subject }
+      );
+  }
+};
+
 const translateSignalKey = (tt: TranslateFn, key: 'nutrition' | 'processing' | 'additives'): string => {
   switch (key) {
     case 'nutrition':
@@ -388,6 +514,163 @@ const translateNovaDetail = (tt: TranslateFn, novaGroup: number | null): string 
         'İşlenme seviyesi verisi bulunmadığı için NOVA sinyali sınırlı.'
       );
   }
+};
+
+const buildFoodNutrientBalanceItems = (params: {
+  product?: Product | null;
+  tt: TranslateFn;
+  locale: string;
+}): NutrientBalanceItem[] => {
+  const { product, tt, locale } = params;
+
+  if (!product || product.type !== 'food') {
+    return [];
+  }
+
+  const nutriments = product.nutriments || {};
+
+  const items: NutrientBalanceItem[] = [];
+  const pushItem = (item?: NutrientBalanceItem | null) => {
+    if (item) {
+      items.push(item);
+    }
+  };
+
+  const energyKcal = getNumericNutriment(
+    nutriments,
+    'energy-kcal_100g',
+    'energy-kcal_100ml',
+    'energy-kcal',
+    'energy-kcal_value'
+  );
+  if (typeof energyKcal === 'number') {
+    const tone = buildLimitNutrientTone(energyKcal, 80, 240, 480);
+    pushItem({
+      key: 'energy',
+      title: tt('nutrient_balance_energy_title', 'Kalori'),
+      helper: tt('nutrient_balance_per_100', '100 g / 100 mL bazlı'),
+      valueLabel: formatNutrientValue(energyKcal, 'kcal', locale),
+      envelope: getNutrientEnvelope(tt, tone, 'limit', tt('nutrient_subject_calorie', 'kalori')),
+      progress: Math.max(0, Math.min(1, energyKcal / 480)),
+      accentColor: getNutrientToneColor(tone),
+    });
+  }
+
+  const saturatedFat = getNumericNutriment(
+    nutriments,
+    'saturated-fat_100g',
+    'saturated-fat_100ml',
+    'saturated-fat'
+  );
+  if (typeof saturatedFat === 'number') {
+    const tone = buildLimitNutrientTone(saturatedFat, 1, 3, 6);
+    pushItem({
+      key: 'saturated-fat',
+      title: tt('nutrient_balance_saturated_fat_title', 'Doymuş yağ'),
+      helper: tt('nutrient_balance_per_100', '100 g / 100 mL bazlı'),
+      valueLabel: formatNutrientValue(saturatedFat, 'g', locale),
+      envelope: getNutrientEnvelope(
+        tt,
+        tone,
+        'limit',
+        tt('nutrient_subject_saturated_fat', 'doymuş yağ')
+      ),
+      progress: Math.max(0, Math.min(1, saturatedFat / 10)),
+      accentColor: getNutrientToneColor(tone),
+    });
+  }
+
+  const sugars = getNumericNutriment(nutriments, 'sugars_100g', 'sugars_100ml', 'sugars');
+  if (typeof sugars === 'number') {
+    const tone = buildLimitNutrientTone(sugars, 4.5, 13.5, 27);
+    pushItem({
+      key: 'sugars',
+      title: tt('nutrient_balance_sugar_title', 'Şeker'),
+      helper: tt('nutrient_balance_per_100', '100 g / 100 mL bazlı'),
+      valueLabel: formatNutrientValue(sugars, 'g', locale),
+      envelope: getNutrientEnvelope(tt, tone, 'limit', tt('nutrient_subject_sugar', 'şeker')),
+      progress: Math.max(0, Math.min(1, sugars / 45)),
+      accentColor: getNutrientToneColor(tone),
+    });
+  }
+
+  const salt = getNumericNutriment(nutriments, 'salt_100g', 'salt_100ml', 'salt');
+  if (typeof salt === 'number') {
+    const tone = buildLimitNutrientTone(salt, 0.225, 0.675, 1.35);
+    pushItem({
+      key: 'salt',
+      title: tt('nutrient_balance_salt_title', 'Tuz'),
+      helper: tt('nutrient_balance_per_100', '100 g / 100 mL bazlı'),
+      valueLabel: formatNutrientValue(salt, 'g', locale),
+      envelope: getNutrientEnvelope(tt, tone, 'limit', tt('nutrient_subject_salt', 'tuz')),
+      progress: Math.max(0, Math.min(1, salt / 2.25)),
+      accentColor: getNutrientToneColor(tone),
+    });
+  }
+
+  const proteins = getNumericNutriment(
+    nutriments,
+    'proteins_100g',
+    'proteins_100ml',
+    'proteins'
+  );
+  if (typeof proteins === 'number') {
+    const tone = buildEncourageNutrientTone(proteins, 4.8, 8);
+    pushItem({
+      key: 'proteins',
+      title: tt('nutrient_balance_protein_title', 'Protein'),
+      helper: tt('nutrient_balance_per_100', '100 g / 100 mL bazlı'),
+      valueLabel: formatNutrientValue(proteins, 'g', locale),
+      envelope: getNutrientEnvelope(
+        tt,
+        tone,
+        'encourage',
+        tt('nutrient_subject_protein', 'protein')
+      ),
+      progress: Math.max(0, Math.min(1, proteins / 8)),
+      accentColor: getNutrientToneColor(tone),
+    });
+  }
+
+  const fiber = getNumericNutriment(nutriments, 'fiber_100g', 'fiber_100ml', 'fiber');
+  if (typeof fiber === 'number') {
+    const tone = buildEncourageNutrientTone(fiber, 2.8, 4.7);
+    pushItem({
+      key: 'fiber',
+      title: tt('nutrient_balance_fiber_title', 'Lif'),
+      helper: tt('nutrient_balance_per_100', '100 g / 100 mL bazlı'),
+      valueLabel: formatNutrientValue(fiber, 'g', locale),
+      envelope: getNutrientEnvelope(tt, tone, 'encourage', tt('nutrient_subject_fiber', 'lif')),
+      progress: Math.max(0, Math.min(1, fiber / 4.7)),
+      accentColor: getNutrientToneColor(tone),
+    });
+  }
+
+  const fruitVegetable = getNumericNutriment(
+    nutriments,
+    'fruits-vegetables-legumes-estimate-from-ingredients_100g',
+    'fruits-vegetables-nuts-estimate-from-ingredients_100g',
+    'fruits-vegetables-nuts_100g'
+  );
+  if (typeof fruitVegetable === 'number') {
+    const tone = buildEncourageNutrientTone(fruitVegetable, 40, 80);
+    pushItem({
+      key: 'fruit-vegetable',
+      title: tt('nutrient_balance_fruit_veg_title', 'Meyve / sebze'),
+      helper: tt('nutrient_balance_estimated_share', 'Tahmini içerik oranı'),
+      valueLabel: formatNutrientValue(fruitVegetable, '%', locale),
+      envelope: getNutrientEnvelope(
+        tt,
+        tone,
+        'encourage',
+        tt('nutrient_subject_fruit_veg', 'meyve / sebze')
+      ),
+      progress: Math.max(0, Math.min(1, fruitVegetable / 100)),
+      accentColor: getNutrientToneColor(tone),
+    });
+  }
+
+  return items;
 };
 
 const getMedicineTherapeuticAreaSummary = (
@@ -1259,6 +1542,14 @@ export const DetailScreen: React.FC = () => {
       { missing: missingLabels || tt('unknown', 'Bilinmiyor') }
     );
   }, [displayedAnalysis, displayedProduct?.type, tt]);
+
+  const nutrientBalanceItems = useMemo(() => {
+    return buildFoodNutrientBalanceItems({
+      product: displayedProduct,
+      tt,
+      locale: preferredLocale,
+    });
+  }, [displayedProduct, preferredLocale, tt]);
 
   const methodologySignalLabels = useMemo(() => {
     if (!displayedProduct || !displayedAnalysis || displayedProduct.type === 'medicine') {
@@ -2927,6 +3218,16 @@ export const DetailScreen: React.FC = () => {
               <ScoreBreakdownSection
                 title={tt('food_signal_breakdown_title', 'Skorun Bileşenleri')}
                 items={foodScoreBreakdownItems}
+                colors={colors}
+              />
+
+              <NutrientBalanceSection
+                title={tt('nutrient_balance_title', 'Besin Dengesi')}
+                subtitle={tt(
+                  'nutrient_balance_subtitle',
+                  'Mevcut besin verileri 100 g / 100 mL üzerinden renkli zarflarla yorumlanır.'
+                )}
+                items={nutrientBalanceItems}
                 colors={colors}
               />
 

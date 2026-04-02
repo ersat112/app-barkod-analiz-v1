@@ -49,6 +49,16 @@ export type ScoreBreakdownItem = {
   accentColor: string;
 };
 
+export type NutrientBalanceItem = {
+  key: string;
+  title: string;
+  valueLabel: string;
+  helper: string;
+  envelope: string;
+  progress: number;
+  accentColor: string;
+};
+
 export type MethodologySectionItem = {
   key: string;
   title: string;
@@ -444,6 +454,77 @@ export const ScoreBreakdownSection: React.FC<{
 
             <Text style={[styles.breakdownDetail, { color: colors.text }]}>
               {item.detail}
+            </Text>
+          </View>
+        ))}
+      </View>
+    </>
+  );
+};
+
+export const NutrientBalanceSection: React.FC<{
+  title: string;
+  subtitle?: string;
+  items: NutrientBalanceItem[];
+  colors: ThemeColors;
+}> = ({ title, subtitle, items, colors }) => {
+  if (!items.length) {
+    return null;
+  }
+
+  return (
+    <>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
+      {subtitle ? (
+        <Text style={[styles.sectionSubtitle, { color: colors.mutedText }]}>{subtitle}</Text>
+      ) : null}
+
+      <View style={styles.breakdownList}>
+        {items.map((item) => (
+          <View
+            key={item.key}
+            style={[
+              styles.breakdownCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+              },
+            ]}
+          >
+            <View style={styles.nutrientRowTop}>
+              <View style={styles.breakdownHeadingWrap}>
+                <Text style={[styles.breakdownTitle, { color: colors.text }]}>
+                  {item.title}
+                </Text>
+                <Text style={[styles.breakdownHelper, { color: colors.mutedText }]}>
+                  {item.helper}
+                </Text>
+              </View>
+
+              <Text style={[styles.nutrientValueLabel, { color: item.accentColor }]}>
+                {item.valueLabel}
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.nutrientTrack,
+                { backgroundColor: withAlpha(item.accentColor, '12') },
+              ]}
+            >
+              <View
+                style={[
+                  styles.nutrientTrackFill,
+                  {
+                    backgroundColor: item.accentColor,
+                    width: `${Math.max(8, Math.round(item.progress * 100))}%`,
+                  },
+                ]}
+              />
+            </View>
+
+            <Text style={[styles.nutrientEnvelope, { color: colors.text }]}>
+              {item.envelope}
             </Text>
           </View>
         ))}
@@ -1240,6 +1321,33 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     opacity: 0.84,
   },
+  nutrientRowTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  nutrientValueLabel: {
+    fontSize: 14,
+    fontWeight: '900',
+    textAlign: 'right',
+  },
+  nutrientTrack: {
+    marginTop: 14,
+    height: 10,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  nutrientTrackFill: {
+    height: '100%',
+    borderRadius: 999,
+  },
+  nutrientEnvelope: {
+    marginTop: 12,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
+  },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1248,6 +1356,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 19,
     fontWeight: '900',
+  },
+  sectionSubtitle: {
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 6,
+    marginBottom: 14,
   },
   textSectionTitle: {
     marginTop: 35,
