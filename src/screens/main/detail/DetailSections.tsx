@@ -59,6 +59,13 @@ export type NutrientBalanceItem = {
   accentColor: string;
 };
 
+export type ProductHighlightItem = {
+  key: string;
+  title: string;
+  detail: string;
+  accentColor: string;
+};
+
 export type MethodologySectionItem = {
   key: string;
   title: string;
@@ -528,6 +535,64 @@ export const NutrientBalanceSection: React.FC<{
             </Text>
           </View>
         ))}
+      </View>
+    </>
+  );
+};
+
+export const ProductHighlightsSection: React.FC<{
+  title: string;
+  items: ProductHighlightItem[];
+  emptyLabel?: string;
+  colors: ThemeColors;
+}> = ({ title, items, emptyLabel, colors }) => {
+  if (!items.length && !emptyLabel) {
+    return null;
+  }
+
+  return (
+    <>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
+
+      <View
+        style={[
+          styles.highlightCard,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+      >
+        {items.length ? (
+          items.map((item, index) => (
+            <View
+              key={item.key}
+              style={[
+                styles.highlightRow,
+                index < items.length - 1 && {
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.border,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.highlightDot,
+                  { backgroundColor: item.accentColor },
+                ]}
+              />
+              <View style={styles.highlightTextWrap}>
+                <Text style={[styles.highlightTitle, { color: colors.text }]}>
+                  {item.title}
+                </Text>
+                <Text style={[styles.highlightDetail, { color: colors.mutedText }]}>
+                  {item.detail}
+                </Text>
+              </View>
+            </View>
+          ))
+        ) : (
+          <Text style={[styles.highlightEmptyText, { color: colors.mutedText }]}>
+            {emptyLabel}
+          </Text>
+        )}
       </View>
     </>
   );
@@ -1347,6 +1412,45 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     fontWeight: '700',
+  },
+  highlightCard: {
+    borderWidth: 1,
+    borderRadius: 22,
+    marginTop: 18,
+    marginBottom: 24,
+    overflow: 'hidden',
+  },
+  highlightRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  highlightDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginTop: 5,
+  },
+  highlightTextWrap: {
+    flex: 1,
+  },
+  highlightTitle: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '800',
+  },
+  highlightDetail: {
+    marginTop: 4,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  highlightEmptyText: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    fontSize: 13,
+    lineHeight: 19,
   },
   sectionHeader: {
     flexDirection: 'row',

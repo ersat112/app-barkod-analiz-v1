@@ -89,6 +89,7 @@ import {
   NoticeCard,
   NutrientBalanceSection,
   PricingHighlightsSection,
+  ProductHighlightsSection,
   ProductHeadingSection,
   ScoreBreakdownSection,
   ScoreOverviewCard,
@@ -99,6 +100,7 @@ import {
 import type {
   MethodologySectionItem,
   NutrientBalanceItem,
+  ProductHighlightItem,
   PricingHighlightItem,
   ScoreBreakdownItem,
 } from './detail/DetailSections';
@@ -671,6 +673,219 @@ const buildFoodNutrientBalanceItems = (params: {
   }
 
   return items;
+};
+
+const buildFoodHighlights = (params: {
+  product?: Product | null;
+  analysis?: AnalysisResult | null;
+  tt: TranslateFn;
+  locale: string;
+}): {
+  negatives: ProductHighlightItem[];
+  positives: ProductHighlightItem[];
+} => {
+  const { product, analysis, tt, locale } = params;
+
+  if (!product || product.type !== 'food' || !analysis) {
+    return { negatives: [], positives: [] };
+  }
+
+  const nutriments = product.nutriments || {};
+  const negatives: ProductHighlightItem[] = [];
+  const positives: ProductHighlightItem[] = [];
+
+  const pushUnique = (
+    list: ProductHighlightItem[],
+    item?: ProductHighlightItem | null
+  ) => {
+    if (!item || list.some((entry) => entry.key === item.key)) {
+      return;
+    }
+
+    list.push(item);
+  };
+
+  if (analysis.foundECodes.length > 0) {
+    pushUnique(negatives, {
+      key: 'additives',
+      title: tt('food_highlight_additives_title', 'Katkı maddeleri'),
+      detail:
+        analysis.highRiskAdditiveCount > 0
+          ? applyTemplate(
+              tt(
+                'food_highlight_additives_high_detail',
+                '{{count}} katkı sinyali bulundu. Kaçınılması önerilen bileşenler içeriyor.'
+              ),
+              { count: analysis.foundECodes.length }
+            )
+          : applyTemplate(
+              tt(
+                'food_highlight_additives_detail',
+                '{{count}} katkı sinyali bulundu. İçerik daha dikkatli okunmalı.'
+              ),
+              { count: analysis.foundECodes.length }
+            ),
+      accentColor: '#D94B45',
+    });
+  }
+
+  const calories = getNumericNutriment(
+    nutriments,
+    'energy-kcal_100g',
+    'energy-kcal_100ml',
+    'energy-kcal',
+    'energy-kcal_value'
+  );
+  if (typeof calories === 'number') {
+    const tone = buildLimitNutrientTone(calories, 80, 240, 480);
+    if (tone === 'orange' || tone === 'red') {
+      pushUnique(negatives, {
+        key: 'calories',
+        title: tt('food_highlight_calories_title', 'Kalori'),
+        detail:
+          tone === 'red'
+            ? applyTemplate(
+                tt('food_highlight_calories_red', '100 g / mL için yüksek enerji: {{value}}.'),
+                { value: formatNutrientValue(calories, 'kcal', locale) }
+              )
+            : applyTemplate(
+                tt('food_highlight_calories_orange', '100 g / mL için biraz yüksek enerji: {{value}}.'),
+                { value: formatNutrientValue(calories, 'kcal', locale) }
+              ),
+        accentColor: getNutrientToneColor(tone),
+      });
+    }
+  }
+
+  const salt = getNumericNutriment(nutriments, 'salt_100g', 'salt_100ml', 'salt');
+  if (typeof salt === 'number') {
+    const tone = buildLimitNutrientTone(salt, 0.225, 0.675, 1.35);
+    if (tone === 'orange' || tone === 'red') {
+      pushUnique(negatives, {
+        key: 'salt',
+        title: tt('food_highlight_salt_title', 'Tuz'),
+        detail:
+          tone === 'red'
+            ? applyTemplate(
+                tt('food_highlight_salt_red', '100 g / mL için çok tuzlu: {{value}}.'),
+                { value: formatNutrientValue(salt, 'g', locale) }
+              )
+            : applyTemplate(
+                tt('food_highlight_salt_orange', '100 g / mL için biraz fazla tuz içeriyor: {{value}}.'),
+                { value: formatNutrientValue(salt, 'g', locale) }
+              ),
+        accentColor: getNutrientToneColor(tone),
+      });
+    }
+  }
+
+  const sugar = getNumericNutriment(nutriments, 'sugars_100g', 'sugars_100ml', 'sugars');
+  if (typeof sugar === 'number') {
+    const tone = buildLimitNutrientTone(sugar, 4.5, 13.5, 27);
+    if (tone === 'orange' || tone === 'red') {
+      pushUnique(negatives, {
+        key: 'sugar-negative',
+        title: tt('food_highlight_sugar_title', 'Şeker'),
+        detail:
+          tone === 'red'
+            ? applyTemplate(
+                tt('food_highlight_sugar_red', '100 g / mL için yüksek şeker: {{value}}.'),
+                { value: formatNutrientValue(sugar, 'g', locale) }
+              )
+            : applyTemplate(
+                tt('food_highlight_sugar_orange', '100 g / mL için biraz fazla şeker: {{value}}.'),
+                { value: formatNutrientValue(sugar, 'g', locale) }
+              ),
+        accentColor: getNutrientToneColor(tone),
+      });
+    } else {
+      pushUnique(positives, {
+        key: 'sugar-positive',
+        title: tt('food_highlight_low_sugar_title', 'Şeker'),
+        detail:
+          tone === 'darkGreen'
+            ? tt('food_highlight_low_sugar_dark', 'Şeker yükü düşük görünüyor.')
+            : tt('food_highlight_low_sugar_light', 'Şeker etkisi düşük seviyede kalıyor.'),
+        accentColor: getNutrientToneColor(tone),
+      });
+    }
+  }
+
+  const protein = getNumericNutriment(nutriments, 'proteins_100g', 'proteins_100ml', 'proteins');
+  if (typeof protein === 'number') {
+    const tone = buildEncourageNutrientTone(protein, 4.8, 8);
+    if (tone === 'darkGreen' || tone === 'lightGreen') {
+      pushUnique(positives, {
+        key: 'protein',
+        title: tt('food_highlight_protein_title', 'Protein'),
+        detail:
+          tone === 'darkGreen'
+            ? applyTemplate(
+                tt('food_highlight_protein_dark', 'Protein miktarı güçlü: {{value}}.'),
+                { value: formatNutrientValue(protein, 'g', locale) }
+              )
+            : applyTemplate(
+                tt('food_highlight_protein_light', 'Protein desteği var: {{value}}.'),
+                { value: formatNutrientValue(protein, 'g', locale) }
+              ),
+        accentColor: getNutrientToneColor(tone),
+      });
+    }
+  }
+
+  const fiber = getNumericNutriment(nutriments, 'fiber_100g', 'fiber_100ml', 'fiber');
+  if (typeof fiber === 'number') {
+    const tone = buildEncourageNutrientTone(fiber, 2.8, 4.7);
+    if (tone === 'darkGreen' || tone === 'lightGreen') {
+      pushUnique(positives, {
+        key: 'fiber',
+        title: tt('food_highlight_fiber_title', 'Lif'),
+        detail:
+          tone === 'darkGreen'
+            ? applyTemplate(
+                tt('food_highlight_fiber_dark', 'Lif miktarı güçlü: {{value}}.'),
+                { value: formatNutrientValue(fiber, 'g', locale) }
+              )
+            : applyTemplate(
+                tt('food_highlight_fiber_light', 'Lif desteği var: {{value}}.'),
+                { value: formatNutrientValue(fiber, 'g', locale) }
+              ),
+        accentColor: getNutrientToneColor(tone),
+      });
+    }
+  }
+
+  const fruitVegetable = getNumericNutriment(
+    nutriments,
+    'fruits-vegetables-legumes-estimate-from-ingredients_100g',
+    'fruits-vegetables-nuts-estimate-from-ingredients_100g',
+    'fruits-vegetables-nuts_100g'
+  );
+  if (typeof fruitVegetable === 'number') {
+    const tone = buildEncourageNutrientTone(fruitVegetable, 40, 80);
+    if (tone === 'darkGreen' || tone === 'lightGreen') {
+      pushUnique(positives, {
+        key: 'fruit-veg',
+        title: tt('food_highlight_fruit_veg_title', 'Meyve / sebze'),
+        detail:
+          tone === 'darkGreen'
+            ? applyTemplate(
+                tt('food_highlight_fruit_veg_dark', 'Meyve / sebze oranı yüksek: {{value}}.'),
+                { value: formatNutrientValue(fruitVegetable, '%', locale) }
+              )
+            : applyTemplate(
+                tt('food_highlight_fruit_veg_light', 'İyi bir meyve / sebze oranı var: {{value}}.'),
+                { value: formatNutrientValue(fruitVegetable, '%', locale) }
+              ),
+        accentColor: getNutrientToneColor(tone),
+      });
+    }
+  }
+
+  return {
+    negatives: negatives.slice(0, 3),
+    positives: positives.slice(0, 3),
+  };
 };
 
 const getMedicineTherapeuticAreaSummary = (
@@ -1550,6 +1765,15 @@ export const DetailScreen: React.FC = () => {
       locale: preferredLocale,
     });
   }, [displayedProduct, preferredLocale, tt]);
+
+  const foodHighlights = useMemo(() => {
+    return buildFoodHighlights({
+      product: displayedProduct,
+      analysis: displayedAnalysis,
+      tt,
+      locale: preferredLocale,
+    });
+  }, [displayedAnalysis, displayedProduct, preferredLocale, tt]);
 
   const methodologySignalLabels = useMemo(() => {
     if (!displayedProduct || !displayedAnalysis || displayedProduct.type === 'medicine') {
@@ -3215,6 +3439,26 @@ export const DetailScreen: React.FC = () => {
 
           {displayedProduct.type === 'food' ? (
             <>
+              <ProductHighlightsSection
+                title={tt('food_highlights_negative_title', 'Negatifler')}
+                items={foodHighlights.negatives}
+                emptyLabel={tt(
+                  'food_highlights_negative_empty',
+                  'Belirgin bir olumsuz sinyal görünmüyor.'
+                )}
+                colors={colors}
+              />
+
+              <ProductHighlightsSection
+                title={tt('food_highlights_positive_title', 'Pozitifler')}
+                items={foodHighlights.positives}
+                emptyLabel={tt(
+                  'food_highlights_positive_empty',
+                  'Belirgin bir güçlü sinyal görünmüyor.'
+                )}
+                colors={colors}
+              />
+
               <ScoreBreakdownSection
                 title={tt('food_signal_breakdown_title', 'Skorun Bileşenleri')}
                 items={foodScoreBreakdownItems}
