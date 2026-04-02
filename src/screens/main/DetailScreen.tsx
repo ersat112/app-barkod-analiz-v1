@@ -57,6 +57,7 @@ import {
   type NutritionPreferenceKey,
 } from '../../services/nutritionPreferences.service';
 import { buildFamilyHealthAlerts } from '../../services/familyHealthProfile.service';
+import { searchECodesInText } from '../../services/eCodesData';
 import {
   resolveCanonicalCity,
   resolveCanonicalDistrict,
@@ -79,6 +80,7 @@ import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import {
   ActionLinksSection,
   AdditivesSection,
+  CosmeticIngredientRiskSection,
   DetailErrorState,
   DetailHeroSection,
   DetailLoadingState,
@@ -98,6 +100,7 @@ import {
   TextSection,
 } from './detail/DetailSections';
 import type {
+  CosmeticIngredientInsightItem,
   MethodologySectionItem,
   NutrientBalanceItem,
   ProductHighlightItem,
@@ -886,6 +889,79 @@ const buildFoodHighlights = (params: {
     negatives: negatives.slice(0, 3),
     positives: positives.slice(0, 3),
   };
+};
+
+const normalizeIngredientEntry = (value: string): string =>
+  String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/^\W+|\W+$/g, '')
+    .trim();
+
+const splitIngredientsText = (value?: string | null): string[] => {
+  return String(value || '')
+    .split(/[,;\n]+/)
+    .map(normalizeIngredientEntry)
+    .filter(Boolean);
+};
+
+const getCosmeticRiskColor = (label: string): string => {
+  const normalized = label.toLowerCase();
+  if (normalized.includes('yüksek') || normalized.includes('high')) return '#D94B45';
+  if (normalized.includes('orta') || normalized.includes('moderate')) return '#E38B2D';
+  if (normalized.includes('düşük') || normalized.includes('low')) return '#74C947';
+  return '#94A3B8';
+};
+
+const buildCosmeticIngredientInsights = (params: {
+  product?: Product | null;
+  tt: TranslateFn;
+}): CosmeticIngredientInsightItem[] => {
+  const { product, tt } = params;
+
+  if (!product || product.type !== 'beauty') {
+    return [];
+  }
+
+  const parsed = splitIngredientsText(product.ingredients_text);
+  const unique = Array.from(new Set(parsed)).slice(0, 24);
+
+  const ranked = unique.map((ingredient, index) => {
+    const matches = searchECodesInText(ingredient);
+    const matched = matches[0];
+
+    if (matched) {
+      const riskLabel = translateRiskLevel(tt, matched.risk);
+      return {
+        order: matched.risk === 'Yüksek' ? 0 : matched.risk === 'Orta' ? 1 : 2,
+        item: {
+          key: `${ingredient}-${index}`,
+          title: ingredient,
+          riskLabel,
+          accentColor: getCosmeticRiskColor(riskLabel),
+          summary: `${matched.category} • ${matched.description}`,
+          detail: matched.impact,
+        } satisfies CosmeticIngredientInsightItem,
+      };
+    }
+
+    return {
+      order: 3,
+      item: {
+        key: `${ingredient}-${index}`,
+        title: ingredient,
+        riskLabel: tt('beauty_ingredient_no_clear_signal', 'Belirgin risk sinyali yok'),
+        accentColor: '#94A3B8',
+        summary: tt(
+          'beauty_ingredient_no_clear_signal_detail',
+          'Bu içerik için mevcut yerel risk kütüphanesinde doğrudan bir eşleşme bulunmadı.'
+        ),
+      } satisfies CosmeticIngredientInsightItem,
+    };
+  });
+
+  return ranked
+    .sort((a, b) => a.order - b.order)
+    .map((entry) => entry.item);
 };
 
 const getMedicineTherapeuticAreaSummary = (
@@ -1774,6 +1850,13 @@ export const DetailScreen: React.FC = () => {
       locale: preferredLocale,
     });
   }, [displayedAnalysis, displayedProduct, preferredLocale, tt]);
+
+  const cosmeticIngredientInsights = useMemo(() => {
+    return buildCosmeticIngredientInsights({
+      product: displayedProduct,
+      tt,
+    });
+  }, [displayedProduct, tt]);
 
   const methodologySignalLabels = useMemo(() => {
     if (!displayedProduct || !displayedAnalysis || displayedProduct.type === 'medicine') {
@@ -3703,15 +3786,27 @@ export const DetailScreen: React.FC = () => {
             </>
           ) : (
             <>
-              <AdditivesSection
-                title={tt('additives', 'Katkı Maddeleri')}
-                emptyLabel={tt('clean_content_detected', 'Belirgin katkı riski tespit edilmedi')}
-                items={displayedAnalysis.foundECodes ?? []}
-                analysisColor={analysisColor}
-                unknownLabel={tt('unknown', 'Bilinmiyor')}
-                formatRiskLabel={(risk) => translateRiskLevel(tt, risk)}
-                colors={colors}
-              />
+              {displayedProduct.type === 'beauty' ? (
+                <CosmeticIngredientRiskSection
+                  title={tt('beauty_ingredient_risk_title', 'İçerik Risk Listesi')}
+                  subtitle={tt(
+                    'beauty_ingredient_risk_subtitle',
+                    'Risk sinyali bulunan bileşenler üstte gösterilir. Bir satıra dokunarak kısa açıklamayı açabilirsiniz.'
+                  )}
+                  items={cosmeticIngredientInsights}
+                  colors={colors}
+                />
+              ) : (
+                <AdditivesSection
+                  title={tt('additives', 'Katkı Maddeleri')}
+                  emptyLabel={tt('clean_content_detected', 'Belirgin katkı riski tespit edilmedi')}
+                  items={displayedAnalysis.foundECodes ?? []}
+                  analysisColor={analysisColor}
+                  unknownLabel={tt('unknown', 'Bilinmiyor')}
+                  formatRiskLabel={(risk) => translateRiskLevel(tt, risk)}
+                  colors={colors}
+                />
+              )}
 
               <TextSection
                 title={tt('ingredients', 'İçerik')}

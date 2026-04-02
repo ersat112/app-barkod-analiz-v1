@@ -66,6 +66,15 @@ export type ProductHighlightItem = {
   accentColor: string;
 };
 
+export type CosmeticIngredientInsightItem = {
+  key: string;
+  title: string;
+  riskLabel: string;
+  accentColor: string;
+  summary: string;
+  detail?: string;
+};
+
 export type MethodologySectionItem = {
   key: string;
   title: string;
@@ -593,6 +602,84 @@ export const ProductHighlightsSection: React.FC<{
             {emptyLabel}
           </Text>
         )}
+      </View>
+    </>
+  );
+};
+
+export const CosmeticIngredientRiskSection: React.FC<{
+  title: string;
+  subtitle?: string;
+  items: CosmeticIngredientInsightItem[];
+  colors: ThemeColors;
+}> = ({ title, subtitle, items, colors }) => {
+  const [expandedKey, setExpandedKey] = React.useState<string | null>(null);
+
+  if (!items.length) {
+    return null;
+  }
+
+  return (
+    <>
+      <Text style={[styles.sectionTitle, { color: colors.text }]}>{title}</Text>
+      {subtitle ? (
+        <Text style={[styles.sectionSubtitle, { color: colors.mutedText }]}>{subtitle}</Text>
+      ) : null}
+
+      <View
+        style={[
+          styles.highlightCard,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}
+      >
+        {items.map((item, index) => {
+          const expanded = expandedKey === item.key;
+
+          return (
+            <TouchableOpacity
+              key={item.key}
+              activeOpacity={0.88}
+              onPress={() => setExpandedKey(expanded ? null : item.key)}
+              style={[
+                styles.cosmeticIngredientRow,
+                index < items.length - 1 && {
+                  borderBottomWidth: 1,
+                  borderBottomColor: colors.border,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.highlightDot,
+                  { backgroundColor: item.accentColor },
+                ]}
+              />
+              <View style={styles.highlightTextWrap}>
+                <Text style={[styles.highlightTitle, { color: colors.text }]}>
+                  {item.title}
+                </Text>
+                <Text style={[styles.cosmeticIngredientRisk, { color: item.accentColor }]}>
+                  {item.riskLabel}
+                </Text>
+                <Text style={[styles.highlightDetail, { color: colors.mutedText }]}>
+                  {item.summary}
+                </Text>
+                {expanded && item.detail ? (
+                  <Text style={[styles.cosmeticIngredientDetail, { color: colors.text }]}>
+                    {item.detail}
+                  </Text>
+                ) : null}
+              </View>
+              <View style={styles.cosmeticIngredientIconWrap}>
+                <Ionicons
+                  name={expanded ? 'chevron-up-circle-outline' : 'information-circle-outline'}
+                  size={18}
+                  color={colors.primary}
+                />
+              </View>
+            </TouchableOpacity>
+          );
+        })}
       </View>
     </>
   );
@@ -1427,6 +1514,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 14,
   },
+  cosmeticIngredientRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
   highlightDot: {
     width: 10,
     height: 10,
@@ -1445,6 +1539,21 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontSize: 13,
     lineHeight: 19,
+  },
+  cosmeticIngredientRisk: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
+  cosmeticIngredientDetail: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 20,
+    opacity: 0.92,
+  },
+  cosmeticIngredientIconWrap: {
+    paddingTop: 2,
   },
   highlightEmptyText: {
     paddingHorizontal: 16,
