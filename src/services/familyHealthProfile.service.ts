@@ -21,6 +21,22 @@ export type FamilyHealthProfile = {
   healthGoals: FamilyHealthGoalKey[];
 };
 
+export const FAMILY_ALLERGEN_KEYS: FamilyAllergenKey[] = [
+  'gluten',
+  'milk',
+  'egg',
+  'peanut',
+  'treeNuts',
+  'soy',
+  'sesame',
+];
+
+export const FAMILY_HEALTH_GOAL_KEYS: FamilyHealthGoalKey[] = [
+  'lowerSugar',
+  'lowerSalt',
+  'cleanIngredients',
+];
+
 export type FamilyAllergenDefinition = {
   key: FamilyAllergenKey;
   label: string;
@@ -183,6 +199,53 @@ export const normalizeWatchedAdditiveCode = (value?: string | null): string => {
     .toUpperCase()
     .replace(/[- ]/g, '')
     .trim();
+};
+
+export const normalizeFamilyHealthProfile = (
+  input: unknown
+): FamilyHealthProfile | undefined => {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+
+  const record = input as Record<string, unknown>;
+  const allergens = Array.isArray(record.allergens)
+    ? Array.from(
+        new Set(
+          record.allergens.filter((item): item is FamilyAllergenKey =>
+            FAMILY_ALLERGEN_KEYS.includes(item as FamilyAllergenKey)
+          )
+        )
+      )
+    : [];
+  const watchedAdditives = Array.isArray(record.watchedAdditives)
+    ? Array.from(
+        new Set(
+          record.watchedAdditives
+            .map((item) => normalizeWatchedAdditiveCode(String(item || '')))
+            .filter(Boolean)
+        )
+      )
+    : [];
+  const healthGoals = Array.isArray(record.healthGoals)
+    ? Array.from(
+        new Set(
+          record.healthGoals.filter((item): item is FamilyHealthGoalKey =>
+            FAMILY_HEALTH_GOAL_KEYS.includes(item as FamilyHealthGoalKey)
+          )
+        )
+      )
+    : [];
+
+  if (!allergens.length && !watchedAdditives.length && !healthGoals.length) {
+    return undefined;
+  }
+
+  return {
+    allergens,
+    watchedAdditives,
+    healthGoals,
+  };
 };
 
 export const matchesProductAllergen = (

@@ -4,6 +4,7 @@ import type {
   MonetizationPolicySource,
 } from './monetization';
 import type { NutritionPreferences } from '../services/nutritionPreferences.service';
+import type { FamilyHealthProfile } from '../services/familyHealthProfile.service';
 
 export type LegalDocumentVersionMap = {
   terms: string;
@@ -51,6 +52,17 @@ export type UserMonetizationProjection = {
   lastValidatedAt?: string | null;
 };
 
+export type UserLocationSnapshot = {
+  permissionPrompted?: boolean;
+  permissionGranted?: boolean;
+  latitude?: number;
+  longitude?: number;
+  city?: string;
+  district?: string;
+  capturedAt?: string;
+  source?: 'device' | 'manual';
+};
+
 export type AppUserProfile = {
   firstName?: string;
   lastName?: string;
@@ -71,6 +83,8 @@ export type AppUserProfile = {
   lastSeenAt?: string;
   monetization?: UserMonetizationProjection;
   nutritionPreferences?: NutritionPreferences;
+  familyHealthProfile?: FamilyHealthProfile;
+  locationContext?: UserLocationSnapshot;
 };
 
 export type UserProfileInput = Partial<AppUserProfile>;

@@ -101,6 +101,52 @@ service cloud.firestore {
         );
     }
 
+    function isOptionalFamilyHealthProfileMap(value) {
+      return value == null
+        || (
+          value is map
+          && value.keys().hasOnly([
+            'allergens',
+            'watchedAdditives',
+            'healthGoals'
+          ])
+          && isOptionalStringList(value.allergens)
+          && isOptionalStringList(value.watchedAdditives)
+          && isOptionalStringList(value.healthGoals)
+        );
+    }
+
+    function isOptionalLocationContextMap(value) {
+      return value == null
+        || (
+          value is map
+          && value.keys().hasOnly([
+            'permissionPrompted',
+            'permissionGranted',
+            'latitude',
+            'longitude',
+            'city',
+            'district',
+            'capturedAt',
+            'source'
+          ])
+          && isOptionalBoolean(value.permissionPrompted)
+          && isOptionalBoolean(value.permissionGranted)
+          && isOptionalNumber(value.latitude)
+          && isOptionalNumber(value.longitude)
+          && isOptionalString(value.city)
+          && isOptionalString(value.district)
+          && isOptionalStringOrTimestamp(value.capturedAt)
+          && (
+            value.source == null
+            || (
+              value.source is string
+              && (value.source == 'device' || value.source == 'manual')
+            )
+          )
+        );
+    }
+
     function isOptionalLegalAcceptanceMap(value) {
       return value == null
         || (
@@ -349,6 +395,8 @@ service cloud.firestore {
         && isOptionalBoolean(request.resource.data.kvkkAccepted)
         && isOptionalLegalAcceptanceMap(request.resource.data.legalAcceptance)
         && isOptionalNutritionPreferencesMap(request.resource.data.nutritionPreferences)
+        && isOptionalFamilyHealthProfileMap(request.resource.data.familyHealthProfile)
+        && isOptionalLocationContextMap(request.resource.data.locationContext)
         && isOptionalMap(request.resource.data.monetization)
         && isOptionalStringOrTimestamp(request.resource.data.createdAt)
         && isOptionalStringOrTimestamp(request.resource.data.updatedAt)

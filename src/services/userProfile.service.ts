@@ -12,6 +12,10 @@ import {
   resolveCanonicalDistrict,
 } from './locationData';
 import {
+  normalizeFamilyHealthProfile,
+  type FamilyHealthProfile,
+} from './familyHealthProfile.service';
+import {
   DEFAULT_NUTRITION_PREFERENCES,
   type NutritionPreferences,
 } from './nutritionPreferences.service';
@@ -20,6 +24,7 @@ import { freeScanPolicyService } from './freeScanPolicy.service';
 import { monetizationPolicyService } from './monetizationPolicy.service';
 import type {
   AppUserProfile,
+  UserLocationSnapshot,
   LegalAcceptanceSnapshot,
   LegalDocumentVersionMap,
   UserMonetizationProjection,
@@ -75,6 +80,62 @@ function normalizeNutritionPreferences(input: unknown): NutritionPreferences | u
   });
 
   return hasAnyValue ? normalized : undefined;
+}
+
+function normalizeLocationContext(input: unknown): UserLocationSnapshot | undefined {
+  if (!input || typeof input !== 'object') {
+    return undefined;
+  }
+
+  const record = input as Record<string, unknown>;
+  const rawCity = normalizeOptionalString(record.city as string | undefined);
+  const rawDistrict = normalizeOptionalString(record.district as string | undefined);
+  const city = resolveCanonicalCity(rawCity) ?? rawCity;
+  const district = resolveCanonicalDistrict(city, rawDistrict) ?? rawDistrict;
+  const latitude =
+    typeof record.latitude === 'number' && Number.isFinite(record.latitude)
+      ? record.latitude
+      : undefined;
+  const longitude =
+    typeof record.longitude === 'number' && Number.isFinite(record.longitude)
+      ? record.longitude
+      : undefined;
+  const permissionPrompted =
+    typeof record.permissionPrompted === 'boolean'
+      ? record.permissionPrompted
+      : undefined;
+  const permissionGranted =
+    typeof record.permissionGranted === 'boolean'
+      ? record.permissionGranted
+      : undefined;
+  const capturedAt = normalizeOptionalString(record.capturedAt as string | undefined);
+  const rawSource = normalizeOptionalString(record.source as string | undefined);
+  const source =
+    rawSource === 'device' || rawSource === 'manual' ? rawSource : undefined;
+
+  if (
+    permissionPrompted === undefined &&
+    permissionGranted === undefined &&
+    latitude === undefined &&
+    longitude === undefined &&
+    !city &&
+    !district &&
+    !capturedAt &&
+    !source
+  ) {
+    return undefined;
+  }
+
+  return {
+    permissionPrompted,
+    permissionGranted,
+    latitude,
+    longitude,
+    city,
+    district,
+    capturedAt,
+    source,
+  };
 }
 
 function normalizeLegalDocumentVersions(input: unknown): LegalDocumentVersionMap | undefined {
@@ -220,6 +281,8 @@ function sanitizeUserProfileInput(input?: UserProfileInput): UserProfileInput {
     kvkkAccepted: normalizeOptionalBoolean(input.kvkkAccepted),
     legalAcceptance: normalizeLegalAcceptanceSnapshot(input.legalAcceptance),
     nutritionPreferences: normalizeNutritionPreferences(input.nutritionPreferences),
+    familyHealthProfile: normalizeFamilyHealthProfile(input.familyHealthProfile),
+    locationContext: normalizeLocationContext(input.locationContext),
     createdAt: normalizeOptionalString(input.createdAt),
     updatedAt: normalizeOptionalString(input.updatedAt),
     lastLoginAt: normalizeOptionalString(input.lastLoginAt),
@@ -247,6 +310,8 @@ function sanitizeEditableUserProfileInput(input?: UserProfileInput): UserProfile
     kvkkAccepted: normalizeOptionalBoolean(input.kvkkAccepted),
     legalAcceptance: normalizeLegalAcceptanceSnapshot(input.legalAcceptance),
     nutritionPreferences: normalizeNutritionPreferences(input.nutritionPreferences),
+    familyHealthProfile: normalizeFamilyHealthProfile(input.familyHealthProfile),
+    locationContext: normalizeLocationContext(input.locationContext),
     createdAt: normalizeEditableString(input.createdAt),
     updatedAt: normalizeEditableString(input.updatedAt),
     lastLoginAt: normalizeEditableString(input.lastLoginAt),
@@ -442,6 +507,8 @@ function compactUserProfile(input: UserProfileInput): AppUserProfile {
   assign('kvkkAccepted', input.kvkkAccepted);
   assign('legalAcceptance', input.legalAcceptance);
   assign('nutritionPreferences', input.nutritionPreferences);
+  assign('familyHealthProfile', input.familyHealthProfile);
+  assign('locationContext', input.locationContext);
   assign('createdAt', input.createdAt);
   assign('updatedAt', input.updatedAt);
   assign('lastLoginAt', input.lastLoginAt);
@@ -485,6 +552,8 @@ function normalizeStoredUserProfile(input: unknown): AppUserProfile | null {
       typeof record.kvkkAccepted === 'boolean' ? record.kvkkAccepted : undefined,
     legalAcceptance: normalizeLegalAcceptanceSnapshot(record.legalAcceptance),
     nutritionPreferences: normalizeNutritionPreferences(record.nutritionPreferences),
+    familyHealthProfile: normalizeFamilyHealthProfile(record.familyHealthProfile),
+    locationContext: normalizeLocationContext(record.locationContext),
     createdAt: normalizeOptionalString(record.createdAt as string | undefined),
     updatedAt: normalizeOptionalString(record.updatedAt as string | undefined),
     lastLoginAt: normalizeOptionalString(record.lastLoginAt as string | undefined),
@@ -635,6 +704,10 @@ export async function ensureUserProfileDocument(
       ),
     nutritionPreferences:
       overrideProfile.nutritionPreferences ?? existingProfile?.nutritionPreferences,
+    familyHealthProfile:
+      overrideProfile.familyHealthProfile ?? existingProfile?.familyHealthProfile,
+    locationContext:
+      overrideProfile.locationContext ?? existingProfile?.locationContext,
     createdAt: existingProfile?.createdAt ?? now,
     updatedAt: now,
     lastSeenAt: now,
@@ -737,6 +810,8 @@ export async function updateCurrentUserProfile(input: {
     legalAcceptance:
       existingProfile?.legalAcceptance ?? buildCurrentLegalAcceptance('profile_sync', now),
     nutritionPreferences: existingProfile?.nutritionPreferences,
+    familyHealthProfile: existingProfile?.familyHealthProfile,
+    locationContext: existingProfile?.locationContext,
     createdAt: existingProfile?.createdAt ?? now,
     updatedAt: now,
     lastLoginAt: existingProfile?.lastLoginAt,
@@ -779,6 +854,90 @@ export async function updateCurrentUserNutritionPreferences(
   return compactUserProfile({
     ...(existingProfile ?? {}),
     nutritionPreferences: normalizedPreferences,
+    updatedAt: now,
+    lastSeenAt: now,
+  });
+}
+
+export async function updateCurrentUserFamilyHealthProfile(
+  familyHealthProfile: FamilyHealthProfile
+): Promise<AppUserProfile | null> {
+  const currentUser = auth.currentUser;
+
+  if (!currentUser) {
+    return null;
+  }
+
+  const normalizedProfile = normalizeFamilyHealthProfile(familyHealthProfile);
+  const existingProfile = await getUserProfile(currentUser.uid);
+  const now = new Date().toISOString();
+
+  const ref = doc(db, USERS_COLLECTION, currentUser.uid);
+
+  await setDoc(
+    ref,
+    compactUserProfile({
+      familyHealthProfile: normalizedProfile,
+      updatedAt: now,
+      lastSeenAt: now,
+    }),
+    { merge: true }
+  );
+
+  return compactUserProfile({
+    ...(existingProfile ?? {}),
+    familyHealthProfile: normalizedProfile,
+    updatedAt: now,
+    lastSeenAt: now,
+  });
+}
+
+export async function updateCurrentUserLocationContext(
+  locationContext: UserLocationSnapshot
+): Promise<AppUserProfile | null> {
+  const currentUser = auth.currentUser;
+
+  if (!currentUser) {
+    return null;
+  }
+
+  const existingProfile = await getUserProfile(currentUser.uid);
+  const normalizedLocation = normalizeLocationContext(locationContext);
+  const now = new Date().toISOString();
+
+  const nextLocation = normalizedLocation
+    ? normalizeLocationContext({
+        ...(existingProfile?.locationContext ?? {}),
+        ...normalizedLocation,
+        city: normalizedLocation.city ?? existingProfile?.city ?? existingProfile?.locationContext?.city,
+        district:
+          normalizedLocation.district ??
+          existingProfile?.district ??
+          existingProfile?.locationContext?.district,
+        capturedAt: normalizedLocation.capturedAt ?? now,
+        source: normalizedLocation.source ?? 'device',
+      })
+    : existingProfile?.locationContext;
+
+  const ref = doc(db, USERS_COLLECTION, currentUser.uid);
+
+  await setDoc(
+    ref,
+    compactUserProfile({
+      city: nextLocation?.city ?? existingProfile?.city,
+      district: nextLocation?.district ?? existingProfile?.district,
+      locationContext: nextLocation,
+      updatedAt: now,
+      lastSeenAt: now,
+    }),
+    { merge: true }
+  );
+
+  return compactUserProfile({
+    ...(existingProfile ?? {}),
+    city: nextLocation?.city ?? existingProfile?.city,
+    district: nextLocation?.district ?? existingProfile?.district,
+    locationContext: nextLocation,
     updatedAt: now,
     lastSeenAt: now,
   });
