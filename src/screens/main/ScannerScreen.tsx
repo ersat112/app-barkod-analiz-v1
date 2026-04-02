@@ -39,6 +39,10 @@ import {
   lookupProductByBarcode,
   type ProductLookupMode,
 } from '../../services/productLookup.service';
+import {
+  isMlKitTextRecognitionAvailable,
+  recognizeTextFromImage,
+} from '../../services/mlKitTextRecognition.service';
 import { saveProductToHistory } from '../../services/db';
 import { prewarmMedicineCatalog } from '../../services/titckMedicine.service';
 import {
@@ -189,8 +193,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const [manualError, setManualError] = useState('');
   const [selectedMode, setSelectedMode] = useState<ScannerUiMode>(initialMode);
   const [showModeHint, setShowModeHint] = useState(true);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [ocrProcessing, setOcrProcessing] = useState(false);
 
   const { setAnalysis, markNotFound, previewCacheByBarcode } = useScanStore();
+  const cameraRef = useRef<CameraView | null>(null);
   const lineAnim = useRef(new Animated.Value(0)).current;
   const previewSheetAnim = useRef(new Animated.Value(220)).current;
   const scanResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -218,6 +225,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       null
     : null;
   const profileCityCode = resolveTurkeyCityCode(profileCity);
+  const ocrAvailable = isMlKitTextRecognitionAvailable();
 
   useEffect(() => {
     let disposed = false;
@@ -430,6 +438,74 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const dismissPreviewByBarcode = useCallback((barcode: string) => {
     setPreviewItems((current) => current.filter((item) => item.barcode !== barcode));
   }, []);
+
+  const applyTextAnalysis = useCallback(
+    async (rawValue: string, source: 'manual' | 'ocr') => {
+      const trimmedValue = rawValue.trim();
+
+      if (trimmedValue.length < 12) {
+        throw new Error('TEXT_TOO_SHORT');
+      }
+
+      resetTransientState();
+
+      const inferredType = inferTextProductType(trimmedValue);
+      const previewId = pushLoadingPreview(`TEXT-${Date.now()}`, 'auto');
+      const inferredName =
+        inferredType === 'medicine'
+          ? tt('text_mode_medicine_name', 'Metin Analizi • İlaç')
+          : inferredType === 'beauty'
+            ? tt('text_mode_beauty_name', 'Metin Analizi • Kozmetik')
+            : tt('text_mode_food_name', 'Metin Analizi • Gıda');
+
+      const textBackedProduct: Product = {
+        barcode: `TEXT-${Date.now()}`,
+        name: inferredName,
+        brand:
+          source === 'ocr'
+            ? tt('text_mode_brand_ocr', 'Kameradan okunan metin')
+            : tt('text_mode_brand', 'Elle girilen metin'),
+        image_url: FALLBACK_IMAGE,
+        type: inferredType,
+        ingredients_text: trimmedValue,
+        intended_use_summary:
+          inferredType === 'medicine' ? buildMedicineSummaryFromText(trimmedValue) : undefined,
+        sourceName:
+          inferredType === 'medicine'
+            ? 'titck'
+            : inferredType === 'beauty'
+              ? 'openbeautyfacts'
+              : 'openfoodfacts',
+      };
+
+      const analysis = analyzeProduct(textBackedProduct);
+      setAnalysis(textBackedProduct, analysis);
+
+      updatePreviewItem(previewId, (current) => ({
+        ...current,
+        status: 'found',
+        product: textBackedProduct,
+        analysis,
+        isTextAnalysis: true,
+        message:
+          inferredType === 'medicine'
+            ? tt(
+                'text_mode_medicine_message',
+                'Metinden resmi kullanim sinyali yorumlandi. Prospektus yerine gecmez.'
+              )
+            : source === 'ocr'
+              ? tt(
+                  'text_mode_ocr_preview_message',
+                  'Kameradan okunan metinle hizli icerik analizi hazirlandi. Sonucu ambalajla tekrar kontrol edin.'
+                )
+              : tt(
+                  'text_mode_preview_message',
+                  'Metin uzerinden hizli icerik analizi hazirlandi. Bu ilk surum barkod kadar kesin degildir.'
+                ),
+      }));
+    },
+    [pushLoadingPreview, resetTransientState, setAnalysis, tt, updatePreviewItem]
+  );
 
   const handleOpenPreviewDetail = useCallback(
     (item: ScanPreviewItem) => {
@@ -717,55 +793,72 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       return;
     }
 
-    resetTransientState();
+    await applyTextAnalysis(trimmedValue, 'manual');
+  }, [applyTextAnalysis, manualText, tt]);
 
-    const inferredType = inferTextProductType(trimmedValue);
-    const previewId = pushLoadingPreview(`TEXT-${Date.now()}`, 'auto');
-    const inferredName =
-      inferredType === 'medicine'
-        ? tt('text_mode_medicine_name', 'Metin Analizi • İlaç')
-        : inferredType === 'beauty'
-          ? tt('text_mode_beauty_name', 'Metin Analizi • Kozmetik')
-          : tt('text_mode_food_name', 'Metin Analizi • Gıda');
+  const captureAndAnalyzeText = useCallback(async () => {
+    if (!ocrAvailable) {
+      Alert.alert(
+        tt('text_mode_ocr_unavailable_title', 'OCR hazır değil'),
+        tt(
+          'text_mode_ocr_unavailable_message',
+          'Bu build içinde kamera tabanli metin okuma henüz aktif degil. Istersen metni elle girebilirsin.'
+        )
+      );
+      openManualEntry();
+      return;
+    }
 
-    const textBackedProduct: Product = {
-      barcode: `TEXT-${Date.now()}`,
-      name: inferredName,
-      brand: tt('text_mode_brand', 'Elle girilen metin'),
-      image_url: FALLBACK_IMAGE,
-      type: inferredType,
-      ingredients_text: inferredType === 'medicine' ? trimmedValue : trimmedValue,
-      intended_use_summary:
-        inferredType === 'medicine' ? buildMedicineSummaryFromText(trimmedValue) : undefined,
-      sourceName:
-        inferredType === 'medicine'
-          ? 'titck'
-          : inferredType === 'beauty'
-            ? 'openbeautyfacts'
-            : 'openfoodfacts',
-    };
+    if (!cameraReady || !cameraRef.current) {
+      Alert.alert(
+        tt('camera_not_ready_title', 'Kamera hazır değil'),
+        tt(
+          'camera_not_ready_message',
+          'Kamera tam olarak hazır olduğunda tekrar deneyin.'
+        )
+      );
+      return;
+    }
 
-    const analysis = analyzeProduct(textBackedProduct);
-    setAnalysis(textBackedProduct, analysis);
+    try {
+      setOcrProcessing(true);
+      const picture = await cameraRef.current.takePictureAsync({
+        quality: 0.35,
+        base64: false,
+        shutterSound: false,
+      });
 
-    updatePreviewItem(previewId, (current) => ({
-      ...current,
-      status: 'found',
-      product: textBackedProduct,
-      analysis,
-      isTextAnalysis: true,
-      message:
-        inferredType === 'medicine'
-          ? tt(
-              'text_mode_medicine_message',
-              'Metinden resmi kullanim sinyali yorumlandi. Prospektus yerine gecmez.'
-            )
-          : tt(
-              'text_mode_preview_message',
-              'Metin uzerinden hizli icerik analizi hazirlandi. Bu ilk surum barkod kadar kesin degildir.'
-            ),
-    }));
-  }, [manualText, pushLoadingPreview, resetTransientState, setAnalysis, tt, updatePreviewItem]);
+      if (!picture?.uri) {
+        throw new Error('OCR_CAPTURE_EMPTY');
+      }
+
+      const ocrResult = await recognizeTextFromImage(picture.uri);
+
+      if (!ocrResult.hasText || ocrResult.text.trim().length < 12) {
+        Alert.alert(
+          tt('text_mode_no_text_title', 'Metin okunamadı'),
+          tt(
+            'text_mode_no_text_message',
+            'Lütfen içindekiler alanını daha net hizalayın veya metni elle girin.'
+          )
+        );
+        return;
+      }
+
+      await applyTextAnalysis(ocrResult.text, 'ocr');
+    } catch (error) {
+      console.error('[ScannerScreen] OCR capture failed:', error);
+      Alert.alert(
+        tt('text_mode_ocr_failed_title', 'Metin okunamadı'),
+        tt(
+          'text_mode_ocr_failed_message',
+          'Kameradan metin okunurken bir hata oluştu. Dilersen metni elle girebilirsin.'
+        )
+      );
+    } finally {
+      setOcrProcessing(false);
+    }
+  }, [applyTextAnalysis, cameraReady, ocrAvailable, openManualEntry, tt]);
 
   const handleBarCodeScanned = useCallback(
     ({ data, type }: { data: string; type?: string }) => {
@@ -992,8 +1085,10 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     <View style={styles.container}>
       {isFocused && (
         <CameraView
+          ref={cameraRef}
           style={StyleSheet.absoluteFillObject}
           onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+          onCameraReady={() => setCameraReady(true)}
           enableTorch={torch}
           barcodeScannerSettings={{
             barcodeTypes: ['ean13', 'ean8', 'upc_a', 'upc_e'],
@@ -1188,7 +1283,63 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
           <View style={styles.sideDarkArea} />
         </View>
 
-        <View style={styles.bottomDarkArea} />
+        <View style={styles.bottomDarkArea}>
+          {!isManualMode && isTextMode ? (
+            <View style={styles.textCapturePanel}>
+              <Text style={styles.textCaptureHint}>
+                {tt(
+                  'text_mode_capture_hint',
+                  'İçindekiler veya kullanım metnini kareye hizalayın, sonra kameradan okutun.'
+                )}
+              </Text>
+              <View style={styles.textCaptureActions}>
+                <TouchableOpacity
+                  style={[
+                    styles.textCaptureButton,
+                    {
+                      backgroundColor: ocrAvailable ? colors.primary : 'rgba(255,255,255,0.14)',
+                    },
+                  ]}
+                  activeOpacity={0.88}
+                  onPress={() => {
+                    void captureAndAnalyzeText();
+                  }}
+                  disabled={ocrProcessing}
+                >
+                  {ocrProcessing ? (
+                    <ActivityIndicator size="small" color={colors.primaryContrast} />
+                  ) : (
+                    <Ionicons
+                      name="scan-outline"
+                      size={18}
+                      color={ocrAvailable ? colors.primaryContrast : '#FFFFFF'}
+                    />
+                  )}
+                  <Text
+                    style={[
+                      styles.textCaptureButtonText,
+                      { color: ocrAvailable ? colors.primaryContrast : '#FFFFFF' },
+                    ]}
+                  >
+                    {ocrProcessing
+                      ? tt('text_mode_processing', 'Okunuyor...')
+                      : tt('text_mode_capture_action', 'Metni Tara')}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.textManualFallback}
+                  activeOpacity={0.84}
+                  onPress={openManualEntry}
+                >
+                  <Text style={styles.textManualFallbackText}>
+                    {tt('text_mode_manual_short', 'Metni Gir')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : null}
+        </View>
       </View>
 
       {!isManualMode && hasPreviewSurface ? (
@@ -1761,6 +1912,57 @@ const styles = StyleSheet.create({
   bottomDarkArea: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.72)',
+    paddingHorizontal: 20,
+    paddingTop: 18,
+  },
+  textCapturePanel: {
+    borderRadius: 24,
+    padding: 16,
+    backgroundColor: 'rgba(11,14,20,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    gap: 14,
+  },
+  textCaptureHint: {
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
+  },
+  textCaptureActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  textCaptureButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  textCaptureButtonText: {
+    fontSize: 14,
+    fontWeight: '900',
+    letterSpacing: 0.2,
+  },
+  textManualFallback: {
+    minHeight: 48,
+    paddingHorizontal: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  textManualFallbackText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
   previewSheet: {
     position: 'absolute',
