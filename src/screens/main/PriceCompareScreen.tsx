@@ -152,62 +152,6 @@ const formatLocalizedPrice = (locale: string, amount: number, currency: string):
   }
 };
 
-const formatLocalizedDateTime = (locale: string, value?: string | null): string => {
-  if (!value) {
-    return '';
-  }
-
-  const date = new Date(value);
-
-  if (!Number.isFinite(date.getTime())) {
-    return '';
-  }
-
-  try {
-    return new Intl.DateTimeFormat(locale || 'tr-TR', {
-      day: '2-digit',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date);
-  } catch {
-    return value;
-  }
-};
-
-const buildMarketOfferMeta = (
-  tt: TranslateFn,
-  locale: string,
-  offer?: MarketOffer | null
-): string => {
-  if (!offer) {
-    return '';
-  }
-
-  const parts: string[] = [];
-
-  if (typeof offer.unitPrice === 'number' && offer.unitPriceUnit) {
-    parts.push(
-      tt('market_pricing_unit_price_template', '{{price}} / {{unit}}')
-        .replace('{{price}}', formatLocalizedPrice(locale, offer.unitPrice, offer.currency))
-        .replace('{{unit}}', offer.unitPriceUnit)
-    );
-  }
-
-  const updatedAt = formatLocalizedDateTime(locale, offer.capturedAt);
-
-  if (updatedAt) {
-    parts.push(
-      tt('market_pricing_updated_template', 'Güncellendi {{value}}').replace(
-        '{{value}}',
-        updatedAt
-      )
-    );
-  }
-
-  return parts.join(' • ');
-};
-
 const getOfferToneLabel = (tt: TranslateFn, offer: MarketOffer): string => {
   if (offer.priceSourceType === 'local_market_price') {
     return tt('price_compare_market_row_local', 'Yerel fiyat');
@@ -1547,34 +1491,51 @@ export const PriceCompareScreen: React.FC = () => {
                           {offer.marketName}
                         </Text>
                         <Text style={[styles.offerMeta, { color: colors.mutedText }]}>
-                          {getOfferToneLabel(tt, offer)}
-                          {offer.districtName ? ` • ${offer.districtName}` : ''}
-                          {offer.cityName ? ` • ${offer.cityName}` : ''}
+                          {[
+                            offer.branchName,
+                            offer.districtName,
+                            offer.cityName,
+                          ]
+                            .filter(Boolean)
+                            .join(' • ') || getOfferToneLabel(tt, offer)}
                         </Text>
-                        <Text style={[styles.offerHelper, { color: colors.mutedText }]}>
-                          {buildMarketOfferMeta(tt, preferredLocale, offer)}
-                        </Text>
-                        {formatDistanceMeters(tt, offer.distanceMeters) ? (
-                          <Text style={[styles.offerDistance, { color: colors.teal }]}>
-                            {formatDistanceMeters(tt, offer.distanceMeters)}
-                          </Text>
-                        ) : null}
                       </View>
 
                       <View style={styles.offerPriceWrap}>
                         <Text style={[styles.offerPrice, { color: colors.text }]}>
                           {formatLocalizedPrice(preferredLocale, offer.price, offer.currency)}
                         </Text>
-                        <Text
-                          style={[
-                            styles.offerStock,
-                            { color: offer.inStock ? colors.success : colors.warning },
-                          ]}
-                        >
-                          {offer.inStock
-                            ? tt('price_compare_stock_in', 'Stokta')
-                            : tt('price_compare_stock_out', 'Stokta değil')}
-                        </Text>
+                        {typeof offer.unitPrice === 'number' && offer.unitPriceUnit ? (
+                          <Text style={[styles.offerUnitPrice, { color: colors.mutedText }]}>
+                            {tt('market_pricing_unit_price_template', '{{price}} / {{unit}}')
+                              .replace(
+                                '{{price}}',
+                                formatLocalizedPrice(
+                                  preferredLocale,
+                                  offer.unitPrice,
+                                  offer.currency
+                                )
+                              )
+                              .replace('{{unit}}', offer.unitPriceUnit)}
+                          </Text>
+                        ) : null}
+                        <View style={styles.offerSignalsRow}>
+                          <Text
+                            style={[
+                              styles.offerStock,
+                              { color: offer.inStock ? colors.success : colors.warning },
+                            ]}
+                          >
+                            {offer.inStock
+                              ? tt('price_compare_stock_in', 'Stokta')
+                              : tt('price_compare_stock_out', 'Stokta değil')}
+                          </Text>
+                          {formatDistanceMeters(tt, offer.distanceMeters) ? (
+                            <Text style={[styles.offerDistance, { color: colors.teal }]}>
+                              {formatDistanceMeters(tt, offer.distanceMeters)}
+                            </Text>
+                          ) : null}
+                        </View>
                       </View>
                     </View>
                   ))}
@@ -1819,29 +1780,31 @@ export const PriceCompareScreen: React.FC = () => {
                           {tt('price_compare_cart_coverage', '{{covered}}/{{total}} ürün')
                             .replace('{{covered}}', String(market.availableItemCount))
                             .replace('{{total}}', String(totalRequestedCartQuantity))}
+                          {market.branchName ? ` • ${market.branchName}` : ''}
                         </Text>
-                        {market.branchName ? (
-                          <Text style={[styles.offerHelper, { color: colors.mutedText }]}>
-                            {market.branchName}
-                          </Text>
-                        ) : null}
-                        {formatDistanceMeters(tt, market.distanceMeters) ? (
-                          <Text style={[styles.offerDistance, { color: colors.teal }]}>
-                            {formatDistanceMeters(tt, market.distanceMeters)}
-                          </Text>
-                        ) : null}
                       </View>
 
                       <View style={styles.offerPriceWrap}>
                         <Text style={[styles.offerPrice, { color: colors.text }]}>
                           {formatLocalizedPrice(preferredLocale, market.basketTotal, 'TRY')}
                         </Text>
-                        {market.missingItemCount ? (
-                          <Text style={[styles.offerStock, { color: colors.warning }]}>
-                            {tt('price_compare_missing_count', '{{count}} eksik')
-                              .replace('{{count}}', String(market.missingItemCount))}
-                          </Text>
-                        ) : null}
+                        <View style={styles.offerSignalsRow}>
+                          {market.missingItemCount ? (
+                            <Text style={[styles.offerStock, { color: colors.warning }]}>
+                              {tt('price_compare_missing_count', '{{count}} eksik')
+                                .replace('{{count}}', String(market.missingItemCount))}
+                            </Text>
+                          ) : (
+                            <Text style={[styles.offerStock, { color: colors.success }]}>
+                              {tt('price_compare_market_complete', 'Tam')}
+                            </Text>
+                          )}
+                          {formatDistanceMeters(tt, market.distanceMeters) ? (
+                            <Text style={[styles.offerDistance, { color: colors.teal }]}>
+                              {formatDistanceMeters(tt, market.distanceMeters)}
+                            </Text>
+                          ) : null}
+                        </View>
                       </View>
                     </View>
                   ))}
@@ -2269,9 +2232,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
   },
-  offerHelper: {
+  offerUnitPrice: {
     fontSize: 11,
-    lineHeight: 16,
+    lineHeight: 15,
+  },
+  offerSignalsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   offerDistance: {
     fontSize: 11,
@@ -2280,7 +2250,7 @@ const styles = StyleSheet.create({
   },
   offerPriceWrap: {
     alignItems: 'flex-end',
-    gap: 4,
+    gap: 5,
   },
   offerPrice: {
     fontSize: 14,
