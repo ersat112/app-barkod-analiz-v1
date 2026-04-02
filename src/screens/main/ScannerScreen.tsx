@@ -850,6 +850,8 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     label: string;
     hintTitle: string;
     hintBody: string;
+    frameTitle: string;
+    frameSubtitle: string;
   }[] = [
     {
       key: 'food',
@@ -858,6 +860,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       hintBody: tt(
         'scanner_mode_food_body',
         'Paketli gıdanın barkodunu kare içine hizala. Skor, alerjen ve katkı sinyalleri gelir.'
+      ),
+      frameTitle: tt('scanner_frame_food_title', 'Barkodu kareye hizalayın'),
+      frameSubtitle: tt(
+        'scanner_frame_food_subtitle',
+        'Skor, alerjen ve katkı sinyalleri hızlıca okunur.'
       ),
     },
     {
@@ -868,6 +875,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         'scanner_mode_beauty_body',
         'Kozmetik barkodunu okut. İçerik sinyali ve uygun marketlerde fiyat kıyası gösterilir.'
       ),
+      frameTitle: tt('scanner_frame_beauty_title', 'Kozmetik barkodunu hizalayın'),
+      frameSubtitle: tt(
+        'scanner_frame_beauty_subtitle',
+        'İçerik riski ve market fiyatları birlikte hazırlanır.'
+      ),
     },
     {
       key: 'medicine',
@@ -877,6 +889,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         'scanner_mode_medicine_body',
         'İlaç kutusunun barkodunu okut. Resmi kayıt, prospektüs ve kullanım özeti gelir.'
       ),
+      frameTitle: tt('scanner_frame_medicine_title', 'İlaç barkodunu hizalayın'),
+      frameSubtitle: tt(
+        'scanner_frame_medicine_subtitle',
+        'Resmi kayıt, prospektüs ve kullanım özeti açılır.'
+      ),
     },
     {
       key: 'text',
@@ -885,6 +902,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       hintBody: tt(
         'scanner_mode_text_body',
         'Gıdada hem içindekiler hem besin değerleri tablosunu okut. Kozmetikte INCI, ilaçta ne için kullanılır bölümü okunabilir. Eksik metin sınırlı sonuç üretir.'
+      ),
+      frameTitle: tt('scanner_frame_text_title', 'Metni kareye hizalayın'),
+      frameSubtitle: tt(
+        'scanner_frame_text_subtitle',
+        'Gıdada içerik ve besin değerlerini birlikte okutun.'
       ),
     },
   ];
@@ -1030,39 +1052,47 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         <View style={[styles.topDarkArea, { paddingTop: topInsetPadding }]}>
           {!isManualMode ? (
             <>
-              <View style={styles.topControlsRow}>
+              <View style={styles.topHeaderCard}>
                 <TouchableOpacity
-                  style={styles.topIconButton}
+                  style={styles.topBackButton}
                   onPress={handleCloseScanner}
                   activeOpacity={0.85}
                 >
                   <Ionicons name="chevron-back" size={18} color="#FFFFFF" />
                 </TouchableOpacity>
 
+                <View style={styles.topHeaderTextWrap}>
+                  <Text style={styles.topHeaderEyebrow}>
+                    {selectedModeMeta.label}
+                  </Text>
+                  <Text style={styles.topHeaderTitle}>
+                    {selectedModeMeta.frameTitle}
+                  </Text>
+                </View>
+
                 <View style={styles.topActionsGroup}>
                   <TouchableOpacity
-                    style={styles.topManualButton}
-                    onPress={openManualEntry}
+                    style={styles.topIconButton}
+                    onPress={openInfoHint}
                     activeOpacity={0.88}
                   >
                     <Ionicons
-                      name={selectedMode === 'text' ? 'document-text-outline' : 'keypad-outline'}
-                      size={16}
+                      name="information-outline"
+                      size={17}
                       color="#FFFFFF"
                     />
-                    <Text style={styles.topManualButtonText}>
-                      {selectedMode === 'text'
-                        ? tt('text_mode_manual_short', 'Metni Gir')
-                        : tt('manual_entry_short', 'Elle Gir')}
-                    </Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
                     style={styles.topIconButton}
-                    onPress={openInfoHint}
+                    onPress={openManualEntry}
                     activeOpacity={0.85}
                   >
-                    <Ionicons name="information-outline" size={17} color="#FFFFFF" />
+                    <Ionicons
+                      name={selectedMode === 'text' ? 'document-text-outline' : 'keypad-outline'}
+                      size={17}
+                      color="#FFFFFF"
+                    />
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -1077,58 +1107,53 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                     />
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.topIconButton}
-                    onPress={() => setScanned(false)}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="refresh-outline" size={17} color="#FFFFFF" />
-                  </TouchableOpacity>
                 </View>
               </View>
 
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.modeSelectorRow}
-              >
-                {modeOptions.map((mode) => {
-                  const selected = mode.key === selectedMode;
+              <View style={styles.modeRailWrap}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.modeSelectorRow}
+                >
+                  {modeOptions.map((mode) => {
+                    const selected = mode.key === selectedMode;
 
-                  return (
-                    <TouchableOpacity
-                      key={mode.key}
-                      style={[
-                        styles.modeChip,
-                        {
-                          backgroundColor: selected
-                            ? `${colors.primary}26`
-                            : 'rgba(255,255,255,0.08)',
-                          borderColor: selected
-                            ? `${colors.primary}88`
-                            : 'rgba(255,255,255,0.16)',
-                        },
-                      ]}
-                      activeOpacity={0.88}
-                      onPress={() => handleSelectMode(mode.key)}
-                    >
-                      <Ionicons
-                        name={MODE_ICON_MAP[mode.key]}
-                        size={15}
-                        color={selected ? colors.primary : '#FFFFFF'}
-                      />
-                      <Text
+                    return (
+                      <TouchableOpacity
+                        key={mode.key}
                         style={[
-                          styles.modeChipText,
-                          { color: selected ? colors.primary : '#FFFFFF' },
+                          styles.modeChip,
+                          {
+                            backgroundColor: selected
+                              ? `${colors.primary}22`
+                              : 'rgba(255,255,255,0.04)',
+                            borderColor: selected
+                              ? `${colors.primary}88`
+                              : 'rgba(255,255,255,0.10)',
+                          },
                         ]}
+                        activeOpacity={0.88}
+                        onPress={() => handleSelectMode(mode.key)}
                       >
-                        {mode.label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
+                        <Ionicons
+                          name={MODE_ICON_MAP[mode.key]}
+                          size={15}
+                          color={selected ? colors.primary : '#FFFFFF'}
+                        />
+                        <Text
+                          style={[
+                            styles.modeChipText,
+                            { color: selected ? colors.primary : '#FFFFFF' },
+                          ]}
+                        >
+                          {mode.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
 
               {showModeHint ? (
                 <View style={styles.modeHintCard}>
@@ -1146,7 +1171,12 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                           color={colors.primary}
                         />
                       </View>
-                      <Text style={styles.modeHintTitle}>{selectedModeMeta.hintTitle}</Text>
+                      <View style={styles.modeHintTextWrap}>
+                        <Text style={styles.modeHintEyebrow}>
+                          {tt('scanner_how_to_title', 'Nasıl taranır')}
+                        </Text>
+                        <Text style={styles.modeHintTitle}>{selectedModeMeta.hintTitle}</Text>
+                      </View>
                     </View>
                     <TouchableOpacity
                       style={styles.modeHintClose}
@@ -1157,6 +1187,12 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                     </TouchableOpacity>
                   </View>
                   <Text style={styles.modeHintBody}>{selectedModeMeta.hintBody}</Text>
+                  <View style={styles.modeHintMiniRow}>
+                    <Ionicons name="scan-outline" size={15} color="#9FDBFF" />
+                    <Text style={styles.modeHintMiniText}>
+                      {selectedModeMeta.frameSubtitle}
+                    </Text>
+                  </View>
                   {selectedMode === 'text' ? (
                     <TouchableOpacity
                       style={[styles.modeHintAction, { backgroundColor: colors.primary }]}
@@ -1214,69 +1250,111 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         </View>
 
         <View style={styles.bottomDarkArea}>
-          {!isManualMode && isTextMode ? (
-            <View style={styles.textCapturePanel}>
-              <Text style={styles.textCaptureHint}>
-                {tt(
-                  'text_mode_capture_hint',
-                  'Gıda için önce içindekiler, sonra besin değerleri tablosunu kareye hizalayın. Yalnız içerik metni okunursa sonuç sınırlı ve hatalı olabilir.'
-                )}
-              </Text>
-              <View style={styles.textCaptureWarning}>
-                <Ionicons name="information-circle-outline" size={16} color="#FCD34D" />
-                <Text style={styles.textCaptureWarningText}>
-                  {tt(
-                    'text_mode_capture_warning',
-                    'Tam gıda yorumu için içerik ve besin değerleri birlikte okunmalıdır. Kozmetik ve ilaçta ilgili bölüm tek başına yeterli olabilir.'
-                  )}
-                </Text>
-              </View>
-              <View style={styles.textCaptureActions}>
-                <TouchableOpacity
-                  style={[
-                    styles.textCaptureButton,
-                    {
-                      backgroundColor: ocrAvailable ? colors.primary : 'rgba(255,255,255,0.14)',
-                    },
-                  ]}
-                  activeOpacity={0.88}
-                  onPress={() => {
-                    void captureAndAnalyzeText();
-                  }}
-                  disabled={ocrProcessing}
-                >
-                  {ocrProcessing ? (
-                    <ActivityIndicator size="small" color={colors.primaryContrast} />
-                  ) : (
+          {!isManualMode ? (
+            isTextMode ? (
+              <View style={styles.textCapturePanel}>
+                <View style={styles.frameGuideCard}>
+                  <View style={styles.frameGuideIconWrap}>
                     <Ionicons
-                      name="scan-outline"
-                      size={18}
-                      color={ocrAvailable ? colors.primaryContrast : '#FFFFFF'}
+                      name={MODE_ICON_MAP[selectedMode]}
+                      size={16}
+                      color={colors.primary}
                     />
-                  )}
-                  <Text
-                    style={[
-                      styles.textCaptureButtonText,
-                      { color: ocrAvailable ? colors.primaryContrast : '#FFFFFF' },
-                    ]}
-                  >
-                    {ocrProcessing
-                      ? tt('text_mode_processing', 'Okunuyor...')
-                      : tt('text_mode_capture_action', 'Metni Tara')}
+                  </View>
+                  <View style={styles.frameGuideTextWrap}>
+                    <Text style={styles.frameGuideTitle}>{selectedModeMeta.frameTitle}</Text>
+                    <Text style={styles.frameGuideSubtitle}>
+                      {tt(
+                        'text_mode_capture_hint',
+                        'Gıda için önce içindekiler, sonra besin değerleri tablosunu kareye hizalayın. Yalnız içerik metni okunursa sonuç sınırlı ve hatalı olabilir.'
+                      )}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.textCaptureWarning}>
+                  <Ionicons name="information-circle-outline" size={16} color="#FCD34D" />
+                  <Text style={styles.textCaptureWarningText}>
+                    {tt(
+                      'text_mode_capture_warning',
+                      'Tam gıda yorumu için içerik ve besin değerleri birlikte okunmalıdır. Kozmetik ve ilaçta ilgili bölüm tek başına yeterli olabilir.'
+                    )}
                   </Text>
-                </TouchableOpacity>
+                </View>
+                <View style={styles.textCaptureActions}>
+                  <TouchableOpacity
+                    style={[
+                      styles.textCaptureButton,
+                      {
+                        backgroundColor: ocrAvailable ? colors.primary : 'rgba(255,255,255,0.14)',
+                      },
+                    ]}
+                    activeOpacity={0.88}
+                    onPress={() => {
+                      void captureAndAnalyzeText();
+                    }}
+                    disabled={ocrProcessing}
+                  >
+                    {ocrProcessing ? (
+                      <ActivityIndicator size="small" color={colors.primaryContrast} />
+                    ) : (
+                      <Ionicons
+                        name="scan-outline"
+                        size={18}
+                        color={ocrAvailable ? colors.primaryContrast : '#FFFFFF'}
+                      />
+                    )}
+                    <Text
+                      style={[
+                        styles.textCaptureButtonText,
+                        { color: ocrAvailable ? colors.primaryContrast : '#FFFFFF' },
+                      ]}
+                    >
+                      {ocrProcessing
+                        ? tt('text_mode_processing', 'Okunuyor...')
+                        : tt('text_mode_capture_action', 'Metni Tara')}
+                    </Text>
+                  </TouchableOpacity>
 
+                  <TouchableOpacity
+                    style={styles.textManualFallback}
+                    activeOpacity={0.84}
+                    onPress={openManualEntry}
+                  >
+                    <Text style={styles.textManualFallbackText}>
+                      {tt('text_mode_manual_short', 'Metni Gir')}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.frameGuideCard}>
+                <View style={styles.frameGuideIconWrap}>
+                  <Ionicons
+                    name={MODE_ICON_MAP[selectedMode]}
+                    size={16}
+                    color={colors.primary}
+                  />
+                </View>
+                <View style={styles.frameGuideTextWrap}>
+                  <Text style={styles.frameGuideTitle}>{selectedModeMeta.frameTitle}</Text>
+                  <Text style={styles.frameGuideSubtitle}>{selectedModeMeta.frameSubtitle}</Text>
+                </View>
                 <TouchableOpacity
-                  style={styles.textManualFallback}
+                  style={styles.frameGuideAction}
                   activeOpacity={0.84}
                   onPress={openManualEntry}
                 >
-                  <Text style={styles.textManualFallbackText}>
-                    {tt('text_mode_manual_short', 'Metni Gir')}
+                  <Ionicons
+                    name="keypad-outline"
+                    size={15}
+                    color="#FFFFFF"
+                  />
+                  <Text style={styles.frameGuideActionText}>
+                    {tt('manual_entry_short', 'Elle Gir')}
                   </Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            )
           ) : null}
         </View>
       </View>
@@ -1677,71 +1755,101 @@ const styles = StyleSheet.create({
   topDarkArea: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.72)',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
   },
-  topControlsRow: {
+  topHeaderCard: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 22,
+    backgroundColor: 'rgba(11,14,20,0.42)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+  },
+  topBackButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topHeaderTextWrap: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 2,
+  },
+  topHeaderEyebrow: {
+    color: 'rgba(255,255,255,0.68)',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  topHeaderTitle: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '900',
+    marginTop: 2,
+  },
+  modeRailWrap: {
+    marginTop: 12,
+    borderRadius: 18,
+    backgroundColor: 'rgba(11,14,20,0.42)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   modeSelectorRow: {
-    gap: 10,
-    paddingTop: 16,
-    paddingBottom: 14,
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
   },
   modeChip: {
-    minHeight: 38,
-    paddingHorizontal: 14,
+    minHeight: 36,
+    paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   modeChipText: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  topManualButton: {
-    minHeight: 38,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.11)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  topManualButtonText: {
-    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: '800',
   },
   topActionsGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
   },
   modeHintCard: {
-    borderRadius: 22,
+    marginTop: 12,
+    borderRadius: 18,
     padding: 14,
-    backgroundColor: 'rgba(11,14,20,0.84)',
+    backgroundColor: 'rgba(11,14,20,0.72)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   modeHintHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 10,
+    gap: 8,
   },
   modeHintTitleWrap: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+  },
+  modeHintTextWrap: {
+    flex: 1,
   },
   modeHintIcon: {
     width: 30,
@@ -1750,11 +1858,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  modeHintEyebrow: {
+    color: 'rgba(255,255,255,0.58)',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 2,
+  },
   modeHintTitle: {
     color: '#FFFFFF',
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '900',
-    flex: 1,
   },
   modeHintClose: {
     width: 28,
@@ -1769,6 +1884,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     marginTop: 10,
+  },
+  modeHintMiniRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  modeHintMiniText: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '700',
   },
   modeHintAction: {
     marginTop: 12,
@@ -1785,12 +1913,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   topIconButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.11)',
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.09)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1851,22 +1979,66 @@ const styles = StyleSheet.create({
   bottomDarkArea: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.72)',
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
     paddingTop: 18,
   },
-  textCapturePanel: {
-    borderRadius: 24,
-    padding: 16,
-    backgroundColor: 'rgba(11,14,20,0.9)',
+  frameGuideCard: {
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    backgroundColor: 'rgba(11,14,20,0.76)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  frameGuideIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  frameGuideTextWrap: {
+    flex: 1,
+  },
+  frameGuideTitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '900',
+  },
+  frameGuideSubtitle: {
+    color: 'rgba(255,255,255,0.70)',
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 3,
+  },
+  frameGuideAction: {
+    minHeight: 34,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
-    gap: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
-  textCaptureHint: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: '700',
+  frameGuideActionText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  textCapturePanel: {
+    borderRadius: 20,
+    padding: 14,
+    backgroundColor: 'rgba(11,14,20,0.82)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    gap: 12,
   },
   textCaptureWarning: {
     flexDirection: 'row',
