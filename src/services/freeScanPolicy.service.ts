@@ -9,11 +9,14 @@ import type {
   FreeScanAccessSnapshot,
   FreeScanPolicyState,
   FreeScanRegistrationResult,
+  RewardedScanUnlockResult,
 } from '../types/monetization';
 import { entitlementService } from './entitlement.service';
 import { monetizationPolicyService } from './monetizationPolicy.service';
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
+const REWARDED_EXTRA_SCANS_PER_UNLOCK = 3;
+const REWARDED_DAILY_UNLOCK_CAP = 2;
 
 function log(...args: unknown[]) {
   if (FEATURES.monetization.diagnosticsLoggingEnabled) {
@@ -44,6 +47,8 @@ function defaultState(now = new Date()): FreeScanPolicyState {
     schemaVersion: SCHEMA_VERSION,
     dateKey: getLocalDateKey(now),
     successfulScanCount: 0,
+    rewardedUnlockCount: 0,
+    rewardedExtraScanCount: 0,
   };
 }
 
@@ -66,6 +71,18 @@ function normalizeState(raw: unknown): FreeScanPolicyState {
       Number.isFinite(value.successfulScanCount) &&
       value.successfulScanCount > 0
         ? Math.round(value.successfulScanCount)
+        : 0,
+    rewardedUnlockCount:
+      typeof value.rewardedUnlockCount === 'number' &&
+      Number.isFinite(value.rewardedUnlockCount) &&
+      value.rewardedUnlockCount > 0
+        ? Math.round(value.rewardedUnlockCount)
+        : 0,
+    rewardedExtraScanCount:
+      typeof value.rewardedExtraScanCount === 'number' &&
+      Number.isFinite(value.rewardedExtraScanCount) &&
+      value.rewardedExtraScanCount > 0
+        ? Math.round(value.rewardedExtraScanCount)
         : 0,
   };
 }
@@ -121,8 +138,11 @@ function buildSnapshot(params: {
 
   const dailyLimit = limitEnabled ? params.freeDailyScanLimit : null;
   const usedCount = params.state.successfulScanCount;
+  const rewardedExtraScanCount = limitEnabled ? params.state.rewardedExtraScanCount : 0;
+  const totalLimit =
+    dailyLimit == null ? null : Math.max(dailyLimit + rewardedExtraScanCount, 0);
   const remainingCount =
-    dailyLimit == null ? null : Math.max(dailyLimit - usedCount, 0);
+    totalLimit == null ? null : Math.max(totalLimit - usedCount, 0);
 
   return {
     fetchedAt: new Date().toISOString(),
@@ -131,9 +151,13 @@ function buildSnapshot(params: {
     dailyLimit,
     usedCount,
     remainingCount,
-    hasReachedLimit: Boolean(dailyLimit != null && usedCount >= dailyLimit),
+    hasReachedLimit: Boolean(totalLimit != null && usedCount >= totalLimit),
     entitlementPlan: params.plan,
     paywallEnabled: params.paywallEnabled,
+    rewardedUnlockCount: params.state.rewardedUnlockCount,
+    rewardedExtraScanCount,
+    rewardedExtraScansPerUnlock: REWARDED_EXTRA_SCANS_PER_UNLOCK,
+    rewardedDailyUnlockCap: REWARDED_DAILY_UNLOCK_CAP,
   };
 }
 
@@ -226,5 +250,70 @@ export const freeScanPolicyService = {
     } catch (error) {
       warn('clearLocalState failed:', error);
     }
+  },
+
+  async grantRewardedExtraScans(): Promise<RewardedScanUnlockResult> {
+    const [policy, entitlement, rawState] = await Promise.all([
+      monetizationPolicyService.getResolvedPolicy({ allowStale: true }),
+      entitlementService.getSnapshot(),
+      readState(),
+    ]);
+
+    let state = normalizeDailyState(rawState);
+
+    const currentSnapshot = buildSnapshot({
+      state,
+      isPremium: entitlement.isPremium,
+      plan: entitlement.plan,
+      paywallEnabled: policy.paywallEnabled,
+      freeScanLimitEnabled: policy.freeScanLimitEnabled,
+      freeDailyScanLimit: policy.freeDailyScanLimit,
+    });
+
+    if (!currentSnapshot.limitEnabled) {
+      return {
+        granted: false,
+        reason: entitlement.isPremium ? 'premium' : 'limit_disabled',
+        snapshot: currentSnapshot,
+      };
+    }
+
+    if (!currentSnapshot.hasReachedLimit) {
+      return {
+        granted: false,
+        reason: 'not_needed',
+        snapshot: currentSnapshot,
+      };
+    }
+
+    if (state.rewardedUnlockCount >= REWARDED_DAILY_UNLOCK_CAP) {
+      return {
+        granted: false,
+        reason: 'daily_cap_reached',
+        snapshot: currentSnapshot,
+      };
+    }
+
+    state = {
+      ...state,
+      rewardedUnlockCount: state.rewardedUnlockCount + 1,
+      rewardedExtraScanCount:
+        state.rewardedExtraScanCount + REWARDED_EXTRA_SCANS_PER_UNLOCK,
+    };
+
+    await writeState(state);
+
+    return {
+      granted: true,
+      reason: 'granted',
+      snapshot: buildSnapshot({
+        state,
+        isPremium: entitlement.isPremium,
+        plan: entitlement.plan,
+        paywallEnabled: policy.paywallEnabled,
+        freeScanLimitEnabled: policy.freeScanLimitEnabled,
+        freeDailyScanLimit: policy.freeDailyScanLimit,
+      }),
+    };
   },
 };

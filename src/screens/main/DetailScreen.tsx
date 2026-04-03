@@ -29,7 +29,6 @@ import { adService } from '../../services/adService';
 import { analyticsService } from '../../services/analytics.service';
 import { saveProductToHistory } from '../../services/db';
 import { entitlementService } from '../../services/entitlement.service';
-import { freeScanPolicyService } from '../../services/freeScanPolicy.service';
 import {
   getProductAlternativeSuggestions,
   type ProductAlternativeSuggestion,
@@ -70,7 +69,6 @@ import {
 } from '../../utils/analysis';
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
-import { AdBanner } from '../../components/AdBanner';
 import { AlternativeCard } from '../../components/AlternativeCard';
 import { MarketOfferSheet } from '../../components/MarketOfferSheet';
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
@@ -2893,18 +2891,12 @@ export const DetailScreen: React.FC = () => {
 
     const showDeferredInterstitial = async () => {
       try {
-        const [entitlement, freeScan, policy, stats] = await Promise.all([
+        const [entitlement, policy] = await Promise.all([
           entitlementService.getSnapshot(),
-          freeScanPolicyService.getSnapshot(),
           adService.getCurrentPolicy(),
-          adService.getStats(),
         ]);
 
         if (cancelled || entitlement.isPremium) {
-          return;
-        }
-
-        if (freeScan.usedCount <= 3) {
           return;
         }
 
@@ -2912,45 +2904,17 @@ export const DetailScreen: React.FC = () => {
           return;
         }
 
-        if (stats.dailyInterstitialCount >= policy.maxDailyInterstitials) {
-          return;
-        }
-
         if (!adService.isRewardedAdReady()) {
           await adService.prepareRewardedAd();
-          await new Promise((resolve) => setTimeout(resolve, 240));
         }
-
-        if (cancelled) {
-          return;
-        }
-
-        const shown = await adService.showPreparedRewardedAd();
-
-        if (!shown) {
-          await adService.trackInterstitialShowFailure('interstitial_not_ready', {
-            stage: 'detail_show_gate',
-            screen: 'Detail',
-            entrySource,
-            barcode: normalizedRouteBarcode,
-            successfulScanCount: freeScan.usedCount,
-          });
-          return;
-        }
-
-        await adService.recordInterstitialShown({
-          shownAt: Date.now(),
-          successfulScanCount: freeScan.usedCount,
-        });
       } catch (error) {
-        console.error('Detail interstitial show failed:', error);
+        console.error('Detail rewarded preload failed:', error);
 
         await adService.trackInterstitialShowFailure(error, {
-          stage: 'detail_show',
+          stage: 'detail_rewarded_prewarm',
           screen: 'Detail',
           entrySource,
           barcode: normalizedRouteBarcode,
-          successfulScanCount: undefined,
         });
       }
     };
@@ -3565,15 +3529,6 @@ export const DetailScreen: React.FC = () => {
         </View>
       </ScrollView>
 
-      <View
-        style={[
-          styles.adContainer,
-          { bottom: layout.floatingBottomOffset },
-        ]}
-      >
-        <AdBanner placement="detail_footer" />
-      </View>
-
       <Modal
         visible={methodologySheetVisible}
         transparent
@@ -3707,11 +3662,6 @@ const styles = StyleSheet.create({
   scrollContent: {},
   content: {
     padding: 25,
-  },
-  adContainer: {
-    position: 'absolute',
-    width: '100%',
-    alignItems: 'center',
   },
   shareOverlay: {
     flex: 1,

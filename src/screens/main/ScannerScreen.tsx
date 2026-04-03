@@ -659,6 +659,120 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     []
   );
 
+  const handleScanLimitReached = useCallback(
+    (blockedBarcode: string, paywallEnabled: boolean) => {
+      const openPaywall = () => {
+        if (paywallEnabled) {
+          navigation.navigate('Paywall', { source: 'scan_limit' });
+        }
+      };
+
+      Alert.alert(
+        tt('scan_limit_title', 'Tarama limiti'),
+        tt(
+          'scan_limit_rewarded_message',
+          'Bugünkü 5 ücretsiz tarama hakkın bitti. Reklam izleyerek 3 ek tarama kazanabilir veya Premium’a geçebilirsin.'
+        ),
+        [
+          {
+            text: tt('cancel', 'İptal'),
+            style: 'cancel',
+            onPress: () => {
+              setActiveLookupBarcode(null);
+            },
+          },
+          ...(paywallEnabled
+            ? [
+                {
+                  text: tt('scan_limit_premium_cta', 'Premium'),
+                  onPress: openPaywall,
+                },
+              ]
+            : []),
+          {
+            text: tt('scan_limit_rewarded_cta', 'Reklam izle +3 hak'),
+            onPress: () => {
+              void (async () => {
+                try {
+                  if (!adService.isRewardedAdReady()) {
+                    await adService.prepareRewardedAd();
+                    await new Promise((resolve) => setTimeout(resolve, 320));
+                  }
+
+                  const rewardResult = await adService.showRewardedAdForUnlock();
+
+                  if (!rewardResult.shown) {
+                    Alert.alert(
+                      tt('rewarded_unavailable_title', 'Reklam hazır değil'),
+                      tt(
+                        'rewarded_unavailable_message',
+                        'Şu an ödüllü reklam açılamadı. Biraz sonra tekrar deneyebilir veya Premium’a geçebilirsin.'
+                      )
+                    );
+                    return;
+                  }
+
+                  if (!rewardResult.rewarded) {
+                    Alert.alert(
+                      tt('rewarded_not_completed_title', 'Ödül alınamadı'),
+                      tt(
+                        'rewarded_not_completed_message',
+                        'Reklam tamamlanmadığı için ek tarama hakkı yüklenmedi.'
+                      )
+                    );
+                    return;
+                  }
+
+                  const unlockResult = await freeScanPolicyService.grantRewardedExtraScans();
+
+                  if (!unlockResult.granted) {
+                    if (unlockResult.reason === 'daily_cap_reached') {
+                      openPaywall();
+                      return;
+                    }
+
+                    Alert.alert(
+                      tt('scan_limit_title', 'Tarama limiti'),
+                      tt(
+                        'rewarded_unlock_not_needed',
+                        'Ek tarama hakkı şu an yüklenemedi. Lütfen biraz sonra tekrar deneyin.'
+                      )
+                    );
+                    return;
+                  }
+
+                  recentScanMapRef.current[blockedBarcode] = 0;
+                  setScanned(false);
+                  setActiveLookupBarcode(null);
+
+                  Alert.alert(
+                    tt('rewarded_unlock_success_title', '3 ek tarama hazır'),
+                    tt(
+                      'rewarded_unlock_success_message',
+                      'Ek tarama hakları yüklendi. Barkodu tekrar okutarak devam edebilirsin.'
+                    )
+                  );
+                } catch (error) {
+                  console.error('[ScannerScreen] rewarded unlock failed:', error);
+                  Alert.alert(
+                    tt('error_title', 'Hata'),
+                    tt(
+                      'rewarded_unlock_error',
+                      'Ek tarama hakkı yüklenirken bir sorun oluştu. Lütfen tekrar deneyin.'
+                    )
+                  );
+                } finally {
+                  setActiveLookupBarcode(null);
+                }
+              })();
+            },
+          },
+        ]
+      );
+    },
+    [navigation, tt]
+  );
+
   const processBarcode = useCallback(
     async (validBarcodeData: string) => {
       setScanned(true);
@@ -671,19 +785,10 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
           if (!freeScanResult.allowed) {
             resetTransientState();
             setScanned(false);
-
-            if (freeScanResult.snapshot.paywallEnabled) {
-              navigation.navigate('Paywall', { source: 'scan_limit' });
-            } else {
-              Alert.alert(
-                tt('scan_limit_title', 'Tarama limiti'),
-                tt(
-                  'scan_limit_reached_message',
-                  'Günlük ücretsiz tarama limitine ulaştınız.'
-                )
-              );
-            }
-
+            handleScanLimitReached(
+              validBarcodeData,
+              freeScanResult.snapshot.paywallEnabled
+            );
             return;
           }
         } catch (error) {
@@ -817,9 +922,9 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       }
     },
     [
+      handleScanLimitReached,
       markNotFound,
       maybeShowScanInterstitial,
-      navigation,
       previewCacheByBarcode,
       pushLoadingPreview,
       resetTransientState,

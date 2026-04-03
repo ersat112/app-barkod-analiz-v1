@@ -105,10 +105,10 @@ export const AD_POLICY = Object.freeze({
   interstitialEnabled: true,
   bannerEnabled: true,
   analyticsEnabled: true,
-  warmupSuccessfulScans: 3,
-  scansBetweenInterstitials: 4,
-  minInterstitialCooldownMs: 1000 * 60 * 2,
-  maxDailyInterstitials: 6,
+  warmupSuccessfulScans: 0,
+  scansBetweenInterstitials: 3,
+  minInterstitialCooldownMs: 1000 * 60,
+  maxDailyInterstitials: 8,
   remoteFetchTtlMs: 1000 * 60 * 10,
   remoteFetchTimeoutMs: 1000 * 6,
 });
@@ -124,7 +124,7 @@ export const MONETIZATION_POLICY = Object.freeze({
   restoreEnabled: true,
   paywallEnabled: true,
   freeScanLimitEnabled: true,
-  freeDailyScanLimit: 20,
+  freeDailyScanLimit: 5,
   remoteFetchTtlMs: 1000 * 60 * 10,
   remoteFetchTimeoutMs: 1000 * 6,
 });

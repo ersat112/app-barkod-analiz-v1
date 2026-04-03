@@ -21,7 +21,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../../context/ThemeContext';
 import { useMissingProductFlow } from '../../hooks/useMissingProductFlow';
 import { RootStackParamList } from '../../navigation/AppNavigator';
-import { AdBanner } from '../../components/AdBanner';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import {
   saveMissingProductDraft,
@@ -591,9 +590,6 @@ export const MissingProductScreen: React.FC = () => {
           )}
         </Text>
 
-        <View style={styles.adBox}>
-          <AdBanner placement="missing_product_footer" />
-        </View>
       </ScrollView>
 
       <Modal visible={successVisible} transparent animationType="fade">
@@ -805,9 +801,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 20,
     opacity: 0.65,
-  },
-  adBox: {
-    marginTop: 24,
   },
   modalOverlay: {
     flex: 1,

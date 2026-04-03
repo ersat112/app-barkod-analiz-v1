@@ -106,16 +106,28 @@ const AppContent: React.FC = () => {
           return;
         }
 
-        if (!adService.isAppOpenAdReady()) {
-          await adService.prepareAppOpenAd();
-          await new Promise((resolve) => setTimeout(resolve, 320));
-        }
+        await Promise.all([
+          adService.prepareAppOpenAd(),
+          adService.prepareInterstitial(),
+        ]);
+        await new Promise((resolve) => setTimeout(resolve, 420));
 
         if (cancelled) {
           return;
         }
 
-        const shown = await adService.showAppOpenAdOnce();
+        let shown = await adService.showAppOpenAdOnce();
+
+        if (!shown && adService.isInterstitialReady()) {
+          shown = await adService.showPreparedInterstitial();
+
+          if (shown) {
+            await adService.recordInterstitialShown({
+              shownAt: Date.now(),
+              successfulScanCount: 0,
+            });
+          }
+        }
 
         if (!shown) {
           await adService.trackInterstitialShowFailure('app_open_not_ready', {

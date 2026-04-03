@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Linking,
   Platform,
   RefreshControl,
@@ -27,7 +28,6 @@ import { FEATURES } from '../../config/features';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, type ThemeColors } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
-import { AdBanner } from '../../components/AdBanner';
 import { ScreenOnboardingOverlay } from '../../components/ScreenOnboardingOverlay';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { SearchableSelectSheet } from '../../components/ui/SearchableSelectSheet';
@@ -55,6 +55,7 @@ import {
 import { withAlpha } from '../../utils/color';
 
 const APP_VERSION = 'v1.0.1';
+const SETTINGS_FOOTER_FAVICON = require('../../../assets/favicon.png');
 
 type SettingsItemProps = {
   icon: keyof typeof Ionicons.glyphMap;
@@ -2731,19 +2732,13 @@ export const SettingsScreen: React.FC = () => {
         <Text style={styles.logoutText}>{tt('logout', 'Çıkış Yap')}</Text>
       </TouchableOpacity>
 
-      <View style={styles.adBox}>
-        <AdBanner
-          placement="settings_footer"
-          showPlaceholderWhenUnavailable={adDiagnosticsEnabled}
-        />
-      </View>
-
       <View
         style={[
           styles.footer,
           { paddingHorizontal: layout.horizontalPadding },
         ]}
       >
+        <Image source={SETTINGS_FOOTER_FAVICON} style={styles.footerLogo} resizeMode="contain" />
         <Text style={[styles.footerText, { color: colors.text }]}>
           ErEnesAl® {APP_VERSION}
         </Text>
@@ -3448,14 +3443,15 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginLeft: 10,
   },
-  adBox: {
-    marginTop: 8,
-    paddingHorizontal: 12,
-  },
   footer: {
     alignItems: 'center',
     marginTop: 20,
     opacity: 0.3,
+  },
+  footerLogo: {
+    width: 34,
+    height: 34,
+    marginBottom: 10,
   },
   footerText: {
     fontSize: 12,

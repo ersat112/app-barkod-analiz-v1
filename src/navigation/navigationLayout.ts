@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 
 export const PERSISTENT_BOTTOM_NAV_BASE_HEIGHT = 82;
 export const PERSISTENT_BOTTOM_NAV_HEIGHT = 96;
+export const PERSISTENT_GLOBAL_BANNER_HEIGHT = 64;
 
 const IOS_BOTTOM_NAV_MIN_INSET = 18;
 const ANDROID_BOTTOM_NAV_MIN_INSET = 30;
@@ -19,7 +20,11 @@ export const resolvePersistentBottomNavInset = (bottomInset: number): number => 
 };
 
 export const resolvePersistentBottomNavHeight = (bottomInset: number): number => {
-  return PERSISTENT_BOTTOM_NAV_BASE_HEIGHT + resolvePersistentBottomNavInset(bottomInset);
+  return (
+    PERSISTENT_BOTTOM_NAV_BASE_HEIGHT +
+    PERSISTENT_GLOBAL_BANNER_HEIGHT +
+    resolvePersistentBottomNavInset(bottomInset)
+  );
 };
 
 export const resolvePersistentBottomNavReservedSpace = (

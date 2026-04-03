@@ -12,7 +12,6 @@ import { useTranslation } from 'react-i18next';
 
 import { ScreenOnboardingOverlay } from '../../components/ScreenOnboardingOverlay';
 import { useTheme } from '../../context/ThemeContext';
-import { AdBanner } from '../../components/AdBanner';
 import { usePaginatedHistory } from '../../hooks/usePaginatedHistory';
 import { useRescanActions } from '../../hooks/useRescanActions';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
@@ -278,9 +277,6 @@ export const HistoryScreen: React.FC = () => {
                 hasMore={hasMore}
                 colors={colors}
               />
-              <View style={styles.footerBox}>
-                <AdBanner placement="history_footer" />
-              </View>
               <View style={{ height: layout.contentBottomPadding }} />
             </>
           }
@@ -321,9 +317,5 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingBottom: 12,
-  },
-  footerBox: {
-    marginTop: 8,
-    paddingHorizontal: 12,
   },
 });

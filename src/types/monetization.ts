@@ -225,6 +225,8 @@ export type FreeScanPolicyState = {
   schemaVersion: number;
   dateKey: string;
   successfulScanCount: number;
+  rewardedUnlockCount: number;
+  rewardedExtraScanCount: number;
 };
 
 export type FreeScanAccessSnapshot = {
@@ -237,6 +239,10 @@ export type FreeScanAccessSnapshot = {
   hasReachedLimit: boolean;
   entitlementPlan: MonetizationPlan;
   paywallEnabled: boolean;
+  rewardedUnlockCount: number;
+  rewardedExtraScanCount: number;
+  rewardedExtraScansPerUnlock: number;
+  rewardedDailyUnlockCap: number;
 };
 
 export type FreeScanRegistrationReason =
@@ -248,6 +254,19 @@ export type FreeScanRegistrationReason =
 export type FreeScanRegistrationResult = {
   allowed: boolean;
   reason: FreeScanRegistrationReason;
+  snapshot: FreeScanAccessSnapshot;
+};
+
+export type RewardedScanUnlockReason =
+  | 'granted'
+  | 'premium'
+  | 'limit_disabled'
+  | 'not_needed'
+  | 'daily_cap_reached';
+
+export type RewardedScanUnlockResult = {
+  granted: boolean;
+  reason: RewardedScanUnlockReason;
   snapshot: FreeScanAccessSnapshot;
 };
 

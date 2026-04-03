@@ -11,13 +11,15 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AdBanner } from '../components/AdBanner';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useLanguage } from '../context/LanguageContext';
 import {
+  PERSISTENT_GLOBAL_BANNER_HEIGHT,
   resolvePersistentBottomNavHeight,
   resolvePersistentBottomNavInset,
 } from './navigationLayout';
@@ -47,6 +49,8 @@ import type { PaywallEntrySource } from '../types/monetization';
 import type { Product } from '../utils/analysis';
 import type { FamilyAllergenKey } from '../services/familyHealthProfile.service';
 import type { HelpArticleKey } from '../services/helpCenterContent.service';
+
+const SCAN_BUTTON_ART = require('../../assets/icon.png');
 
 export type MainTabParamList = {
   Home: undefined;
@@ -149,7 +153,7 @@ const CenterScanTabButton: React.FC<{
             },
           ]}
         >
-          <Ionicons name="scan-outline" size={22} color={colors.primaryContrast} />
+          <Image source={SCAN_BUTTON_ART} style={styles.centerScanArtwork} resizeMode="contain" />
         </View>
         <Text style={[styles.centerScanLabel, { color: colors.primary }]}>{label}</Text>
       </TouchableOpacity>
@@ -243,6 +247,13 @@ const PersistentBottomNav: React.FC<{
         },
       ]}
     >
+      <View style={styles.globalBannerWrap}>
+        <AdBanner
+          placement={`global_${activeRouteName.toLowerCase()}`}
+          containerStyle={styles.globalBannerContainer}
+        />
+      </View>
+
       <View style={styles.customTabBarGrid}>
         <View style={styles.tabBarSlot}>
           <TabBarItem
@@ -538,6 +549,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     zIndex: 30,
   },
+  globalBannerWrap: {
+    minHeight: PERSISTENT_GLOBAL_BANNER_HEIGHT,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingTop: 4,
+  },
+  globalBannerContainer: {
+    width: '100%',
+    paddingHorizontal: 0,
+  },
   customTabBarGrid: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -593,6 +614,11 @@ const styles = StyleSheet.create({
       height: 10,
     },
     elevation: 10,
+  },
+  centerScanArtwork: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
   },
   centerScanLabel: {
     marginTop: 3,

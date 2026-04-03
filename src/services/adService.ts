@@ -192,6 +192,69 @@ export const adService = {
     return true;
   },
 
+  async showRewardedAdForUnlock(): Promise<{ shown: boolean; rewarded: boolean }> {
+    if (!preparedRewarded || !preparedRewardedLoaded) {
+      return { shown: false, rewarded: false };
+    }
+
+    const adsModule = getAdMobModule();
+
+    if (!adsModule?.RewardedAdEventType || !adsModule?.AdEventType) {
+      try {
+        await preparedRewarded.show();
+        return { shown: true, rewarded: false };
+      } catch {
+        return { shown: false, rewarded: false };
+      }
+    }
+
+    const { RewardedAdEventType, AdEventType } = adsModule;
+
+    return new Promise((resolve) => {
+      let rewardEarned = false;
+      let settled = false;
+
+      const cleanup = () => {
+        unsubscribeReward?.();
+        unsubscribeClosed?.();
+        unsubscribeError?.();
+      };
+
+      const settle = (result: { shown: boolean; rewarded: boolean }) => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        cleanup();
+        resolve(result);
+      };
+
+      const unsubscribeReward = preparedRewarded.addAdEventListener(
+        RewardedAdEventType.EARNED_REWARD,
+        () => {
+          rewardEarned = true;
+        }
+      );
+      const unsubscribeClosed = preparedRewarded.addAdEventListener(
+        AdEventType.CLOSED,
+        () => {
+          settle({ shown: true, rewarded: rewardEarned });
+        }
+      );
+      const unsubscribeError = preparedRewarded.addAdEventListener(
+        AdEventType.ERROR,
+        () => {
+          settle({ shown: false, rewarded: false });
+        }
+      );
+
+      void preparedRewarded.show().catch(() => {
+        settle({ shown: false, rewarded: false });
+      });
+    });
+  },
+
   async prepareAppOpenAd(): Promise<boolean> {
     const policy = await adRemotePolicyService.getResolvedPolicy({
       allowStale: true,
