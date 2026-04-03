@@ -144,7 +144,14 @@ const CenterScanTabButton: React.FC<{
         onPress={onPress}
         activeOpacity={0.92}
       >
-        <View style={styles.centerScanButton}>
+        <View
+          style={[
+            styles.centerScanButton,
+            {
+              backgroundColor: colors.background,
+            },
+          ]}
+        >
           <Image source={SCAN_BUTTON_ART} style={styles.centerScanArtwork} resizeMode="contain" />
         </View>
         <Text style={[styles.centerScanLabel, { color: colors.primary }]}>{label}</Text>
@@ -216,7 +223,7 @@ const PersistentBottomNav: React.FC<{
   );
   const tabBarTopPadding = Platform.OS === 'ios' ? 8 : 10;
   const tabBarHeight = resolvePersistentBottomNavHeight(insets.bottom);
-  const centerButtonBottomOffset = tabBarBottomPadding + 6;
+  const centerButtonBottomOffset = Math.max(tabBarBottomPadding - 14, 8);
   const activeSection =
     activeRouteName === 'Home' ||
     activeRouteName === 'History' ||
@@ -583,7 +590,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'flex-start',
-    width: 80,
+    width: 90,
   },
   centerScanButtonOverlay: {
     position: 'absolute',
@@ -598,6 +605,7 @@ const styles = StyleSheet.create({
     height: 62,
     alignItems: 'center',
     justifyContent: 'center',
+    borderRadius: 22,
   },
   centerScanArtwork: {
     width: 46,
@@ -605,7 +613,7 @@ const styles = StyleSheet.create({
     borderRadius: 23,
   },
   centerScanLabel: {
-    marginTop: 3,
+    marginTop: 2,
     fontSize: 9,
     fontWeight: '900',
   },

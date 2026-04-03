@@ -587,7 +587,12 @@ export const PriceCompareScreen: React.FC = () => {
         result.status === 'fulfilled' ? result.value : []
       );
 
-      return dedupeSearchProducts([...localResults, ...remoteResults]).slice(0, limit);
+      const mergedResults =
+        remoteResults.length > 0
+          ? dedupeSearchProducts([...remoteResults, ...localResults])
+          : dedupeSearchProducts([...localResults]);
+
+      return mergedResults.slice(0, limit);
     },
     [cityCode, citySlug]
   );
