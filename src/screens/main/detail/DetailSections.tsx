@@ -1488,14 +1488,14 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
   breakdownList: {
-    gap: 12,
-    marginTop: 18,
-    marginBottom: 24,
+    gap: 10,
+    marginTop: 14,
+    marginBottom: 20,
   },
   breakdownCard: {
     borderWidth: 1,
-    borderRadius: 22,
-    padding: 16,
+    borderRadius: 20,
+    padding: 14,
   },
   breakdownCardHeader: {
     flexDirection: 'row',
@@ -1506,13 +1506,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   breakdownTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
   },
   breakdownHelper: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 18,
+    marginTop: 3,
+    fontSize: 11,
+    lineHeight: 16,
   },
   breakdownScoreBadge: {
     minWidth: 58,
@@ -1539,13 +1539,13 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   nutrientValueLabel: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '900',
     textAlign: 'right',
   },
   nutrientTrack: {
-    marginTop: 14,
-    height: 10,
+    marginTop: 12,
+    height: 8,
     borderRadius: 999,
     overflow: 'hidden',
   },
@@ -1554,9 +1554,9 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   nutrientEnvelope: {
-    marginTop: 12,
-    fontSize: 13,
-    lineHeight: 19,
+    marginTop: 10,
+    fontSize: 12,
+    lineHeight: 17,
     fontWeight: '700',
   },
   highlightCard: {
