@@ -20,6 +20,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
 import { MarketOfferSheet } from '../../components/MarketOfferSheet';
@@ -94,6 +95,7 @@ type ScannerExperienceProps = {
 
 const PREVIEW_QUEUE_LIMIT = 6;
 const FALLBACK_IMAGE = 'https://via.placeholder.com/240?text=No+Image';
+const SCANNER_WALKTHROUGH_STORAGE_KEY = 'scanner_mode_walkthrough_completed_v1';
 const MODE_ICON_MAP: Record<ScannerUiMode, keyof typeof Ionicons.glyphMap> = {
   food: 'nutrition-outline',
   beauty: 'sparkles-outline',
@@ -172,6 +174,10 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const [manualError, setManualError] = useState('');
   const [selectedMode, setSelectedMode] = useState<ScannerUiMode>(initialMode);
   const [showModeHint, setShowModeHint] = useState(true);
+  const [walkthroughState, setWalkthroughState] = useState<'loading' | 'idle' | 'active'>(
+    'loading'
+  );
+  const [walkthroughStepIndex, setWalkthroughStepIndex] = useState(0);
   const [cameraReady, setCameraReady] = useState(false);
   const [ocrProcessing, setOcrProcessing] = useState(false);
 
@@ -205,6 +211,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     : null;
   const profileCityCode = resolveTurkeyCityCode(profileCity);
   const ocrAvailable = isMlKitTextRecognitionAvailable();
+  const walkthroughModeOrder = useMemo<ScannerUiMode[]>(
+    () => ['food', 'beauty', 'medicine', 'text'],
+    []
+  );
+  const isWalkthroughActive = walkthroughState === 'active';
 
   const closePreviewMarketSheet = useCallback(() => {
     setPreviewMarketSheetOffer(null);
@@ -280,9 +291,65 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   }, [initialMode, route?.name, scanMode, selectedMode]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const loadWalkthroughState = async () => {
+      const shouldRunWalkthrough = initialMode === 'food';
+
+      if (!shouldRunWalkthrough) {
+        if (!cancelled) {
+          setWalkthroughState('idle');
+          setSelectedMode(initialMode);
+          setShowModeHint(!dismissedModeHintsRef.current[initialMode]);
+        }
+        return;
+      }
+
+      try {
+        const completed = await AsyncStorage.getItem(SCANNER_WALKTHROUGH_STORAGE_KEY);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (completed === '1') {
+          setWalkthroughState('idle');
+          setSelectedMode(initialMode);
+          setShowModeHint(!dismissedModeHintsRef.current[initialMode]);
+          return;
+        }
+
+        setWalkthroughStepIndex(0);
+        setSelectedMode('food');
+        setShowModeHint(true);
+        setWalkthroughState('active');
+        setIsManualMode(false);
+      } catch (error) {
+        console.warn('[ScannerScreen] failed to load walkthrough state:', error);
+
+        if (!cancelled) {
+          setWalkthroughState('idle');
+          setSelectedMode(initialMode);
+          setShowModeHint(!dismissedModeHintsRef.current[initialMode]);
+        }
+      }
+    };
+
+    void loadWalkthroughState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialMode]);
+
+  useEffect(() => {
+    if (walkthroughState !== 'idle') {
+      return;
+    }
+
     setSelectedMode(initialMode);
     setShowModeHint(!dismissedModeHintsRef.current[initialMode]);
-  }, [initialMode]);
+  }, [initialMode, walkthroughState]);
 
   useEffect(() => {
     if (isFocused && !isManualMode) {
@@ -364,19 +431,55 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   }, [navigation]);
 
   const handleSelectMode = useCallback((nextMode: ScannerUiMode) => {
+    if (isWalkthroughActive) {
+      return;
+    }
+
     setSelectedMode(nextMode);
     setShowModeHint(!dismissedModeHintsRef.current[nextMode]);
     setScanned(false);
-  }, []);
+  }, [isWalkthroughActive]);
 
   const dismissModeHint = useCallback(() => {
+    if (isWalkthroughActive) {
+      return;
+    }
+
     dismissedModeHintsRef.current[selectedMode] = true;
     setShowModeHint(false);
-  }, [selectedMode]);
+  }, [isWalkthroughActive, selectedMode]);
 
   const openInfoHint = useCallback(() => {
     setShowModeHint(true);
   }, []);
+
+  const advanceWalkthrough = useCallback(async () => {
+    if (!isWalkthroughActive) {
+      return;
+    }
+
+    const nextIndex = walkthroughStepIndex + 1;
+
+    if (nextIndex >= walkthroughModeOrder.length) {
+      try {
+        await AsyncStorage.setItem(SCANNER_WALKTHROUGH_STORAGE_KEY, '1');
+      } catch (error) {
+        console.warn('[ScannerScreen] failed to persist walkthrough state:', error);
+      }
+
+      setWalkthroughState('idle');
+      setWalkthroughStepIndex(0);
+      setShowModeHint(false);
+      setSelectedMode(initialMode);
+      return;
+    }
+
+    const nextMode = walkthroughModeOrder[nextIndex];
+    setWalkthroughStepIndex(nextIndex);
+    setSelectedMode(nextMode);
+    setShowModeHint(true);
+    setScanned(false);
+  }, [initialMode, isWalkthroughActive, walkthroughModeOrder, walkthroughStepIndex]);
 
   const openManualEntry = useCallback(() => {
     setManualEntryMode(selectedMode === 'text' ? 'text' : 'barcode');
@@ -810,7 +913,14 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
   const handleBarCodeScanned = useCallback(
     ({ data, type }: { data: string; type?: string }) => {
-      if (scanned || activeLookupBarcode || !isFocused || isManualMode || isTextMode) {
+      if (
+        scanned ||
+        activeLookupBarcode ||
+        !isFocused ||
+        isManualMode ||
+        isTextMode ||
+        isWalkthroughActive
+      ) {
         return;
       }
 
@@ -831,7 +941,15 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
       void processBarcode(decoded.normalizedData);
     },
-    [activeLookupBarcode, isFocused, isManualMode, isTextMode, processBarcode, scanned]
+    [
+      activeLookupBarcode,
+      isFocused,
+      isManualMode,
+      isTextMode,
+      isWalkthroughActive,
+      processBarcode,
+      scanned,
+    ]
   );
 
   const handleManualSubmit = useCallback(() => {
@@ -1157,6 +1275,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                 <TouchableOpacity
                   style={styles.topBackButton}
                   onPress={handleCloseScanner}
+                  disabled={isWalkthroughActive}
                   activeOpacity={0.85}
                 >
                   <Ionicons name="chevron-back" size={18} color="#FFFFFF" />
@@ -1175,6 +1294,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                   <TouchableOpacity
                     style={styles.topIconButton}
                     onPress={openInfoHint}
+                    disabled={isWalkthroughActive}
                     activeOpacity={0.88}
                   >
                     <Ionicons
@@ -1187,6 +1307,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                   <TouchableOpacity
                     style={styles.topIconButton}
                     onPress={openManualEntry}
+                    disabled={isWalkthroughActive}
                     activeOpacity={0.85}
                   >
                     <Ionicons
@@ -1199,6 +1320,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                   <TouchableOpacity
                     style={styles.topIconButton}
                     onPress={() => setTorch((prev) => !prev)}
+                    disabled={isWalkthroughActive}
                     activeOpacity={0.85}
                   >
                     <Ionicons
@@ -1234,6 +1356,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                               : 'rgba(255,255,255,0.10)',
                           },
                         ]}
+                        disabled={isWalkthroughActive}
                         activeOpacity={0.88}
                         onPress={() => handleSelectMode(mode.key)}
                       >
@@ -1256,7 +1379,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                 </ScrollView>
               </View>
 
-              {showModeHint ? (
+                  {showModeHint ? (
                 <View style={styles.modeHintCard}>
                   <View style={styles.modeHintHeader}>
                     <View style={styles.modeHintTitleWrap}>
@@ -1274,18 +1397,22 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                       </View>
                       <View style={styles.modeHintTextWrap}>
                         <Text style={styles.modeHintEyebrow}>
-                          {tt('scanner_how_to_title', 'Nasıl taranır')}
+                          {isWalkthroughActive
+                            ? tt('scanner_walkthrough_title', 'Kısa tarama turu')
+                            : tt('scanner_how_to_title', 'Nasıl taranır')}
                         </Text>
                         <Text style={styles.modeHintTitle}>{selectedModeMeta.hintTitle}</Text>
                       </View>
                     </View>
-                    <TouchableOpacity
-                      style={styles.modeHintClose}
-                      onPress={dismissModeHint}
-                      activeOpacity={0.86}
-                    >
-                      <Ionicons name="close" size={16} color="#FFFFFF" />
-                    </TouchableOpacity>
+                    {!isWalkthroughActive ? (
+                      <TouchableOpacity
+                        style={styles.modeHintClose}
+                        onPress={dismissModeHint}
+                        activeOpacity={0.86}
+                      >
+                        <Ionicons name="close" size={16} color="#FFFFFF" />
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
                   <Text style={styles.modeHintBody}>{selectedModeMeta.hintBody}</Text>
                   <View style={styles.modeHintMiniRow}>
@@ -1294,7 +1421,29 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                       {selectedModeMeta.frameSubtitle}
                     </Text>
                   </View>
-                  {selectedMode === 'text' ? (
+                  {isWalkthroughActive ? (
+                    <TouchableOpacity
+                      style={[styles.modeHintAction, { backgroundColor: colors.primary }]}
+                      activeOpacity={0.88}
+                      onPress={() => {
+                        void advanceWalkthrough();
+                      }}
+                    >
+                      <Ionicons
+                        name="checkmark-outline"
+                        size={16}
+                        color={colors.primaryContrast}
+                      />
+                      <Text
+                        style={[
+                          styles.modeHintActionText,
+                          { color: colors.primaryContrast },
+                        ]}
+                      >
+                        {tt('scanner_walkthrough_continue', 'Tamam')}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : selectedMode === 'text' ? (
                     <TouchableOpacity
                       style={[styles.modeHintAction, { backgroundColor: colors.primary }]}
                       activeOpacity={0.88}
@@ -1416,15 +1565,6 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                     </Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.textManualFallback}
-                    activeOpacity={0.84}
-                    onPress={openManualEntry}
-                  >
-                    <Text style={styles.textManualFallbackText}>
-                      {tt('text_mode_manual_short', 'Metni Gir')}
-                    </Text>
-                  </TouchableOpacity>
                 </View>
               </View>
             ) : (
@@ -1440,20 +1580,6 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                   <Text style={styles.frameGuideTitle}>{selectedModeMeta.frameTitle}</Text>
                   <Text style={styles.frameGuideSubtitle}>{selectedModeMeta.frameSubtitle}</Text>
                 </View>
-                <TouchableOpacity
-                  style={styles.frameGuideAction}
-                  activeOpacity={0.84}
-                  onPress={openManualEntry}
-                >
-                  <Ionicons
-                    name="keypad-outline"
-                    size={15}
-                    color="#FFFFFF"
-                  />
-                  <Text style={styles.frameGuideActionText}>
-                    {tt('manual_entry_short', 'Elle Gir')}
-                  </Text>
-                </TouchableOpacity>
               </View>
             )
           ) : null}
