@@ -325,7 +325,10 @@ export const InfoActionCard: React.FC<{
 
       <View style={styles.infoActionTextWrap}>
         <Text style={[styles.infoActionTitle, { color: colors.text }]}>{title}</Text>
-        <Text style={[styles.infoActionSubtitle, { color: colors.mutedText }]}>
+        <Text
+          style={[styles.infoActionSubtitle, { color: colors.mutedText }]}
+          numberOfLines={2}
+        >
           {subtitle}
         </Text>
       </View>
@@ -351,7 +354,9 @@ export const EvidenceSection: React.FC<{
           { backgroundColor: colors.card, borderColor: colors.border },
         ]}
       >
-        <Text style={[styles.evidenceSummary, { color: colors.text }]}>{summary}</Text>
+        <Text style={[styles.evidenceSummary, { color: colors.text }]} numberOfLines={4}>
+          {summary}
+        </Text>
 
         {tags.length ? (
           <View style={styles.methodologyTagsWrap}>
@@ -1133,7 +1138,10 @@ export const ActionLinksSection: React.FC<{
               </Text>
 
               {item.helper ? (
-                <Text style={[styles.actionLinkHelper, { color: colors.mutedText }]}>
+                <Text
+                  style={[styles.actionLinkHelper, { color: colors.mutedText }]}
+                  numberOfLines={2}
+                >
                   {item.helper}
                 </Text>
               ) : null}
@@ -1373,17 +1381,18 @@ const styles = StyleSheet.create({
   },
   infoActionCard: {
     borderWidth: 1,
-    borderRadius: 20,
-    padding: 16,
-    marginBottom: 18,
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    marginBottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
   },
   infoActionIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1391,25 +1400,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   infoActionTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
   },
   infoActionSubtitle: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 18,
+    marginTop: 3,
+    fontSize: 11,
+    lineHeight: 16,
   },
   evidenceCard: {
     borderWidth: 1,
-    borderRadius: 22,
-    padding: 16,
-    marginTop: 18,
-    marginBottom: 24,
-    gap: 14,
+    borderRadius: 20,
+    padding: 14,
+    marginTop: 14,
+    marginBottom: 20,
+    gap: 10,
   },
   evidenceSummary: {
-    fontSize: 13,
-    lineHeight: 20,
+    fontSize: 12,
+    lineHeight: 18,
     opacity: 0.84,
   },
   scoreCard: {
@@ -1693,21 +1702,22 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
   },
   actionLinksWrap: {
-    gap: 12,
-    marginBottom: 24,
+    gap: 10,
+    marginBottom: 20,
   },
   actionLinkCard: {
     borderWidth: 1,
-    borderRadius: 22,
-    padding: 16,
+    borderRadius: 18,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 12,
   },
   actionLinkIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1715,13 +1725,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   actionLinkLabel: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
   },
   actionLinkHelper: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 18,
+    marginTop: 3,
+    fontSize: 11,
+    lineHeight: 16,
   },
   pricingSectionSubtitle: {
     marginTop: -6,
@@ -1911,16 +1921,16 @@ const styles = StyleSheet.create({
   methodologyTagsWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
   },
   methodologyTag: {
     borderWidth: 1,
     borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
   },
   methodologyTagText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
   },
   methodologySectionsWrap: {
