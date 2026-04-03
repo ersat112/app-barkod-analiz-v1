@@ -104,6 +104,7 @@ import {
 } from './detail/DetailSections';
 import type {
   CosmeticIngredientInsightItem,
+  MetaChipItem,
   MethodologySectionItem,
   NutrientBalanceItem,
   ProductHighlightItem,
@@ -2223,7 +2224,7 @@ export const DetailScreen: React.FC = () => {
     ? 'https://via.placeholder.com/400?text=No+Image'
     : displayedProduct?.image_url || 'https://via.placeholder.com/400?text=No+Image';
 
-  const metaChipItems = useMemo(
+  const metaChipItems = useMemo<MetaChipItem[]>(
     () =>
       displayedProduct?.type === 'medicine'
         ? [
@@ -2237,19 +2238,15 @@ export const DetailScreen: React.FC = () => {
                 displayedProduct.license_status ||
                 tt('medicine_license_status_unknown', 'Lisans durumu bilinmiyor'),
             },
-            {
-              icon: 'document-text-outline' as const,
-              label: `${tt('medicine_license_number', 'Ruhsat No')}: ${
-                displayedProduct.license_number || '-'
-              }`,
-            },
-            {
-              icon: 'flask-outline' as const,
-              label: `${tt('medicine_atc_code', 'ATC Kodu')}: ${
-                displayedProduct.atc_code || '-'
-              }`,
-            },
-          ]
+            displayedProduct.atc_code
+              ? {
+                  icon: 'flask-outline' as const,
+                  label: `${tt('medicine_atc_code', 'ATC Kodu')}: ${
+                    displayedProduct.atc_code || '-'
+                  }`,
+                }
+              : null,
+          ].filter(Boolean) as MetaChipItem[]
         : [
             {
               icon: 'server-outline' as const,
@@ -2259,23 +2256,24 @@ export const DetailScreen: React.FC = () => {
               icon: 'flag-outline' as const,
               label: actualOriginLabel,
             },
-            {
-              icon: 'barcode-outline' as const,
-              label: `GS1: ${gs1PrefixLabel}`,
-            },
-            {
-              icon: 'analytics-outline' as const,
-              label: `${tt('api_score', 'API Skoru')}: ${displayedProduct?.score ?? '-'}`,
-            },
           ],
     [
       actualOriginLabel,
       displayedProduct,
-      gs1PrefixLabel,
       sourceLabel,
       tt,
     ]
   );
+
+  const metaChipFooterText = useMemo(() => {
+    if (displayedProduct?.type === 'medicine') {
+      return displayedProduct.license_number
+        ? `${tt('medicine_license_number', 'Ruhsat No')}: ${displayedProduct.license_number}`
+        : null;
+    }
+
+    return `GS1: ${gs1PrefixLabel}`;
+  }, [displayedProduct, gs1PrefixLabel, tt]);
 
   const shareProductUrl = useMemo(() => {
     return buildProductShareUrl(
@@ -3209,7 +3207,11 @@ export const DetailScreen: React.FC = () => {
             colors={colors}
           />
 
-          <MetaChipsSection items={metaChipItems} colors={colors} />
+          <MetaChipsSection
+            items={metaChipItems}
+            footerText={metaChipFooterText}
+            colors={colors}
+          />
 
           {isMedicineProduct ? (
             <NoticeCard

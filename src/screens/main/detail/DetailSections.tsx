@@ -19,7 +19,7 @@ import { withAlpha } from '../../../utils/color';
 const { width } = Dimensions.get('window');
 const FALLBACK_IMAGE = 'https://via.placeholder.com/400?text=No+Image';
 
-type MetaChipItem = {
+export type MetaChipItem = {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
 };
@@ -244,27 +244,40 @@ export const ProductHeadingSection: React.FC<{
 
 export const MetaChipsSection: React.FC<{
   items: MetaChipItem[];
+  footerText?: string | null;
   colors: ThemeColors;
-}> = ({ items, colors }) => {
+}> = ({ items, footerText, colors }) => {
+  if (!items.length && !footerText) {
+    return null;
+  }
+
   return (
-    <View style={styles.metaRow}>
-      {items.map((item) => (
-        <View
-          key={`${item.icon}-${item.label}`}
-          style={[
-            styles.metaChip,
-            { backgroundColor: colors.card, borderColor: colors.border },
-          ]}
-        >
-          <Ionicons name={item.icon} size={14} color={colors.primary} />
-          <Text
-            style={[styles.metaChipText, { color: colors.text }]}
-            numberOfLines={1}
+    <View style={styles.metaWrap}>
+      <View style={styles.metaRow}>
+        {items.map((item) => (
+          <View
+            key={`${item.icon}-${item.label}`}
+            style={[
+              styles.metaChip,
+              { backgroundColor: colors.card, borderColor: colors.border },
+            ]}
           >
-            {item.label}
-          </Text>
-        </View>
-      ))}
+            <Ionicons name={item.icon} size={14} color={colors.primary} />
+            <Text
+              style={[styles.metaChipText, { color: colors.text }]}
+              numberOfLines={1}
+            >
+              {item.label}
+            </Text>
+          </View>
+        ))}
+      </View>
+
+      {footerText ? (
+        <Text style={[styles.metaFooterText, { color: colors.mutedText }]} numberOfLines={2}>
+          {footerText}
+        </Text>
+      ) : null}
     </View>
   );
 };
@@ -1294,26 +1307,33 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     lineHeight: 34,
   },
+  metaWrap: {
+    marginBottom: 18,
+  },
   metaRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 20,
+    gap: 8,
   },
   metaChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 14,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 13,
     borderWidth: 1,
     gap: 6,
     maxWidth: '100%',
   },
   metaChipText: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
     flexShrink: 1,
+  },
+  metaFooterText: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 17,
   },
   noticeCard: {
     flexDirection: 'row',
