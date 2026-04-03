@@ -1136,6 +1136,13 @@ export const SettingsScreen: React.FC = () => {
       </Text>
 
       <SettingsItem
+        icon="help-circle-outline"
+        label={tt('help_center', 'Yardım Merkezi')}
+        colors={colors}
+        onPress={() => navigation.navigate('HelpCenter')}
+      />
+
+      <SettingsItem
         icon="flask-outline"
         label={tt('ecode_catalog', 'Katkı Kataloğu')}
         colors={colors}

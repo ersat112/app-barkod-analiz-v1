@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import * as WebBrowser from 'expo-web-browser';
 
@@ -16,8 +17,6 @@ import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { withAlpha } from '../../utils/color';
 
-const NUTRI_SCORE_OVERVIEW_URL =
-  'https://www.santepubliquefrance.fr/en/nutri-score';
 const WHO_FOPNL_GUIDANCE_URL =
   'https://apps.who.int/iris/bitstream/handle/10665/336988/WHO-EURO-2020-1569-41320-56234-eng.pdf?sequence=1&isAllowed=y';
 const OPEN_FOOD_FACTS_URL = 'https://world.openfoodfacts.org';
@@ -36,10 +35,11 @@ type SourceLinkCard = {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   subtitle: string;
-  url: string;
+  onPress: () => void;
 };
 
 export const MethodologySourcesScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
   const { colors, isDark } = useTheme();
   const layout = useAppScreenLayout({
     topInsetExtra: 18,
@@ -131,7 +131,9 @@ export const MethodologySourcesScreen: React.FC = () => {
           'methodology_link_off_subtitle',
           'Gıda ürün kaydı, Nutri-Score alanları ve içerik verisi.'
         ),
-        url: OPEN_FOOD_FACTS_URL,
+        onPress: () => {
+          void openUrl(OPEN_FOOD_FACTS_URL);
+        },
       },
       {
         key: 'obf',
@@ -141,7 +143,9 @@ export const MethodologySourcesScreen: React.FC = () => {
           'methodology_link_obf_subtitle',
           'Kozmetik ürün kaydı ve içerik verisi.'
         ),
-        url: OPEN_BEAUTY_FACTS_URL,
+        onPress: () => {
+          void openUrl(OPEN_BEAUTY_FACTS_URL);
+        },
       },
       {
         key: 'nutri-score',
@@ -149,9 +153,9 @@ export const MethodologySourcesScreen: React.FC = () => {
         title: tt('methodology_link_nutri_title', 'Nutri-Score Özeti'),
         subtitle: tt(
           'methodology_link_nutri_subtitle',
-          'Resmi kamu sağlığı sayfasında Nutri-Score’un A-E ve 5 renkli ön yüz etiketi mantığını açıklar.'
+          'A-E etiketi, besin dengesi ve OCR sınırlarını uygulama içinden açıklar.'
         ),
-        url: NUTRI_SCORE_OVERVIEW_URL,
+        onPress: () => navigation.navigate('HelpArticle', { articleKey: 'nutriScore' }),
       },
       {
         key: 'who',
@@ -161,7 +165,9 @@ export const MethodologySourcesScreen: React.FC = () => {
           'methodology_link_who_subtitle',
           'Ambalaj önü beslenme etiketlemesine ilişkin WHO kılavuzu.'
         ),
-        url: WHO_FOPNL_GUIDANCE_URL,
+        onPress: () => {
+          void openUrl(WHO_FOPNL_GUIDANCE_URL);
+        },
       },
       {
         key: 'titck',
@@ -171,10 +177,12 @@ export const MethodologySourcesScreen: React.FC = () => {
           'methodology_link_titck_subtitle',
           'İlaç kayıtları, prospektüs ve KÜB belgeleri.'
         ),
-        url: TITCK_PORTAL_URL,
+        onPress: () => {
+          void openUrl(TITCK_PORTAL_URL);
+        },
       },
     ],
-    [tt]
+    [navigation, openUrl, tt]
   );
 
   const categoryCards = useMemo(
@@ -360,9 +368,7 @@ export const MethodologySourcesScreen: React.FC = () => {
                   shadowColor: colors.shadow,
                 },
               ]}
-              onPress={() => {
-                void openUrl(item.url);
-              }}
+              onPress={item.onPress}
               activeOpacity={0.88}
             >
               <View

@@ -304,8 +304,6 @@ const buildProductShareUrl = (
     : `https://world.openfoodfacts.org/product/${normalizedBarcode}`;
 };
 
-const NUTRI_SCORE_OVERVIEW_URL =
-  'https://www.santepubliquefrance.fr/en/nutri-score';
 const WHO_FOPNL_GUIDANCE_URL =
   'https://apps.who.int/iris/bitstream/handle/10665/336988/WHO-EURO-2020-1569-41320-56234-eng.pdf?sequence=1&isAllowed=y';
 const TITCK_PORTAL_URL = 'https://www.titck.gov.tr/kubkt';
@@ -2435,10 +2433,10 @@ export const DetailScreen: React.FC = () => {
         label: tt('scientific_link_nutri_score', 'Nutri-Score Özeti'),
         helper: tt(
           'scientific_link_nutri_score_helper',
-          'Resmi kamu sağlığı sayfasında Nutri-Score’un A-E ve 5 renkli ön yüz etiketi mantığını açar.'
+          'A-E etiketi, besin dengesi ve OCR sınırlarını uygulama içinden açıklar.'
         ),
         onPress: () => {
-          void openDocumentUrl(NUTRI_SCORE_OVERVIEW_URL);
+          navigation.navigate('HelpArticle', { articleKey: 'nutriScore' });
         },
       },
       {
@@ -2454,7 +2452,7 @@ export const DetailScreen: React.FC = () => {
         },
       },
     ];
-  }, [displayedProduct, openDocumentUrl, shareProductUrl, tt]);
+  }, [displayedProduct, navigation, openDocumentUrl, shareProductUrl, tt]);
 
   const medicineDocumentItems = useMemo(() => {
     if (displayedProduct?.type !== 'medicine') {

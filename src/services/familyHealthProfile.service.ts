@@ -8,7 +8,14 @@ export type FamilyAllergenKey =
   | 'peanut'
   | 'treeNuts'
   | 'soy'
-  | 'sesame';
+  | 'sesame'
+  | 'fish'
+  | 'shellfish'
+  | 'molluscs'
+  | 'mustard'
+  | 'celery'
+  | 'lupin'
+  | 'sulfites';
 
 export type FamilyHealthGoalKey =
   | 'lowerSugar'
@@ -29,6 +36,13 @@ export const FAMILY_ALLERGEN_KEYS: FamilyAllergenKey[] = [
   'treeNuts',
   'soy',
   'sesame',
+  'fish',
+  'shellfish',
+  'molluscs',
+  'mustard',
+  'celery',
+  'lupin',
+  'sulfites',
 ];
 
 export const FAMILY_HEALTH_GOAL_KEYS: FamilyHealthGoalKey[] = [
@@ -132,6 +146,62 @@ export const FAMILY_ALLERGEN_DEFINITIONS: FamilyAllergenDefinition[] = [
       'Susam alerjisi olan bireyler icin susam, tahin ve ilgili turevlerin acik bicimde takip edilmesi gerekir.',
     watchTerms: ['sesame', 'susam', 'tahin'],
   },
+  {
+    key: 'fish',
+    label: 'Balık',
+    shortDescription: 'Balık ve balık proteinleri için uyarı üretir.',
+    detail:
+      'Balık alerjisi olan bireyler için balık, balık proteini ve ilgili türevler ayrı dikkat gerektirir.',
+    watchTerms: ['fish', 'balik', 'somon', 'ton baligi', 'anchovy', 'anchov', 'cod'],
+  },
+  {
+    key: 'shellfish',
+    label: 'Kabuklu Deniz Ürünleri',
+    shortDescription: 'Karides, yengeç ve benzeri kabuklular için sinyal verir.',
+    detail:
+      'Kabuklu deniz ürünü alerjilerinde karides, yengeç, ıstakoz ve benzeri türler için net uyarı gerekir.',
+    watchTerms: ['shrimp', 'karides', 'prawn', 'crab', 'yengec', 'lobster', 'istakoz'],
+  },
+  {
+    key: 'molluscs',
+    label: 'Yumuşakçalar',
+    shortDescription: 'Midye, kalamar ve benzeri yumuşakçaları izler.',
+    detail:
+      'Midye, kalamar, ahtapot ve benzeri yumuşakçalar aile profiline ayrı hassas madde olarak eklenebilir.',
+    watchTerms: ['mussel', 'midye', 'squid', 'kalamar', 'octopus', 'ahtapot', 'clam'],
+  },
+  {
+    key: 'mustard',
+    label: 'Hardal',
+    shortDescription: 'Hardal ve hardal tohumu içeren ürünleri izler.',
+    detail:
+      'Hardal hassasiyeti olan bireylerde hardal tohumu, hardal unu ve sos türevlerinde dikkat gerekir.',
+    watchTerms: ['mustard', 'hardal', 'mustard seed'],
+  },
+  {
+    key: 'celery',
+    label: 'Kereviz',
+    shortDescription: 'Kereviz ve kereviz kökü türevleri için sinyal verir.',
+    detail:
+      'Kereviz alerjisi olan bireylerde kereviz sapı, kereviz kökü ve kurutulmuş kereviz türevleri de önemlidir.',
+    watchTerms: ['celery', 'kereviz', 'celeriac'],
+  },
+  {
+    key: 'lupin',
+    label: 'Lupin',
+    shortDescription: 'Lupin unu ve lupin türevlerini takip eder.',
+    detail:
+      'Bazı glutensiz ve özel karışımlarda görülen lupin, ayrı bir hassas madde olarak takip edilmelidir.',
+    watchTerms: ['lupin', 'lupine', 'acı bakla'],
+  },
+  {
+    key: 'sulfites',
+    label: 'Sülfitler',
+    shortDescription: 'Sülfit ve kükürt dioksit sinyallerini izler.',
+    detail:
+      'Sülfit hassasiyetinde sülfit, sulfur dioxide ve ilgili koruyucu sinyalleri dikkatle izlenmelidir.',
+    watchTerms: ['sulfite', 'sulfit', 'sulfites', 'sulfitler', 'sulphite', 'sulfur dioxide'],
+  },
 ];
 
 export const FAMILY_HEALTH_GOAL_DEFINITIONS: FamilyHealthGoalDefinition[] = [
@@ -158,7 +228,18 @@ export const FAMILY_HEALTH_GOAL_DEFINITIONS: FamilyHealthGoalDefinition[] = [
   },
 ];
 
-const HIGH_RISK_HOME_CODES = ['E951', 'E250', 'E211', 'E129', 'E102'] as const;
+const HIGH_RISK_HOME_CODES = [
+  'E951',
+  'E250',
+  'E211',
+  'E129',
+  'E102',
+  'E621',
+  'E950',
+  'E300',
+  'E322',
+  'E440',
+] as const;
 
 const normalizeValue = (value?: string | null): string =>
   String(value || '')

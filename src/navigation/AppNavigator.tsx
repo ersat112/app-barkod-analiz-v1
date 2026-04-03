@@ -41,9 +41,12 @@ import { PaywallScreen } from '../screens/main/PaywallScreen';
 import { PriceCompareScreen } from '../screens/main/PriceCompareScreen';
 import { FamilyHealthProfileScreen } from '../screens/main/FamilyHealthProfileScreen';
 import { RiskInsightDetailScreen } from '../screens/main/RiskInsightDetailScreen';
+import { HelpCenterScreen } from '../screens/main/HelpCenterScreen';
+import { HelpArticleScreen } from '../screens/main/HelpArticleScreen';
 import type { PaywallEntrySource } from '../types/monetization';
 import type { Product } from '../utils/analysis';
 import type { FamilyAllergenKey } from '../services/familyHealthProfile.service';
+import type { HelpArticleKey } from '../services/helpCenterContent.service';
 
 export type MainTabParamList = {
   Home: undefined;
@@ -64,6 +67,10 @@ export type RootStackParamList = {
   };
   ECodeCatalog: undefined;
   MethodologySources: undefined;
+  HelpCenter: undefined;
+  HelpArticle: {
+    articleKey: HelpArticleKey;
+  };
   LegalDocument: {
     documentKey: 'terms' | 'privacy' | 'medical' | 'premium' | 'independence';
   };
@@ -364,6 +371,16 @@ const AppStack = () => (
     <Stack.Screen
       name="MethodologySources"
       component={MethodologySourcesScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="HelpCenter"
+      component={HelpCenterScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="HelpArticle"
+      component={HelpArticleScreen}
       options={{ animation: 'slide_from_right' }}
     />
     <Stack.Screen
