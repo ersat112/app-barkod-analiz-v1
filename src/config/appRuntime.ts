@@ -5,6 +5,16 @@ export type AppEnvironment = 'development' | 'preview' | 'production';
 
 type RuntimeSource = 'fallback' | 'env_override';
 
+const EXPO_EXTRA = Object.freeze(
+  ((Constants.expoConfig?.extra ??
+    (Constants as typeof Constants & {
+      manifest2?: {
+        extra?: Record<string, unknown>;
+      };
+    }).manifest2?.extra ??
+    {}) as Record<string, unknown>)
+);
+
 const EXPO_PUBLIC_ENV = Object.freeze({
   EXPO_PUBLIC_ADMOB_APP_ID_ANDROID: process.env.EXPO_PUBLIC_ADMOB_APP_ID_ANDROID,
   EXPO_PUBLIC_ADMOB_APP_ID_IOS: process.env.EXPO_PUBLIC_ADMOB_APP_ID_IOS,
@@ -81,8 +91,25 @@ function normalizeString(value?: string | null): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function getOptionalExtraString(key: string): string | null {
+  const raw = EXPO_EXTRA[key];
+
+  if (typeof raw === 'string') {
+    return normalizeString(raw);
+  }
+
+  if (typeof raw === 'number' || typeof raw === 'boolean') {
+    return normalizeString(String(raw));
+  }
+
+  return null;
+}
+
 function getOptionalEnvString(key: string): string | null {
-  return normalizeString(EXPO_PUBLIC_ENV[key as ExpoPublicEnvKey]);
+  return (
+    normalizeString(EXPO_PUBLIC_ENV[key as ExpoPublicEnvKey]) ??
+    getOptionalExtraString(key)
+  );
 }
 
 export function hasEnvOverride(key: string): boolean {

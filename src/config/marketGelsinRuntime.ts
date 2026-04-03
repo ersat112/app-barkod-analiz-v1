@@ -110,6 +110,12 @@ export const hasMarketGelsinEnvOverride = (): boolean =>
   hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_ENABLED') ||
   hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS');
 
+export const getMarketGelsinEnvOverrideState = () => ({
+  apiUrl: hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_API_URL'),
+  enabled: hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_ENABLED'),
+  timeoutMs: hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS'),
+});
+
 export const getDefaultMarketGelsinRuntimeSnapshot =
   (): MarketGelsinRuntimeSnapshot => defaultSnapshot;
 

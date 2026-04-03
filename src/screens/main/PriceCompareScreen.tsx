@@ -21,6 +21,10 @@ import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
 import { ProductSummaryCard } from '../../components/ProductSummaryCard';
 import { ScreenOnboardingOverlay } from '../../components/ScreenOnboardingOverlay';
 import { inferMarketDisplayProductType } from '../../config/marketDisplay';
+import {
+  getDefaultMarketGelsinRuntimeSnapshot,
+  getMarketGelsinEnvOverrideState,
+} from '../../config/marketGelsinRuntime';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, type ThemeColors } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
@@ -390,6 +394,11 @@ export const PriceCompareScreen: React.FC = () => {
   );
 
   const preferredLocale = i18n.language || 'tr-TR';
+  const defaultMarketRuntime = useMemo(
+    () => getDefaultMarketGelsinRuntimeSnapshot(),
+    []
+  );
+  const marketRuntimeEnvState = useMemo(() => getMarketGelsinEnvOverrideState(), []);
   const [detectedLocation, setDetectedLocation] = useState<CurrentLocationContext | null>(null);
   const [detectedLocationLoading, setDetectedLocationLoading] = useState(false);
   const [detectedLocationResolved, setDetectedLocationResolved] = useState(false);
@@ -926,6 +935,36 @@ export const PriceCompareScreen: React.FC = () => {
     );
   }, [locationLabel, offerItems.length, selectedProduct, tt]);
 
+  const runtimeDiagnosticSummary = useMemo(() => {
+    const baseUrlLabel = marketRuntime.baseUrl || defaultMarketRuntime.baseUrl || '-';
+    const disableReasonLabel = marketRuntime.disableReason || '-';
+    const envStateLabel = [
+      marketRuntimeEnvState.apiUrl ? 'url' : null,
+      marketRuntimeEnvState.enabled ? 'enabled' : null,
+      marketRuntimeEnvState.timeoutMs ? 'timeout' : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+
+    return tt(
+      'price_compare_runtime_diagnostics_template',
+      'Tanılama: kaynak {{source}} • url {{url}} • neden {{reason}} • env {{env}}'
+    )
+      .replace('{{source}}', marketRuntime.source)
+      .replace('{{url}}', baseUrlLabel)
+      .replace('{{reason}}', disableReasonLabel)
+      .replace('{{env}}', envStateLabel || 'yok');
+  }, [
+    defaultMarketRuntime.baseUrl,
+    marketRuntime.baseUrl,
+    marketRuntime.disableReason,
+    marketRuntime.source,
+    marketRuntimeEnvState.apiUrl,
+    marketRuntimeEnvState.enabled,
+    marketRuntimeEnvState.timeoutMs,
+    tt,
+  ]);
+
   const selectedBestOffer = useMemo(() => {
     return getBestInStockOffer(offerItems.filter((offer) => offer.inStock));
   }, [offerItems]);
@@ -1414,13 +1453,23 @@ export const PriceCompareScreen: React.FC = () => {
         ) : null}
 
         {!marketRuntime.isEnabled ? (
-          <NoticeCard
-            text={tt(
-              'price_compare_runtime_disabled_notice',
-              'Fiyat servisi şu anda bağlı değil. Yerel ürün eşleşmelerini göstermeye devam ediyoruz.'
-            )}
-            colors={colors}
-          />
+          <View style={styles.runtimeNoticeWrap}>
+            <NoticeCard
+              text={tt(
+                'price_compare_runtime_disabled_notice',
+                'Fiyat servisi şu anda bağlı değil. Yerel ürün eşleşmelerini göstermeye devam ediyoruz.'
+              )}
+              colors={colors}
+            />
+            <Text
+              style={[
+                styles.runtimeDiagnosticsText,
+                { color: withAlpha(colors.mutedText, isDark ? 'D8' : 'CC') },
+              ]}
+            >
+              {runtimeDiagnosticSummary}
+            </Text>
+          </View>
         ) : null}
 
         <View
@@ -2178,6 +2227,15 @@ const styles = StyleSheet.create({
   locationPillText: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  runtimeNoticeWrap: {
+    gap: 8,
+    marginBottom: 14,
+  },
+  runtimeDiagnosticsText: {
+    fontSize: 11,
+    lineHeight: 16,
+    paddingHorizontal: 6,
   },
   searchCard: {
     borderWidth: 1,

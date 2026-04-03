@@ -144,15 +144,7 @@ const CenterScanTabButton: React.FC<{
         onPress={onPress}
         activeOpacity={0.92}
       >
-        <View
-          style={[
-            styles.centerScanButton,
-            {
-              backgroundColor: colors.primary,
-              shadowColor: colors.shadow,
-            },
-          ]}
-        >
+        <View style={styles.centerScanButton}>
           <Image source={SCAN_BUTTON_ART} style={styles.centerScanArtwork} resizeMode="contain" />
         </View>
         <Text style={[styles.centerScanLabel, { color: colors.primary }]}>{label}</Text>
@@ -604,16 +596,8 @@ const styles = StyleSheet.create({
   centerScanButton: {
     width: 62,
     height: 62,
-    borderRadius: 31,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOpacity: 0.24,
-    shadowRadius: 18,
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
-    elevation: 10,
   },
   centerScanArtwork: {
     width: 46,
