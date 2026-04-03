@@ -223,7 +223,7 @@ const PersistentBottomNav: React.FC<{
   );
   const tabBarTopPadding = Platform.OS === 'ios' ? 8 : 10;
   const tabBarHeight = resolvePersistentBottomNavHeight(insets.bottom);
-  const centerButtonBottomOffset = Math.max(tabBarBottomPadding - 14, 8);
+  const centerButtonBottomOffset = Math.max(tabBarBottomPadding - 8, 10);
   const activeSection =
     activeRouteName === 'Home' ||
     activeRouteName === 'History' ||
@@ -560,7 +560,7 @@ const styles = StyleSheet.create({
   },
   customTabBarGrid: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     minHeight: 56,
   },
@@ -589,7 +589,7 @@ const styles = StyleSheet.create({
   centerScanButtonWrap: {
     alignSelf: 'center',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     width: 90,
   },
   centerScanButtonOverlay: {
@@ -601,20 +601,19 @@ const styles = StyleSheet.create({
     zIndex: 3,
   },
   centerScanButton: {
-    width: 62,
-    height: 62,
+    width: 46,
+    height: 46,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 22,
   },
   centerScanArtwork: {
     width: 46,
     height: 46,
-    borderRadius: 23,
   },
   centerScanLabel: {
-    marginTop: -6,
-    fontSize: 9,
-    fontWeight: '900',
+    marginTop: 3,
+    fontSize: 10,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });

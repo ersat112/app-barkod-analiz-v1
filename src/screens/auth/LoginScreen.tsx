@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -41,6 +42,8 @@ import {
 import { withAlpha } from '../../utils/color';
 
 WebBrowser.maybeCompleteAuthSession();
+
+const AUTH_BRAND_LOGO = require('../../../assets/favicon.png');
 
 const randomNonce = (length = 32): string => {
   const chars =
@@ -529,13 +532,12 @@ export const LoginScreen: React.FC = () => {
             </View>
 
             <View style={styles.hero}>
-              <View
-                style={[
-                  styles.logoWrap,
-                  { backgroundColor: withAlpha(colors.primary, '14') },
-                ]}
-              >
-                <Ionicons name="barcode-outline" size={48} color={colors.primary} />
+              <View style={styles.logoWrap}>
+                <Image
+                  source={AUTH_BRAND_LOGO}
+                  style={styles.logoImage}
+                  resizeMode="contain"
+                />
               </View>
 
               <Text style={[styles.title, { color: colors.primary }]}>
@@ -774,10 +776,13 @@ const styles = StyleSheet.create({
   logoWrap: {
     width: 104,
     height: 104,
-    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
+  },
+  logoImage: {
+    width: 96,
+    height: 96,
   },
   title: {
     fontSize: 30,
