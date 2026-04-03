@@ -3203,6 +3203,7 @@ export const DetailScreen: React.FC = () => {
 
         <View style={styles.content}>
           <ProductHeadingSection
+            imageUri={productImageUri}
             brand={displayedProduct.brand || tt('unknown_brand', 'Bilinmeyen Marka')}
             name={displayedProduct.name || tt('unnamed_product', 'İsimsiz Ürün')}
             colors={colors}

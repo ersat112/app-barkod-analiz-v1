@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   View,
   type StyleProp,
+  type TextStyle,
   type ViewStyle,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -36,6 +37,10 @@ type ProductSummaryCardProps = {
   titleNumberOfLines?: number;
   metaNumberOfLines?: number;
   supportingNumberOfLines?: number;
+  eyebrowStyle?: StyleProp<TextStyle>;
+  titleStyle?: StyleProp<TextStyle>;
+  metaStyle?: StyleProp<TextStyle>;
+  supportingStyle?: StyleProp<TextStyle>;
 };
 
 export const ProductSummaryCard: React.FC<ProductSummaryCardProps> = ({
@@ -64,6 +69,10 @@ export const ProductSummaryCard: React.FC<ProductSummaryCardProps> = ({
   titleNumberOfLines = 2,
   metaNumberOfLines = 2,
   supportingNumberOfLines = 2,
+  eyebrowStyle,
+  titleStyle,
+  metaStyle,
+  supportingStyle,
 }) => {
   const resolvedImageUri = imageUrl || fallbackImageUrl;
 
@@ -104,21 +113,30 @@ export const ProductSummaryCard: React.FC<ProductSummaryCardProps> = ({
 
       <View style={styles.textWrap}>
         {eyebrow ? (
-          <Text style={[styles.eyebrow, { color: eyebrowColor }]} numberOfLines={1}>
+          <Text
+            style={[styles.eyebrow, { color: eyebrowColor }, eyebrowStyle]}
+            numberOfLines={1}
+          >
             {eyebrow}
           </Text>
         ) : null}
-        <Text style={[styles.title, { color: titleColor }]} numberOfLines={titleNumberOfLines}>
+        <Text
+          style={[styles.title, { color: titleColor }, titleStyle]}
+          numberOfLines={titleNumberOfLines}
+        >
           {title}
         </Text>
         {meta ? (
-          <Text style={[styles.meta, { color: metaColor }]} numberOfLines={metaNumberOfLines}>
+          <Text
+            style={[styles.meta, { color: metaColor }, metaStyle]}
+            numberOfLines={metaNumberOfLines}
+          >
             {meta}
           </Text>
         ) : null}
         {supportingText ? (
           <Text
-            style={[styles.supportingText, { color: supportingColor }]}
+            style={[styles.supportingText, { color: supportingColor }, supportingStyle]}
             numberOfLines={supportingNumberOfLines}
           >
             {supportingText}

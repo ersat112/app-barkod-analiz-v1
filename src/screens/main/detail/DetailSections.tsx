@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import { ProductSummaryCard } from '../../../components/ProductSummaryCard';
 import type { ThemeColors } from '../../../context/ThemeContext';
 import type { ECodeMatch } from '../../../utils/analysis';
 import { withAlpha } from '../../../utils/color';
@@ -213,20 +214,31 @@ export const DetailHeroSection: React.FC<{
 };
 
 export const ProductHeadingSection: React.FC<{
+  imageUri?: string | null;
   brand: string;
   name: string;
   colors: ThemeColors;
-}> = ({ brand, name, colors }) => {
+}> = ({ imageUri, brand, name, colors }) => {
   return (
-    <>
-      <Text style={[styles.brandName, { color: colors.primary }]} numberOfLines={1}>
-        {brand}
-      </Text>
-
-      <Text style={[styles.productName, { color: colors.text }]} numberOfLines={3}>
-        {name}
-      </Text>
-    </>
+    <ProductSummaryCard
+      imageUrl={imageUri}
+      fallbackImageUrl={FALLBACK_IMAGE}
+      eyebrow={brand}
+      title={name}
+      eyebrowColor={colors.primary}
+      titleColor={colors.text}
+      metaColor={colors.mutedText}
+      supportingColor={colors.mutedText}
+      imageBackgroundColor={colors.card}
+      fallbackIconColor={colors.primary}
+      alignItems="flex-start"
+      imageSize={76}
+      imageRadius={22}
+      containerStyle={styles.headingCard}
+      eyebrowStyle={styles.headingEyebrow}
+      titleStyle={styles.headingTitle}
+      titleNumberOfLines={3}
+    />
   );
 };
 
@@ -1268,17 +1280,18 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     flex: 1,
   },
-  brandName: {
+  headingCard: {
+    marginBottom: 18,
+  },
+  headingEyebrow: {
     fontSize: 13,
     fontWeight: '800',
     textTransform: 'uppercase',
     letterSpacing: 2,
   },
-  productName: {
+  headingTitle: {
     fontSize: 28,
     fontWeight: '900',
-    marginTop: 5,
-    marginBottom: 18,
     lineHeight: 34,
   },
   metaRow: {
