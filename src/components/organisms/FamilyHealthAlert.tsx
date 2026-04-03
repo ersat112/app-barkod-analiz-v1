@@ -79,7 +79,7 @@ export const FamilyHealthAlert: React.FC<FamilyHealthAlertProps> = ({
   return (
     <View style={[styles.wrapper, style]}>
       <Text style={[styles.sectionTitle, { color: colors.text }]}>
-        {tt('family_health_alerts', 'Aile ve Hassas Kullanım Uyarıları')}
+        {tt('family_health_alerts', 'Aile ve Hassas Kullanım')}
       </Text>
 
       {items.map((item) => {
@@ -93,19 +93,23 @@ export const FamilyHealthAlert: React.FC<FamilyHealthAlertProps> = ({
               {
                 backgroundColor: colors.card,
                 borderColor: colors.border,
+                borderLeftColor: meta.color,
               },
             ]}
           >
             <View style={[styles.iconWrap, { backgroundColor: meta.bg }]}>
-              <Ionicons name={meta.icon} size={22} color={meta.color} />
+              <Ionicons name={meta.icon} size={18} color={meta.color} />
             </View>
 
             <View style={styles.content}>
-              <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
+              <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
                 {item.title}
               </Text>
 
-              <Text style={[styles.description, { color: colors.text }]}>
+              <Text
+                style={[styles.description, { color: colors.mutedText }]}
+                numberOfLines={2}
+              >
                 {item.description}
               </Text>
             </View>
@@ -118,41 +122,42 @@ export const FamilyHealthAlert: React.FC<FamilyHealthAlertProps> = ({
 
 const styles = StyleSheet.create({
   wrapper: {
-    gap: 12,
+    gap: 8,
   },
   sectionTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '900',
     marginBottom: 2,
   },
   card: {
     borderWidth: 1,
-    borderRadius: 20,
-    padding: 16,
+    borderLeftWidth: 3,
+    borderRadius: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
   iconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
+    width: 34,
+    height: 34,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
-    marginTop: 2,
+    marginRight: 10,
+    marginTop: 1,
   },
   content: {
     flex: 1,
   },
   title: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '900',
-    lineHeight: 20,
+    lineHeight: 18,
   },
   description: {
-    marginTop: 6,
-    fontSize: 13,
-    lineHeight: 20,
-    opacity: 0.78,
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
   },
 });
