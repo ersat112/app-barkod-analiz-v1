@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, getDoc } from 'firebase/firestore';
 
 import { getEnvBoolean, hasEnvOverride } from '../config/appRuntime';
-import { auth, db } from '../config/firebase';
+import { db } from '../config/firebase';
 import {
   FEATURES,
   FIRESTORE_ROLLOUT_DOCUMENT,
@@ -258,18 +258,6 @@ async function fetchRemoteConfig(): Promise<FirestoreRuntimeConfigSnapshot> {
     const fallback = createDefaultRuntimeConfig();
     inMemoryConfig = fallback;
     return fallback;
-  }
-
-  const currentUser = auth.currentUser;
-
-  if (!currentUser) {
-    return (
-      inMemoryConfig ??
-      (await readStoredConfig()) ??
-      createDefaultRuntimeConfig({
-        fetchedAt: Date.now(),
-      })
-    );
   }
 
   const ref = doc(db, RUNTIME_CONFIG_COLLECTION, FIRESTORE_ROLLOUT_DOCUMENT);

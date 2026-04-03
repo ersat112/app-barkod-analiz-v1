@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { doc, getDoc } from 'firebase/firestore';
 
-import { db, auth } from '../config/firebase';
+import { db } from '../config/firebase';
 import {
   getDefaultMarketGelsinRuntimeSnapshot,
   getMarketGelsinRuntimeSnapshot,
@@ -152,17 +152,6 @@ async function fetchRemoteConfig(): Promise<MarketGelsinRuntimeSnapshot> {
   if (!FEATURES.firebase.runtimeConfigRolloutEnabled || hasMarketGelsinEnvOverride()) {
     const fallback = resetMarketGelsinRuntimeSnapshot();
     inMemoryConfig = fallback;
-    return fallback;
-  }
-
-  const currentUser = auth.currentUser;
-
-  if (!currentUser) {
-    const fallback =
-      inMemoryConfig ??
-      (await readStoredConfig()) ??
-      getDefaultMarketGelsinRuntimeSnapshot();
-    inMemoryConfig = setMarketGelsinRuntimeSnapshot(fallback);
     return fallback;
   }
 

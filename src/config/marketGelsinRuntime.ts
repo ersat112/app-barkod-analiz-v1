@@ -11,6 +11,7 @@ import {
 export type MarketGelsinRuntimeSource =
   | 'env_override'
   | 'development_fallback'
+  | 'emulator_fallback'
   | 'local_cache'
   | 'remote_live'
   | 'fallback';
@@ -33,6 +34,46 @@ export type MarketGelsinRuntimeSnapshot = {
 
 const normalizeBaseUrl = (value: string): string =>
   value.trim().replace(/\/+$/g, '');
+
+const getPlatformConstants = (): Record<string, unknown> => {
+  const platformWithConstants = Platform as typeof Platform & {
+    constants?: Record<string, unknown>;
+  };
+
+  if (platformWithConstants.constants) {
+    return platformWithConstants.constants;
+  }
+
+  const nativePlatformConstants =
+    NativeModules?.PlatformConstants as Record<string, unknown> | undefined;
+
+  return nativePlatformConstants ?? {};
+};
+
+const getPlatformConstantText = (key: string): string =>
+  String(getPlatformConstants()[key] ?? '')
+    .trim()
+    .toLowerCase();
+
+const isProbablyAndroidEmulator = (): boolean => {
+  if (Platform.OS !== 'android') {
+    return false;
+  }
+
+  const fingerprint = getPlatformConstantText('Fingerprint');
+  const model = getPlatformConstantText('Model');
+  const brand = getPlatformConstantText('Brand');
+
+  return (
+    fingerprint.includes('generic') ||
+    fingerprint.includes('emulator') ||
+    fingerprint.includes('sdk_gphone') ||
+    model.includes('sdk_gphone') ||
+    model.includes('emulator') ||
+    model.includes('android sdk built for x86') ||
+    brand.includes('generic')
+  );
+};
 
 const resolveDevelopmentHost = (): string | null => {
   if (!APP_RUNTIME.isDevelopment) {
@@ -62,14 +103,22 @@ const developmentFallbackBaseUrl = (() => {
   return host ? `http://${host}:8040` : '';
 })();
 
+const emulatorFallbackBaseUrl =
+  !APP_RUNTIME.isDevelopment && isProbablyAndroidEmulator()
+    ? 'http://10.0.2.2:8040'
+    : '';
+
 function resolveDefaultSnapshot(): MarketGelsinRuntimeSnapshot {
   const envBaseUrl = normalizeBaseUrl(
     getEnvString('EXPO_PUBLIC_MARKET_GELSIN_API_URL', '')
   );
-  const baseUrl = envBaseUrl || normalizeBaseUrl(developmentFallbackBaseUrl);
+  const baseUrl =
+    envBaseUrl ||
+    normalizeBaseUrl(developmentFallbackBaseUrl) ||
+    normalizeBaseUrl(emulatorFallbackBaseUrl);
   const enabledByEnv = getEnvBoolean(
     'EXPO_PUBLIC_MARKET_GELSIN_ENABLED',
-    Boolean(envBaseUrl || developmentFallbackBaseUrl)
+    Boolean(envBaseUrl || developmentFallbackBaseUrl || emulatorFallbackBaseUrl)
   );
   const timeoutMs = Math.max(
     3000,
@@ -83,6 +132,8 @@ function resolveDefaultSnapshot(): MarketGelsinRuntimeSnapshot {
     ? 'env_override'
     : developmentFallbackBaseUrl
       ? 'development_fallback'
+      : emulatorFallbackBaseUrl
+        ? 'emulator_fallback'
       : 'fallback';
   const isEnabled = Boolean(baseUrl) && enabledByEnv;
   const disableReason: MarketGelsinDisableReason = !baseUrl
