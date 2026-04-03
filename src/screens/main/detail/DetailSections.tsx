@@ -383,9 +383,18 @@ export const ScoreOverviewCard: React.FC<{
   grade: string;
   riskLabel: string;
   recommendationText: string;
+  summaryText?: string;
   analysisColor: string;
   colors: ThemeColors;
-}> = ({ score, grade, riskLabel, recommendationText, analysisColor, colors }) => {
+}> = ({
+  score,
+  grade,
+  riskLabel,
+  recommendationText,
+  summaryText,
+  analysisColor,
+  colors,
+}) => {
   return (
     <View
       style={[
@@ -428,6 +437,12 @@ export const ScoreOverviewCard: React.FC<{
         <Text style={[styles.scoreRecommendation, { color: colors.text }]}>
           {recommendationText}
         </Text>
+
+        {summaryText ? (
+          <Text style={[styles.scoreSummaryNote, { color: colors.mutedText }]}>
+            {summaryText}
+          </Text>
+        ) : null}
       </View>
     </View>
   );
@@ -1447,6 +1462,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 20,
     opacity: 0.82,
+  },
+  scoreSummaryNote: {
+    marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
   },
   summaryBox: {
     marginBottom: 26,

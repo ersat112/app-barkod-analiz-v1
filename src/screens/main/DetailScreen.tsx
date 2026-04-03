@@ -3250,6 +3250,7 @@ export const DetailScreen: React.FC = () => {
               grade={displayGrade}
               riskLabel={riskCompoundLabel}
               recommendationText={recommendationText}
+              summaryText={summaryText}
               analysisColor={analysisColor}
               colors={colors}
             />
@@ -3257,15 +3258,13 @@ export const DetailScreen: React.FC = () => {
 
           <FamilyHealthAlert items={familyAlerts} style={{ marginBottom: 24 }} />
 
-          <SummarySection
-            title={
-              isMedicineProduct
-                ? tt('medicine_record_title', 'İlaç Kayıt Özeti')
-                : tt('analysis_summary', 'Analiz Özeti')
-            }
-            text={summaryText}
-            colors={colors}
-          />
+          {isMedicineProduct ? (
+            <SummarySection
+              title={tt('medicine_record_title', 'İlaç Kayıt Özeti')}
+              text={summaryText}
+              colors={colors}
+            />
+          ) : null}
 
           {nutritionSuitabilityText ? (
             <TextSection
