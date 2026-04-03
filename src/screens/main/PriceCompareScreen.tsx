@@ -24,6 +24,7 @@ import { inferMarketDisplayProductType } from '../../config/marketDisplay';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, type ThemeColors } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
+import { useMarketGelsinRuntime } from '../../hooks/useMarketGelsinRuntime';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import {
   getBestInStockOffer,
@@ -59,7 +60,6 @@ import type {
 } from '../../types/marketPricing';
 import { usePreferenceStore } from '../../store/usePreferenceStore';
 import { withAlpha } from '../../utils/color';
-import { MARKET_GELSIN_RUNTIME } from '../../config/marketGelsinRuntime';
 import { searchLocalPriceCompareProducts } from '../../services/priceCompareSearch.service';
 import {
   hasSeenScreenOnboarding,
@@ -368,6 +368,7 @@ export const PriceCompareScreen: React.FC = () => {
   const route = useRoute<PriceCompareRoute>();
   const { t, i18n } = useTranslation();
   const { colors, isDark } = useTheme();
+  const { snapshot: marketRuntime } = useMarketGelsinRuntime();
   const { profile } = useAuth();
   const locationPermissionGranted = usePreferenceStore(
     (state) => state.locationPermissionGranted
@@ -1389,7 +1390,7 @@ export const PriceCompareScreen: React.FC = () => {
             >
               <Ionicons name="server-outline" size={14} color={colors.primary} />
               <Text style={[styles.locationPillText, { color: colors.primary }]}>
-                {MARKET_GELSIN_RUNTIME.isEnabled
+                {marketRuntime.isEnabled
                   ? tt('price_compare_live_runtime', 'Canlı fiyat akışı')
                   : tt('price_compare_runtime_disabled', 'Fiyat servisi kapalı')}
               </Text>
@@ -1412,7 +1413,7 @@ export const PriceCompareScreen: React.FC = () => {
           />
         ) : null}
 
-        {!MARKET_GELSIN_RUNTIME.isEnabled ? (
+        {!marketRuntime.isEnabled ? (
           <NoticeCard
             text={tt(
               'price_compare_runtime_disabled_notice',

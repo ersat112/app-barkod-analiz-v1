@@ -1,8 +1,35 @@
 import { NativeModules, Platform } from 'react-native';
 
-import { APP_RUNTIME, getEnvBoolean, getEnvNumber, getEnvString, hasEnvOverride } from './appRuntime';
+import {
+  APP_RUNTIME,
+  getEnvBoolean,
+  getEnvNumber,
+  getEnvString,
+  hasEnvOverride,
+} from './appRuntime';
 
-export type MarketGelsinRuntimeSource = 'env_override' | 'development_fallback' | 'fallback';
+export type MarketGelsinRuntimeSource =
+  | 'env_override'
+  | 'development_fallback'
+  | 'local_cache'
+  | 'remote_live'
+  | 'fallback';
+
+export type MarketGelsinDisableReason =
+  | 'missing_base_url'
+  | 'disabled_by_env'
+  | 'disabled_by_remote'
+  | null;
+
+export type MarketGelsinRuntimeSnapshot = {
+  source: MarketGelsinRuntimeSource;
+  version: number;
+  fetchedAt: number | null;
+  baseUrl: string;
+  timeoutMs: number;
+  isEnabled: boolean;
+  disableReason: MarketGelsinDisableReason;
+};
 
 const normalizeBaseUrl = (value: string): string =>
   value.trim().replace(/\/+$/g, '');
@@ -35,25 +62,93 @@ const developmentFallbackBaseUrl = (() => {
   return host ? `http://${host}:8040` : '';
 })();
 
-const envBaseUrl = normalizeBaseUrl(getEnvString('EXPO_PUBLIC_MARKET_GELSIN_API_URL', ''));
-const baseUrl = envBaseUrl || normalizeBaseUrl(developmentFallbackBaseUrl);
-const enabledByEnv = getEnvBoolean(
-  'EXPO_PUBLIC_MARKET_GELSIN_ENABLED',
-  Boolean(envBaseUrl || developmentFallbackBaseUrl)
-);
-const timeoutMs = Math.max(3000, getEnvNumber('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS', 8000));
-
-export const MARKET_GELSIN_RUNTIME = Object.freeze({
-  source: (
+function resolveDefaultSnapshot(): MarketGelsinRuntimeSnapshot {
+  const envBaseUrl = normalizeBaseUrl(
+    getEnvString('EXPO_PUBLIC_MARKET_GELSIN_API_URL', '')
+  );
+  const baseUrl = envBaseUrl || normalizeBaseUrl(developmentFallbackBaseUrl);
+  const enabledByEnv = getEnvBoolean(
+    'EXPO_PUBLIC_MARKET_GELSIN_ENABLED',
+    Boolean(envBaseUrl || developmentFallbackBaseUrl)
+  );
+  const timeoutMs = Math.max(
+    3000,
+    getEnvNumber('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS', 8000)
+  );
+  const hasOverride =
     hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_API_URL') ||
     hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_ENABLED') ||
-    hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS')
-      ? 'env_override'
-      : developmentFallbackBaseUrl
-        ? 'development_fallback'
-        : 'fallback'
-  ) as MarketGelsinRuntimeSource,
-  baseUrl,
-  timeoutMs,
-  isEnabled: Boolean(baseUrl) && enabledByEnv,
+    hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS');
+  const source: MarketGelsinRuntimeSource = hasOverride
+    ? 'env_override'
+    : developmentFallbackBaseUrl
+      ? 'development_fallback'
+      : 'fallback';
+  const isEnabled = Boolean(baseUrl) && enabledByEnv;
+  const disableReason: MarketGelsinDisableReason = !baseUrl
+    ? 'missing_base_url'
+    : !enabledByEnv
+      ? 'disabled_by_env'
+      : null;
+
+  return {
+    source,
+    version: 1,
+    fetchedAt: null,
+    baseUrl,
+    timeoutMs,
+    isEnabled,
+    disableReason,
+  };
+}
+
+const defaultSnapshot = resolveDefaultSnapshot();
+let currentSnapshot: MarketGelsinRuntimeSnapshot = defaultSnapshot;
+
+export const hasMarketGelsinEnvOverride = (): boolean =>
+  hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_API_URL') ||
+  hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_ENABLED') ||
+  hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS');
+
+export const getDefaultMarketGelsinRuntimeSnapshot =
+  (): MarketGelsinRuntimeSnapshot => defaultSnapshot;
+
+export const getMarketGelsinRuntimeSnapshot =
+  (): MarketGelsinRuntimeSnapshot => currentSnapshot;
+
+export const setMarketGelsinRuntimeSnapshot = (
+  nextSnapshot: MarketGelsinRuntimeSnapshot
+): MarketGelsinRuntimeSnapshot => {
+  currentSnapshot = {
+    ...nextSnapshot,
+    baseUrl: normalizeBaseUrl(nextSnapshot.baseUrl),
+  };
+  return currentSnapshot;
+};
+
+export const resetMarketGelsinRuntimeSnapshot = (): MarketGelsinRuntimeSnapshot =>
+  setMarketGelsinRuntimeSnapshot(defaultSnapshot);
+
+export const MARKET_GELSIN_RUNTIME = Object.freeze({
+  get source(): MarketGelsinRuntimeSource {
+    return currentSnapshot.source;
+  },
+  get version(): number {
+    return currentSnapshot.version;
+  },
+  get fetchedAt(): number | null {
+    return currentSnapshot.fetchedAt;
+  },
+  get baseUrl(): string {
+    return currentSnapshot.baseUrl;
+  },
+  get timeoutMs(): number {
+    return currentSnapshot.timeoutMs;
+  },
+  get isEnabled(): boolean {
+    return currentSnapshot.isEnabled;
+  },
+  get disableReason(): MarketGelsinDisableReason {
+    return currentSnapshot.disableReason;
+  },
 });

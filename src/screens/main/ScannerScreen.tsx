@@ -33,8 +33,8 @@ import {
 } from '../../components/marketPricingSummary';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
-import { MARKET_GELSIN_RUNTIME } from '../../config/marketGelsinRuntime';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
+import { useMarketGelsinRuntime } from '../../hooks/useMarketGelsinRuntime';
 import { adService } from '../../services/adService';
 import { entitlementService } from '../../services/entitlement.service';
 import { freeScanPolicyService } from '../../services/freeScanPolicy.service';
@@ -139,6 +139,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 }) => {
   const { t, i18n } = useTranslation();
   const { colors } = useTheme();
+  const { snapshot: marketRuntime } = useMarketGelsinRuntime();
   const { profile } = useAuth();
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
@@ -1237,7 +1238,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
   useEffect(() => {
     if (
-      !MARKET_GELSIN_RUNTIME.isEnabled ||
+      !marketRuntime.isEnabled ||
       !latestPreview?.product ||
       latestPreview.status !== 'found' ||
       latestPreview.isTextAnalysis ||
@@ -1294,7 +1295,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [latestPreview, profileCityCode, profileDistrict, tt]);
+  }, [latestPreview, marketRuntime.isEnabled, profileCityCode, profileDistrict, tt]);
 
   useEffect(() => {
     setPreviewMarketSheetOffer(null);

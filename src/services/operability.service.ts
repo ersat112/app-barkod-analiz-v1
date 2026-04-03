@@ -24,7 +24,12 @@ import {
   type FirebaseAccessSnapshot,
 } from './firebaseAccess.service';
 import { resolveFirestoreRuntimeConfig } from './firestoreRuntimeConfig.service';
+import { resolveMarketGelsinRuntimeConfig } from './marketGelsinRuntimeConfig.service';
 import { freeScanPolicyService } from './freeScanPolicy.service';
+import {
+  fetchMarketIntegrationsStatus,
+  fetchMarketRuntimeStatus,
+} from './marketPricing.service';
 import { monetizationPolicyService } from './monetizationPolicy.service';
 import { getRecentMonetizationFlowLogs } from './purchaseFlowLog.service';
 import { getPurchaseProviderDiagnosticsSnapshot } from './purchaseProvider.service';
@@ -44,7 +49,27 @@ export type StartupBootstrapSnapshot = {
   sharedCacheFlushCount: number;
   analyticsFlushCount: number;
   adPolicySynced: boolean;
+  marketGelsinRuntimeResolved: boolean;
   authUid: string | null;
+};
+
+export type MarketPricingDiagnosticsSnapshot = {
+  fetchedAt: DiagnosticsTimestamp;
+  runtimeSource: string;
+  runtimeVersion: number;
+  runtimeFetchedAt: string | null;
+  runtimeEnabled: boolean;
+  baseUrl: string | null;
+  timeoutMs: number;
+  disableReason: string | null;
+  apiReachable: boolean;
+  activeMarkets: number | null;
+  liveAdapters: number | null;
+  sqliteEnabled: boolean | null;
+  postgresEnabled: boolean | null;
+  firebaseEnabled: boolean | null;
+  statusError: string | null;
+  integrationsError: string | null;
 };
 
 export type RemoteCacheDiagnosticsSnapshot = {
@@ -83,6 +108,7 @@ export type OperabilityDiagnosticsSnapshot = {
   fetchedAt: DiagnosticsTimestamp;
   summary: OperabilityDiagnosticsSummary;
   bootstrap: OperabilitySection<StartupBootstrapSnapshot>;
+  marketPricing: OperabilitySection<MarketPricingDiagnosticsSnapshot>;
   ad: OperabilitySection<AdDiagnosticsSnapshot>;
   monetization: OperabilitySection<MonetizationDiagnosticsSnapshot>;
   remoteCache: OperabilitySection<RemoteCacheDiagnosticsSnapshot>;
@@ -153,7 +179,89 @@ async function buildStartupBootstrapSnapshot(options?: {
     sharedCacheFlushCount: bootstrapSnapshot.sharedCacheFlushCount,
     analyticsFlushCount: bootstrapSnapshot.analyticsFlushCount,
     adPolicySynced: bootstrapSnapshot.adPolicySynced,
+    marketGelsinRuntimeResolved:
+      bootstrapSnapshot.marketGelsinRuntimeResolved,
     authUid: bootstrapSnapshot.authUid,
+  };
+}
+
+async function buildMarketPricingDiagnosticsSnapshot(options?: {
+  forceRefresh?: boolean;
+}): Promise<MarketPricingDiagnosticsSnapshot> {
+  const runtime = await resolveMarketGelsinRuntimeConfig({
+    forceRefresh: Boolean(options?.forceRefresh),
+    allowStale: !options?.forceRefresh,
+  });
+
+  if (!runtime.isEnabled) {
+    return {
+      fetchedAt: new Date().toISOString(),
+      runtimeSource: runtime.source,
+      runtimeVersion: runtime.version,
+      runtimeFetchedAt: runtime.fetchedAt
+        ? new Date(runtime.fetchedAt).toISOString()
+        : null,
+      runtimeEnabled: runtime.isEnabled,
+      baseUrl: runtime.baseUrl || null,
+      timeoutMs: runtime.timeoutMs,
+      disableReason: runtime.disableReason,
+      apiReachable: false,
+      activeMarkets: null,
+      liveAdapters: null,
+      sqliteEnabled: null,
+      postgresEnabled: null,
+      firebaseEnabled: null,
+      statusError: null,
+      integrationsError: null,
+    };
+  }
+
+  const [statusResult, integrationsResult] = await Promise.allSettled([
+    fetchMarketRuntimeStatus(),
+    fetchMarketIntegrationsStatus(),
+  ]);
+
+  const status =
+    statusResult.status === 'fulfilled' ? statusResult.value : null;
+  const integrations =
+    integrationsResult.status === 'fulfilled' ? integrationsResult.value : null;
+
+  return {
+    fetchedAt: new Date().toISOString(),
+    runtimeSource: runtime.source,
+    runtimeVersion: runtime.version,
+    runtimeFetchedAt: runtime.fetchedAt
+      ? new Date(runtime.fetchedAt).toISOString()
+      : null,
+    runtimeEnabled: runtime.isEnabled,
+    baseUrl: runtime.baseUrl || null,
+    timeoutMs: runtime.timeoutMs,
+    disableReason: runtime.disableReason,
+    apiReachable: Boolean(status),
+    activeMarkets:
+      typeof status?.activeMarkets === 'number' ? status.activeMarkets : null,
+    liveAdapters:
+      typeof status?.liveAdapters === 'number' ? status.liveAdapters : null,
+    sqliteEnabled:
+      typeof integrations?.sqlite?.enabled === 'boolean'
+        ? integrations.sqlite.enabled
+        : null,
+    postgresEnabled:
+      typeof integrations?.postgres?.enabled === 'boolean'
+        ? integrations.postgres.enabled
+        : null,
+    firebaseEnabled:
+      typeof integrations?.firebase?.enabled === 'boolean'
+        ? integrations.firebase.enabled
+        : null,
+    statusError:
+      statusResult.status === 'rejected'
+        ? toErrorMessage(statusResult.reason)
+        : null,
+    integrationsError:
+      integrationsResult.status === 'rejected'
+        ? toErrorMessage(integrationsResult.reason)
+        : null,
   };
 }
 
@@ -473,10 +581,23 @@ export async function getOperabilityDiagnosticsSnapshot(options?: {
   forceRefresh?: boolean;
   flushAnalytics?: boolean;
 }): Promise<OperabilityDiagnosticsSnapshot> {
-  const [bootstrap, ad, monetization, remoteCache, firebaseAccess, firebaseServices] =
+  const [
+    bootstrap,
+    marketPricing,
+    ad,
+    monetization,
+    remoteCache,
+    firebaseAccess,
+    firebaseServices,
+  ] =
     await Promise.all([
       captureSection(() =>
         buildStartupBootstrapSnapshot({
+          forceRefresh: Boolean(options?.forceRefresh),
+        })
+      ),
+      captureSection(() =>
+        buildMarketPricingDiagnosticsSnapshot({
           forceRefresh: Boolean(options?.forceRefresh),
         })
       ),
@@ -505,7 +626,8 @@ export async function getOperabilityDiagnosticsSnapshot(options?: {
   const bootstrapReady =
     Boolean(bootstrap.data?.localBootstrapCompleted) &&
     Boolean(bootstrap.data?.databaseReady) &&
-    Boolean(bootstrap.data?.firestoreRuntimeConfigResolved);
+    Boolean(bootstrap.data?.firestoreRuntimeConfigResolved) &&
+    Boolean(bootstrap.data?.marketGelsinRuntimeResolved);
 
   const runtimeReady =
     remoteCache.data?.runtimeReady ??
@@ -524,6 +646,7 @@ export async function getOperabilityDiagnosticsSnapshot(options?: {
       lastBootstrapError: bootstrap.error,
     },
     bootstrap,
+    marketPricing,
     ad,
     monetization,
     remoteCache,

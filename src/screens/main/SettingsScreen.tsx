@@ -253,11 +253,19 @@ function formatDateTimeValue(value?: string | number | null): string {
   }
 }
 
-function boolStateText(value: boolean): string {
+function boolStateText(value?: boolean | null): string {
+  if (typeof value !== 'boolean') {
+    return '-';
+  }
+
   return value ? 'ON' : 'OFF';
 }
 
-function formatOptionalText(value?: string | null): string {
+function formatOptionalText(value?: string | number | null): string {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+
   if (typeof value === 'string' && value.trim()) {
     return value;
   }
@@ -651,6 +659,11 @@ export const SettingsScreen: React.FC = () => {
   const startupDiagnosticsError =
     operabilityDiagnostics?.bootstrap.error ?? operabilityError;
 
+  const marketPricingDiagnostics =
+    operabilityDiagnostics?.marketPricing.data ?? null;
+  const marketPricingDiagnosticsError =
+    operabilityDiagnostics?.marketPricing.error ?? operabilityError;
+
   const adDiagnostics = operabilityDiagnostics?.ad.data ?? null;
   const adDiagnosticsError =
     operabilityDiagnostics?.ad.error ?? operabilityError;
@@ -678,6 +691,10 @@ export const SettingsScreen: React.FC = () => {
   const adDiagnosticsFetchedAtText = useMemo(() => {
     return formatTimeValue(adDiagnostics?.fetchedAt);
   }, [adDiagnostics?.fetchedAt]);
+
+  const marketPricingDiagnosticsFetchedAtText = useMemo(() => {
+    return formatTimeValue(marketPricingDiagnostics?.fetchedAt);
+  }, [marketPricingDiagnostics?.fetchedAt]);
 
   const monetizationDiagnosticsFetchedAtText = useMemo(() => {
     return formatTimeValue(monetizationDiagnostics?.fetchedAt);
@@ -1593,6 +1610,17 @@ export const SettingsScreen: React.FC = () => {
 
                   <View style={styles.diagnosticsRow}>
                     <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      market_gelsin runtime
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {boolStateText(
+                        startupDiagnostics?.marketGelsinRuntimeResolved ?? false
+                      )}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
                       Auth UID
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
@@ -1606,6 +1634,240 @@ export const SettingsScreen: React.FC = () => {
                     </Text>
                     <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
                       {formatOptionalText(operabilityDiagnostics.summary.lastBootstrapError)}
+                    </Text>
+                  </View>
+                </View>
+              </>
+            ) : null}
+          </View>
+        </>
+      ) : null}
+
+      {operabilityDiagnosticsEnabled ? (
+        <>
+          <Text
+            style={[
+              styles.sectionTitle,
+              { color: colors.text, marginHorizontal: layout.horizontalPadding, marginTop: 10 },
+            ]}
+          >
+            {tt('market_pricing_diagnostics', 'Market Fiyat Tanılama')}
+          </Text>
+
+          <View
+            style={[
+              styles.diagnosticsCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                marginHorizontal: layout.horizontalPadding,
+              },
+            ]}
+          >
+            <View style={styles.diagnosticsHeader}>
+              <View style={styles.diagnosticsHeaderLeft}>
+                <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
+                  <Ionicons name="server-outline" size={20} color={colors.primary} />
+                </View>
+
+                <View style={styles.diagnosticsHeaderTextWrap}>
+                  <Text style={[styles.diagnosticsTitle, { color: colors.text }]}>
+                    {tt('market_pricing_runtime_state', 'market_gelsin runtime + API')}
+                  </Text>
+                  <Text style={[styles.diagnosticsSubtitle, { color: colors.text }]}>
+                    {tt('last_refresh', 'Son yenileme')}: {marketPricingDiagnosticsFetchedAtText}
+                  </Text>
+                </View>
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.diagnosticsRefreshButton,
+                  operabilityRefreshing && styles.diagnosticsRefreshButtonDisabled,
+                  {
+                    borderColor: colors.border,
+                    backgroundColor: `${colors.primary}10`,
+                  },
+                ]}
+                onPress={() => {
+                  void refreshOperabilityDiagnostics();
+                }}
+                disabled={operabilityRefreshing}
+                activeOpacity={0.85}
+              >
+                {operabilityRefreshing ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <Ionicons name="refresh" size={18} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+            </View>
+
+            {operabilityLoading ? (
+              <View style={styles.diagnosticsLoadingWrap}>
+                <ActivityIndicator size="small" color={colors.primary} />
+              </View>
+            ) : null}
+
+            {marketPricingDiagnosticsError ? (
+              <Text style={styles.diagnosticsErrorText}>
+                {marketPricingDiagnosticsError}
+              </Text>
+            ) : null}
+
+            {marketPricingDiagnostics ? (
+              <>
+                <View style={styles.diagnosticsPillsRow}>
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      {
+                        backgroundColor: marketPricingDiagnostics.runtimeEnabled
+                          ? `${colors.primary}14`
+                          : '#FF444414',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        {
+                          color: marketPricingDiagnostics.runtimeEnabled
+                            ? colors.primary
+                            : '#FF4444',
+                        },
+                      ]}
+                    >
+                      Runtime: {boolStateText(marketPricingDiagnostics.runtimeEnabled)}
+                    </Text>
+                  </View>
+
+                  <View
+                    style={[
+                      styles.diagnosticsPill,
+                      {
+                        backgroundColor: marketPricingDiagnostics.apiReachable
+                          ? `${colors.primary}14`
+                          : `${colors.border}55`,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.diagnosticsPillText,
+                        {
+                          color: marketPricingDiagnostics.apiReachable
+                            ? colors.primary
+                            : colors.text,
+                        },
+                      ]}
+                    >
+                      API: {boolStateText(marketPricingDiagnostics.apiReachable)}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.diagnosticsGrid}>
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Runtime source
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {marketPricingDiagnostics.runtimeSource}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Runtime version
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {marketPricingDiagnostics.runtimeVersion}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Base URL
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(marketPricingDiagnostics.baseUrl)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Timeout
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {marketPricingDiagnostics.timeoutMs} ms
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Disable reason
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(marketPricingDiagnostics.disableReason)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Active markets
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(marketPricingDiagnostics.activeMarkets)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Live adapters
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(marketPricingDiagnostics.liveAdapters)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      SQLite / Postgres / Firebase
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {[
+                        boolStateText(marketPricingDiagnostics.sqliteEnabled),
+                        boolStateText(marketPricingDiagnostics.postgresEnabled),
+                        boolStateText(marketPricingDiagnostics.firebaseEnabled),
+                      ].join(' / ')}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Runtime fetched at
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(marketPricingDiagnostics.runtimeFetchedAt)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Status error
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(marketPricingDiagnostics.statusError)}
+                    </Text>
+                  </View>
+
+                  <View style={styles.diagnosticsRow}>
+                    <Text style={[styles.diagnosticsLabel, { color: colors.text }]}>
+                      Integrations error
+                    </Text>
+                    <Text style={[styles.diagnosticsValue, { color: colors.text }]}>
+                      {formatOptionalText(marketPricingDiagnostics.integrationsError)}
                     </Text>
                   </View>
                 </View>

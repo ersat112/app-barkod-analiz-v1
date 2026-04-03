@@ -16,6 +16,9 @@ export const RUNTIME_CONFIG_COLLECTION = 'runtime_config' as const;
 export const FIRESTORE_ROLLOUT_DOCUMENT = 'firestore_rollout' as const;
 export const FIRESTORE_RUNTIME_CONFIG_STORAGE_KEY =
   'erenesal_firestore_runtime_config_v1' as const;
+export const MARKET_GELSIN_RUNTIME_DOCUMENT = 'market_gelsin_runtime' as const;
+export const MARKET_GELSIN_RUNTIME_STORAGE_KEY =
+  'erenesal_market_gelsin_runtime_v1' as const;
 
 export const AD_REMOTE_POLICY_COLLECTION = RUNTIME_CONFIG_COLLECTION;
 export const AD_REMOTE_POLICY_DOCUMENT = 'ad_policy' as const;

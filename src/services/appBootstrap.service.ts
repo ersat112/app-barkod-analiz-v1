@@ -5,6 +5,7 @@ import { auth } from '../config/firebase';
 import { initDatabase } from './db';
 import { getFirebaseAccessSnapshot } from './firebaseAccess.service';
 import { resolveFirestoreRuntimeConfig } from './firestoreRuntimeConfig.service';
+import { resolveMarketGelsinRuntimeConfig } from './marketGelsinRuntimeConfig.service';
 import {
   flushHistoryRemoteSyncQueue,
   initializeHistoryRemoteSyncQueue,
@@ -30,6 +31,7 @@ export type AppBootstrapSnapshot = {
   sharedCacheFlushCount: number;
   analyticsFlushCount: number;
   adPolicySynced: boolean;
+  marketGelsinRuntimeResolved: boolean;
   lastError: string | null;
 };
 
@@ -65,6 +67,7 @@ function createSnapshot(
     sharedCacheFlushCount: 0,
     analyticsFlushCount: 0,
     adPolicySynced: false,
+    marketGelsinRuntimeResolved: false,
     lastError: null,
     ...overrides,
   };
@@ -89,6 +92,9 @@ export const ensureAppBootstrap = async (): Promise<AppBootstrapSnapshot> => {
       initializeHistoryRemoteSyncQueue();
       initializeMissingProductDraftSync();
       const admobInitialized = await initializeAdMob();
+      await resolveMarketGelsinRuntimeConfig({
+        allowStale: true,
+      });
 
       localBootstrapCompleted = true;
       lastSnapshot = createSnapshot({
@@ -96,6 +102,7 @@ export const ensureAppBootstrap = async (): Promise<AppBootstrapSnapshot> => {
         databaseReady: true,
         queueLifecycleAttached: true,
         admobInitialized,
+        marketGelsinRuntimeResolved: true,
       });
 
       console.log('[AppBootstrap] local bootstrap completed', lastSnapshot);
@@ -139,18 +146,23 @@ export const runAuthenticatedAppBootstrap = async (options?: {
           ...baseSnapshot,
           fetchedAt: new Date().toISOString(),
           isAuthenticated: false,
-          authUid: null,
-          firestoreRuntimeConfigResolved: false,
-          sharedCacheFlushCount: 0,
-          analyticsFlushCount: 0,
-          adPolicySynced: false,
-          lastError: null,
-        };
+        authUid: null,
+        firestoreRuntimeConfigResolved: false,
+        sharedCacheFlushCount: 0,
+        analyticsFlushCount: 0,
+        adPolicySynced: false,
+        marketGelsinRuntimeResolved: baseSnapshot.marketGelsinRuntimeResolved,
+        lastError: null,
+      };
 
         return lastSnapshot;
       }
 
       await resolveFirestoreRuntimeConfig({
+        forceRefresh: Boolean(options?.forceRefresh),
+        allowStale: !options?.forceRefresh,
+      });
+      await resolveMarketGelsinRuntimeConfig({
         forceRefresh: Boolean(options?.forceRefresh),
         allowStale: !options?.forceRefresh,
       });
@@ -193,6 +205,7 @@ export const runAuthenticatedAppBootstrap = async (options?: {
         sharedCacheFlushCount,
         analyticsFlushCount,
         adPolicySynced,
+        marketGelsinRuntimeResolved: true,
         lastError: null,
       };
 

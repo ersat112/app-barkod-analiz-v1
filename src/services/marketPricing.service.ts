@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-import { MARKET_GELSIN_RUNTIME } from '../config/marketGelsinRuntime';
+import type { AxiosInstance } from 'axios';
+
 import type {
   MarketAlternativePricingEntry,
   MarketAlternativePricingRequest,
@@ -24,6 +25,7 @@ import type {
   MarketScanEventResponse,
   MarketSearchProduct,
 } from '../types/marketPricing';
+import { resolveMarketGelsinRuntimeConfig } from './marketGelsinRuntimeConfig.service';
 import {
   buildMarketGelsinAlternativesEndpoint,
   buildMarketGelsinBarcodeLookupEndpoint,
@@ -38,17 +40,6 @@ import {
   buildMarketGelsinSearchEndpoint,
   buildMarketGelsinStatusEndpoint,
 } from './marketPricingContract.service';
-
-const marketPricingClient = MARKET_GELSIN_RUNTIME.baseUrl
-  ? axios.create({
-      baseURL: MARKET_GELSIN_RUNTIME.baseUrl,
-      timeout: MARKET_GELSIN_RUNTIME.timeoutMs,
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'ErEnesAl/1.0 (BarkodAnaliz Market Pricing)',
-      },
-    })
-  : null;
 
 const toObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -278,10 +269,26 @@ const parseSearchProduct = (value: unknown): MarketSearchProduct => {
   };
 };
 
-const ensureRuntimeReady = () => {
-  if (!MARKET_GELSIN_RUNTIME.isEnabled || !marketPricingClient) {
+const buildMarketPricingClient = (baseUrl: string, timeoutMs: number): AxiosInstance =>
+  axios.create({
+    baseURL: baseUrl,
+    timeout: timeoutMs,
+    headers: {
+      'Content-Type': 'application/json',
+      'User-Agent': 'ErEnesAl/1.0 (BarkodAnaliz Market Pricing)',
+    },
+  });
+
+const ensureRuntimeReady = async (): Promise<AxiosInstance> => {
+  const runtime = await resolveMarketGelsinRuntimeConfig({
+    allowStale: true,
+  });
+
+  if (!runtime.isEnabled || !runtime.baseUrl) {
     throw new Error('market_gelsin_runtime_not_ready');
   }
+
+  return buildMarketPricingClient(runtime.baseUrl, runtime.timeoutMs);
 };
 
 export async function fetchMarketProductOffers(
@@ -293,7 +300,7 @@ export async function fetchMarketProductOffers(
     includeOutOfStock?: boolean;
   }
 ): Promise<MarketProductOffersResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
 
   const endpoint = buildMarketGelsinOffersEndpoint(barcode, params);
   const response = await marketPricingClient!.get(endpoint);
@@ -324,7 +331,7 @@ export async function fetchMarketProductSearch(params: {
   brand?: string;
   limit?: number;
 }): Promise<MarketProductSearchResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
 
   const endpoint = buildMarketGelsinSearchEndpoint({
     query: params.query,
@@ -357,7 +364,7 @@ export async function fetchMarketProductSearch(params: {
 export async function fetchMarketBarcodeLookup(
   barcode: string
 ): Promise<MarketSearchProduct | null> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
 
   const response = await marketPricingClient!.get(buildMarketGelsinBarcodeLookupEndpoint(barcode));
   const payload = toObject(response.data);
@@ -395,7 +402,7 @@ export async function fetchLegacyMarketOfferSearch(params: {
   barcode?: string;
   limit?: number;
 }): Promise<MarketProductSearchResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
 
   const response = await marketPricingClient!.get(
     buildMarketGelsinLegacyOffersSearchEndpoint({
@@ -463,7 +470,7 @@ export async function fetchLegacyMarketProductOffers(params: {
   citySlug?: string | null;
   limit?: number;
 }): Promise<MarketProductOffersResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
 
   if (params.citySlug) {
     const response = await marketPricingClient!.get(
@@ -518,7 +525,7 @@ export async function fetchLegacyMarketProductOffers(params: {
 export async function fetchMarketAlternativePricing(
   request: MarketAlternativePricingRequest
 ): Promise<MarketAlternativePricingResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
 
   const endpoint = buildMarketGelsinAlternativesEndpoint();
   const response = await marketPricingClient!.post(endpoint, {
@@ -585,7 +592,7 @@ export async function fetchMarketPriceHistory(
     days?: number;
   }
 ): Promise<MarketPriceHistoryResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
 
   const endpoint = buildMarketGelsinHistoryEndpoint(barcode, params);
   const response = await marketPricingClient!.get(endpoint);
@@ -607,19 +614,19 @@ export async function fetchMarketPriceHistory(
 }
 
 export async function fetchMarketRuntimeStatus(): Promise<MarketRuntimeStatusResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
   const response = await marketPricingClient!.get(buildMarketGelsinStatusEndpoint());
   return toObject(response.data) as unknown as MarketRuntimeStatusResponse;
 }
 
 export async function fetchMarketProgramCoverage(): Promise<MarketProgramCoverageResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
   const response = await marketPricingClient!.get(buildMarketGelsinProgramCoverageEndpoint());
   return toObject(response.data) as unknown as MarketProgramCoverageResponse;
 }
 
 export async function fetchMarketIntegrationsStatus(): Promise<MarketIntegrationsStatusResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
   const response = await marketPricingClient!.get(buildMarketGelsinIntegrationsStatusEndpoint());
   return toObject(response.data) as unknown as MarketIntegrationsStatusResponse;
 }
@@ -627,7 +634,7 @@ export async function fetchMarketIntegrationsStatus(): Promise<MarketIntegration
 export async function postMarketScanEvent(
   request: MarketScanEventRequest
 ): Promise<MarketScanEventResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
   const response = await marketPricingClient!.post(buildMarketGelsinScanEventEndpoint(), {
     barcode: request.barcode,
     city_code: request.cityCode ?? undefined,
@@ -644,7 +651,7 @@ export async function postMarketBatchScanEvents(payload: {
   events: MarketScanEventRequest[];
   rebuildHotRefresh?: boolean;
 }): Promise<MarketBatchScanEventResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
   const response = await marketPricingClient!.post(
     buildMarketGelsinBatchScanEventEndpoint(),
     {
@@ -671,7 +678,7 @@ export async function fetchMarketBasketCompare(request: {
   longitude?: number | null;
   items: MarketBasketCompareItemRequest[];
 }): Promise<MarketBasketCompareResponse> {
-  ensureRuntimeReady();
+  const marketPricingClient = await ensureRuntimeReady();
 
   const response = await marketPricingClient!.post(buildMarketGelsinBasketCompareEndpoint(), {
     city_code: request.cityCode,

@@ -21,8 +21,8 @@ import {
   type ProductLookupResult,
 } from '../../services/productLookup.service';
 import { FEATURES } from '../../config/features';
-import { MARKET_GELSIN_RUNTIME } from '../../config/marketGelsinRuntime';
 import { useTheme } from '../../context/ThemeContext';
+import { useMarketGelsinRuntime } from '../../hooks/useMarketGelsinRuntime';
 import { useMissingProductFlow } from '../../hooks/useMissingProductFlow';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { adService } from '../../services/adService';
@@ -1247,6 +1247,7 @@ export const DetailScreen: React.FC = () => {
   const nutritionPreferences = usePreferenceStore((state) => state.nutritionPreferences);
   const familyHealthProfile = usePreferenceStore((state) => state.familyHealthProfile);
   const { colors, isDark } = useTheme();
+  const { snapshot: marketRuntime } = useMarketGelsinRuntime();
   const navigation = useNavigation<any>();
   const route = useRoute<DetailRoute>();
   const {
@@ -1939,7 +1940,7 @@ export const DetailScreen: React.FC = () => {
   }, [displayedAnalysis, displayedProduct, nutritionPreferences]);
 
   useEffect(() => {
-    if (!MARKET_GELSIN_RUNTIME.isEnabled || !normalizedRouteBarcode) {
+    if (!marketRuntime.isEnabled || !normalizedRouteBarcode) {
       return;
     }
 
@@ -1967,11 +1968,11 @@ export const DetailScreen: React.FC = () => {
     ).catch((signalError) => {
       console.error('[DetailScreen] market scan signal failed:', signalError);
     });
-  }, [normalizedRouteBarcode, profileCityCode, profileDistrict]);
+  }, [marketRuntime.isEnabled, normalizedRouteBarcode, profileCityCode, profileDistrict]);
 
   useEffect(() => {
     if (
-      !MARKET_GELSIN_RUNTIME.isEnabled ||
+      !marketRuntime.isEnabled ||
       !displayedProduct ||
       displayedProduct.type === 'medicine' ||
       !profileCityCode
@@ -2029,6 +2030,7 @@ export const DetailScreen: React.FC = () => {
     };
   }, [
     displayedProduct,
+    marketRuntime.isEnabled,
     normalizedRouteBarcode,
     profileCityCode,
     profileDistrict,
@@ -2037,7 +2039,7 @@ export const DetailScreen: React.FC = () => {
 
   useEffect(() => {
     if (
-      !MARKET_GELSIN_RUNTIME.isEnabled ||
+      !marketRuntime.isEnabled ||
       !displayedProduct ||
       displayedProduct.type === 'medicine' ||
       !profileCityCode ||
@@ -2099,6 +2101,7 @@ export const DetailScreen: React.FC = () => {
   }, [
     alternativeSuggestions,
     displayedProduct,
+    marketRuntime.isEnabled,
     normalizedRouteBarcode,
     profileCityCode,
     profileDistrict,
@@ -3274,7 +3277,7 @@ export const DetailScreen: React.FC = () => {
             </>
           ) : null}
 
-          {!isMedicineProduct && MARKET_GELSIN_RUNTIME.isEnabled ? (
+          {!isMedicineProduct && marketRuntime.isEnabled ? (
             profileCityCode ? (
               <>
                 {!marketOffersError ? (

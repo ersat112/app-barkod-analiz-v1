@@ -124,7 +124,7 @@ export const buildHelpArticle = (
             title: tt('help_article_database_pricing', 'Fiyat kaynakları'),
             body: tt(
               'help_article_database_pricing_body',
-              'Market fiyatları market_gelsin API katmanından alınır. Fiyat servisi bağlı değilse uygulama bunu gizlemez ve fiyat ekranında açık durum mesajı gösterir.'
+              'Market fiyatları market_gelsin API katmanından alınır. Fiyat servisi bağlı değilse uygulama bunu gizlemez; fiyat ekranında ve ayarlardaki tanılama alanında açık durum mesajı gösterir.'
             ),
           },
         ],

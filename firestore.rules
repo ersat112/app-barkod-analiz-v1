@@ -44,6 +44,7 @@ service cloud.firestore {
         && (
           docId == 'ad_policy'
           || docId == 'firestore_rollout'
+          || docId == 'market_gelsin_runtime'
           || docId == 'monetization_policy'
         );
     }

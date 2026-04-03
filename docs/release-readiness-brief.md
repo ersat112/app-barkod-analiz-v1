@@ -58,6 +58,21 @@ Bu branch BarkodAnaliz'i soft launch oncesi daha guvenli ve daha acik bir urun h
   - Banner: home, history, detail, settings, missing product
 - `app-ads.txt` canli olmali
 
+### 3.5. market_gelsin Runtime
+
+- Release build icin iki yoldan biri secilmeli:
+  - `EXPO_PUBLIC_MARKET_GELSIN_API_URL` env ile dogrudan verilmeli
+  - veya Firestore `runtime_config/market_gelsin_runtime` dokumani hazir olmali
+- Runtime dokumani kullanilacaksa su alanlar teyit edilmeli:
+  - `baseUrl`
+  - `enabled`
+  - opsiyonel `timeoutMs`
+- Ayarlardaki `Market Fiyat Tanilama` kartinda su alanlar kontrol edilmeli:
+  - `Runtime: ON`
+  - `API: ON`
+  - `Base URL` dolu
+  - `Status error` ve `Integrations error` bos
+
 ### 4. Hukuk ve Guven
 
 - Web hukuk sayfalari canli olmali
