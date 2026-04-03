@@ -69,6 +69,10 @@ Bu branch BarkodAnaliz'i soft launch oncesi daha guvenli ve daha acik bir urun h
   - opsiyonel `timeoutMs`
 - Seed etmek icin:
   - `npm run market-gelsin:seed-runtime -- --base-url https://... --enabled true`
+  - veya `.env` hazirsa `npm run market-gelsin:seed-runtime:from-env`
+- Not:
+  - script artik loopback URL'leri (`127.0.0.1`, `localhost`, `10.0.2.2`) varsayilan olarak release runtime'a yazmaz
+  - lokal test icin bilerek yazilacaksa `--allow-loopback` eklenmeli
 - Ayarlardaki `Market Fiyat Tanilama` kartinda su alanlar kontrol edilmeli:
   - `Runtime: ON`
   - `API: ON`

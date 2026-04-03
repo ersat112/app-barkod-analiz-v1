@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { URLSearchParams } from 'node:url';
+import { URL, URLSearchParams } from 'node:url';
 
 const FIREBASE_TOOLS_CONFIG_PATH = path.join(
   os.homedir(),
@@ -9,6 +9,9 @@ const FIREBASE_TOOLS_CONFIG_PATH = path.join(
   'configstore',
   'firebase-tools.json'
 );
+const FIREBASE_TOOLS_CLIENT_ID =
+  '563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com';
+const FIREBASE_TOOLS_CLIENT_SECRET = 'j9iVZfS8kkCEFUPaAeJV0sAi';
 
 function parseArgs(argv) {
   const args = {
@@ -19,6 +22,8 @@ function parseArgs(argv) {
     timeoutMs: 8000,
     version: Date.now(),
     dryRun: false,
+    fromEnv: false,
+    allowLoopback: false,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -53,37 +58,114 @@ function parseArgs(argv) {
       case '--dry-run':
         args.dryRun = true;
         break;
+      case '--from-env':
+        args.fromEnv = true;
+        break;
+      case '--allow-loopback':
+        args.allowLoopback = true;
+        break;
       default:
         break;
     }
   }
 
-  if (!args.baseUrl.trim()) {
-    throw new Error('--base-url zorunlu');
+  const envBaseUrl = readEnvValue('EXPO_PUBLIC_MARKET_GELSIN_API_URL');
+  const envEnabled = readEnvValue('EXPO_PUBLIC_MARKET_GELSIN_ENABLED');
+  const envTimeoutMs = readEnvValue('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS');
+
+  if (args.fromEnv) {
+    if (!args.baseUrl.trim() && envBaseUrl) {
+      args.baseUrl = envBaseUrl;
+    }
+
+    if (!argv.includes('--enabled') && envEnabled) {
+      args.enabled = ['1', 'true', 'yes', 'on'].includes(envEnabled.toLowerCase());
+    }
+
+    if (!argv.includes('--timeout-ms') && envTimeoutMs) {
+      args.timeoutMs = Number(envTimeoutMs) || args.timeoutMs;
+    }
+  }
+
+  const normalizedBaseUrl = args.baseUrl.trim().replace(/\/+$/g, '');
+
+  if (args.enabled && !normalizedBaseUrl) {
+    throw new Error('--base-url zorunlu (veya --from-env ile .env icinde EXPO_PUBLIC_MARKET_GELSIN_API_URL tanimli olmali)');
+  }
+
+  if (!args.allowLoopback && isLoopbackUrl(normalizedBaseUrl) && args.enabled) {
+    throw new Error(
+      'Loopback URL release runtime icin guvensiz. Yalnizca lokal test icin kullanacaksaniz --allow-loopback ekleyin.'
+    );
   }
 
   return {
     ...args,
-    baseUrl: args.baseUrl.trim().replace(/\/+$/g, ''),
+    baseUrl: normalizedBaseUrl,
   };
 }
 
-function getFirebaseRefreshToken() {
+function readEnvValue(key) {
+  const envPath = path.join(process.cwd(), '.env');
+
+  if (!fs.existsSync(envPath)) {
+    return '';
+  }
+
+  const raw = fs.readFileSync(envPath, 'utf8');
+  const match = raw
+    .split(/\r?\n/g)
+    .map((line) => line.trim())
+    .find((line) => line.startsWith(`${key}=`));
+
+  if (!match) {
+    return '';
+  }
+
+  return match.slice(key.length + 1).trim();
+}
+
+function isLoopbackUrl(value) {
+  if (!value) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(value);
+    return ['127.0.0.1', 'localhost', '10.0.2.2'].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function getFirebaseAuthState() {
   if (!fs.existsSync(FIREBASE_TOOLS_CONFIG_PATH)) {
     throw new Error(`firebase-tools config bulunamadi: ${FIREBASE_TOOLS_CONFIG_PATH}`);
   }
 
-  const raw = JSON.parse(fs.readFileSync(FIREBASE_TOOLS_CONFIG_PATH, 'utf8'));
-  const refreshToken = raw?.tokens?.refresh_token;
-
-  if (!refreshToken) {
-    throw new Error('firebase-tools refresh token bulunamadi. npx firebase-tools login ile oturum acin.');
-  }
-
-  return refreshToken;
+  return JSON.parse(fs.readFileSync(FIREBASE_TOOLS_CONFIG_PATH, 'utf8'));
 }
 
-async function getAccessToken(refreshToken) {
+function getAccessToken() {
+  const authState = getFirebaseAuthState();
+  const accessToken = authState?.tokens?.access_token;
+  const refreshToken = authState?.tokens?.refresh_token;
+  const expiresAt = Number(authState?.tokens?.expires_at ?? 0);
+
+  if (accessToken && Number.isFinite(expiresAt) && expiresAt > Date.now() + 60_000) {
+    return Promise.resolve(accessToken);
+  }
+
+  if (!refreshToken) {
+    throw new Error(
+      'firebase-tools tokenlari bulunamadi. npx firebase-tools login ile oturum acin.'
+    );
+  }
+
+  return refreshAccessToken(refreshToken);
+}
+
+async function refreshAccessToken(refreshToken) {
   const response = await fetch('https://oauth2.googleapis.com/token', {
     method: 'POST',
     headers: {
@@ -92,13 +174,15 @@ async function getAccessToken(refreshToken) {
     body: new URLSearchParams({
       grant_type: 'refresh_token',
       refresh_token: refreshToken,
-      client_id: '563584335869-l6f2s0c6q8q5q9q7e0o55f2l8mq4c2m3.apps.googleusercontent.com',
-      client_secret: 'j9iY8wXW2u8hJ4Jbq6P7Q3fQ',
+      client_id: FIREBASE_TOOLS_CLIENT_ID,
+      client_secret: FIREBASE_TOOLS_CLIENT_SECRET,
     }),
   });
 
   if (!response.ok) {
-    throw new Error(`OAuth token alinamadi: ${response.status} ${await response.text()}`);
+    throw new Error(
+      `OAuth token alinamadi: ${response.status} ${await response.text()}`
+    );
   }
 
   const payload = await response.json();
@@ -123,8 +207,7 @@ function buildFirestoreDocumentBody(input) {
 }
 
 async function seedRuntimeDocument(input) {
-  const refreshToken = getFirebaseRefreshToken();
-  const accessToken = await getAccessToken(refreshToken);
+  const accessToken = await getAccessToken();
   const updateMask = [
     'version',
     'enabled',
