@@ -628,10 +628,16 @@ export const ProductHighlightsSection: React.FC<{
                 ]}
               />
               <View style={styles.highlightTextWrap}>
-                <Text style={[styles.highlightTitle, { color: colors.text }]}>
+                <Text
+                  style={[styles.highlightTitle, { color: colors.text }]}
+                  numberOfLines={1}
+                >
                   {item.title}
                 </Text>
-                <Text style={[styles.highlightDetail, { color: colors.mutedText }]}>
+                <Text
+                  style={[styles.highlightDetail, { color: colors.mutedText }]}
+                  numberOfLines={2}
+                >
                   {item.detail}
                 </Text>
               </View>
@@ -1555,17 +1561,17 @@ const styles = StyleSheet.create({
   },
   highlightCard: {
     borderWidth: 1,
-    borderRadius: 22,
-    marginTop: 18,
-    marginBottom: 24,
+    borderRadius: 20,
+    marginTop: 14,
+    marginBottom: 20,
     overflow: 'hidden',
   },
   highlightRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   cosmeticIngredientRow: {
     flexDirection: 'row',
@@ -1575,23 +1581,23 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
   },
   highlightDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     marginTop: 5,
   },
   highlightTextWrap: {
     flex: 1,
   },
   highlightTitle: {
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '800',
   },
   highlightDetail: {
-    marginTop: 4,
-    fontSize: 13,
-    lineHeight: 19,
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 17,
   },
   cosmeticIngredientRisk: {
     marginTop: 4,
@@ -1609,10 +1615,10 @@ const styles = StyleSheet.create({
     paddingTop: 2,
   },
   highlightEmptyText: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    fontSize: 13,
-    lineHeight: 19,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    fontSize: 12,
+    lineHeight: 17,
   },
   sectionHeader: {
     flexDirection: 'row',
