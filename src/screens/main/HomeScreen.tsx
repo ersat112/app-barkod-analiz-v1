@@ -14,6 +14,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
+import { ScreenOnboardingOverlay } from '../../components/ScreenOnboardingOverlay';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
@@ -22,6 +23,10 @@ import {
   FAMILY_ALLERGEN_DEFINITIONS,
   getHomeAdditiveSpotlights,
 } from '../../services/familyHealthProfile.service';
+import {
+  hasSeenScreenOnboarding,
+  markScreenOnboardingSeen,
+} from '../../services/screenOnboarding.service';
 import { usePreferenceStore } from '../../store/usePreferenceStore';
 import { buildUserDisplayName } from '../../services/userPresentation.service';
 import { parseHistoryCreatedAt } from '../../types/history';
@@ -99,6 +104,7 @@ export const HomeScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [recentItems, setRecentItems] = useState<HistoryEntry[]>([]);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -123,9 +129,29 @@ export const HomeScreen: React.FC = () => {
   useFocusEffect(
     useCallback(() => {
       void load();
-      return undefined;
+
+      let cancelled = false;
+
+      const loadOnboarding = async () => {
+        const hasSeen = await hasSeenScreenOnboarding('home');
+
+        if (!cancelled) {
+          setShowOnboarding(!hasSeen);
+        }
+      };
+
+      void loadOnboarding();
+
+      return () => {
+        cancelled = true;
+      };
     }, [load])
   );
+
+  const handleDismissOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    void markScreenOnboardingSeen('home');
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -475,6 +501,19 @@ export const HomeScreen: React.FC = () => {
           </View>
         </View>
       </ScrollView>
+
+      <ScreenOnboardingOverlay
+        visible={showOnboarding}
+        icon="home-outline"
+        title={tt('home_onboarding_title', 'Ana sayfa özeti')}
+        body={tt(
+          'home_onboarding_body',
+          'Burada dikkat gerektiren alerjenleri, riskli katkı kodlarını ve son 10 taramayı tek bakışta görürsün.'
+        )}
+        actionLabel={tt('onboarding_continue', 'Tamam')}
+        colors={colors}
+        onPress={handleDismissOnboarding}
+      />
     </View>
   );
 };

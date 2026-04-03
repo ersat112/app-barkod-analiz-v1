@@ -10,11 +10,16 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useTranslation } from 'react-i18next';
 
+import { ScreenOnboardingOverlay } from '../../components/ScreenOnboardingOverlay';
 import { useTheme } from '../../context/ThemeContext';
 import { AdBanner } from '../../components/AdBanner';
 import { usePaginatedHistory } from '../../hooks/usePaginatedHistory';
 import { useRescanActions } from '../../hooks/useRescanActions';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
+import {
+  hasSeenScreenOnboarding,
+  markScreenOnboardingSeen,
+} from '../../services/screenOnboarding.service';
 import {
   HistoryEmptyState,
   HistoryErrorState,
@@ -44,6 +49,7 @@ export const HistoryScreen: React.FC = () => {
   const { t } = useTranslation();
   const { colors } = useTheme();
   const navigation = useNavigation<any>();
+  const [showOnboarding, setShowOnboarding] = React.useState(false);
 
   const layout = useAppScreenLayout({
     topInsetExtra: 20,
@@ -92,8 +98,29 @@ export const HistoryScreen: React.FC = () => {
     useCallback(() => {
       void loadInitial();
       void loadRescanActions();
+
+      let cancelled = false;
+
+      const loadOnboarding = async () => {
+        const hasSeen = await hasSeenScreenOnboarding('history');
+
+        if (!cancelled) {
+          setShowOnboarding(!hasSeen);
+        }
+      };
+
+      void loadOnboarding();
+
+      return () => {
+        cancelled = true;
+      };
     }, [loadInitial, loadRescanActions])
   );
+
+  const handleDismissOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    void markScreenOnboardingSeen('history');
+  }, []);
 
   const handleDelete = useCallback(
     (id: number) => {
@@ -269,6 +296,19 @@ export const HistoryScreen: React.FC = () => {
               tintColor={colors.primary}
             />
           }
+        />
+
+        <ScreenOnboardingOverlay
+          visible={showOnboarding}
+          icon="time-outline"
+          title={tt('history_onboarding_title', 'Geçmiş burada')}
+          body={tt(
+            'history_onboarding_body',
+            'Önceki taramaları burada arayabilir, filtreleyebilir, favoriye alabilir ve tekrar detayına gidebilirsin.'
+          )}
+          actionLabel={tt('onboarding_continue', 'Tamam')}
+          colors={colors}
+          onPress={handleDismissOnboarding}
         />
       </View>
     </GestureHandlerRootView>

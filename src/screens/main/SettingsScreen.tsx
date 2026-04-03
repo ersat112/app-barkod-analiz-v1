@@ -13,7 +13,7 @@ import {
   View,
   Switch,
 } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
@@ -28,6 +28,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme, type ThemeColors } from '../../context/ThemeContext';
 import { useLanguage } from '../../context/LanguageContext';
 import { AdBanner } from '../../components/AdBanner';
+import { ScreenOnboardingOverlay } from '../../components/ScreenOnboardingOverlay';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { SearchableSelectSheet } from '../../components/ui/SearchableSelectSheet';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
@@ -40,6 +41,10 @@ import {
 } from '../../services/engagementNotifications.service';
 import { analyticsService } from '../../services/analytics.service';
 import { clearMonetizationFlowLogs } from '../../services/purchaseFlowLog.service';
+import {
+  hasSeenScreenOnboarding,
+  markScreenOnboardingSeen,
+} from '../../services/screenOnboarding.service';
 import { updateCurrentUserLegalAcceptance } from '../../services/userProfile.service';
 import { usePreferenceStore } from '../../store/usePreferenceStore';
 import {
@@ -439,6 +444,7 @@ export const SettingsScreen: React.FC = () => {
   const [flowLogResetting, setFlowLogResetting] = useState(false);
   const [notificationSyncing, setNotificationSyncing] = useState(false);
   const [legalAcceptanceUpdating, setLegalAcceptanceUpdating] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   const handleOpenPaywall = useCallback(() => {
     void analyticsService.track(
@@ -459,6 +465,31 @@ export const SettingsScreen: React.FC = () => {
     monetization.policy?.annualProductId,
     navigation,
   ]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+
+      const loadOnboarding = async () => {
+        const hasSeen = await hasSeenScreenOnboarding('profile');
+
+        if (!cancelled) {
+          setShowOnboarding(!hasSeen);
+        }
+      };
+
+      void loadOnboarding();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [])
+  );
+
+  const handleDismissOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    void markScreenOnboardingSeen('profile');
+  }, []);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -2735,6 +2766,19 @@ export const SettingsScreen: React.FC = () => {
         onClose={() => setLanguagePickerVisible(false)}
         colors={colors}
         isDark={isDark}
+      />
+
+      <ScreenOnboardingOverlay
+        visible={showOnboarding}
+        icon="settings-outline"
+        title={tt('profile_onboarding_title', 'Profil ve ayarlar burada')}
+        body={tt(
+          'profile_onboarding_body',
+          'Aile profili, beslenme tercihleri, yardım merkezi ve güven ayarlarını buradan yönetirsin.'
+        )}
+        actionLabel={tt('onboarding_continue', 'Tamam')}
+        colors={colors}
+        onPress={handleDismissOnboarding}
       />
     </View>
   );

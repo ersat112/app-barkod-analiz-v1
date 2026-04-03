@@ -20,11 +20,11 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
 import { MarketOfferSheet } from '../../components/MarketOfferSheet';
 import { ProductSummaryCard } from '../../components/ProductSummaryCard';
+import { ScreenOnboardingOverlay } from '../../components/ScreenOnboardingOverlay';
 import {
   buildBestMarketOfferSummary,
   formatMarketDistance,
@@ -55,6 +55,10 @@ import {
 } from '../../services/mlKitTextRecognition.service';
 import { resolveHybridTextAnalysis } from '../../services/textHybridAnalysis.service';
 import { saveProductToHistory } from '../../services/db';
+import {
+  hasSeenScreenOnboarding,
+  markScreenOnboardingSeen,
+} from '../../services/screenOnboarding.service';
 import { prewarmMedicineCatalog } from '../../services/titckMedicine.service';
 import {
   playScanBeep,
@@ -95,7 +99,6 @@ type ScannerExperienceProps = {
 
 const PREVIEW_QUEUE_LIMIT = 6;
 const FALLBACK_IMAGE = 'https://via.placeholder.com/240?text=No+Image';
-const SCANNER_WALKTHROUGH_STORAGE_KEY = 'scanner_mode_walkthrough_completed_v1';
 const MODE_ICON_MAP: Record<ScannerUiMode, keyof typeof Ionicons.glyphMap> = {
   food: 'nutrition-outline',
   beauty: 'sparkles-outline',
@@ -173,7 +176,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const [manualText, setManualText] = useState('');
   const [manualError, setManualError] = useState('');
   const [selectedMode, setSelectedMode] = useState<ScannerUiMode>(initialMode);
-  const [showModeHint, setShowModeHint] = useState(true);
+  const [showModeHint, setShowModeHint] = useState(false);
   const [walkthroughState, setWalkthroughState] = useState<'loading' | 'idle' | 'active'>(
     'loading'
   );
@@ -300,22 +303,22 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         if (!cancelled) {
           setWalkthroughState('idle');
           setSelectedMode(initialMode);
-          setShowModeHint(!dismissedModeHintsRef.current[initialMode]);
+          setShowModeHint(false);
         }
         return;
       }
 
       try {
-        const completed = await AsyncStorage.getItem(SCANNER_WALKTHROUGH_STORAGE_KEY);
+        const completed = await hasSeenScreenOnboarding('scanner');
 
         if (cancelled) {
           return;
         }
 
-        if (completed === '1') {
+        if (completed) {
           setWalkthroughState('idle');
           setSelectedMode(initialMode);
-          setShowModeHint(!dismissedModeHintsRef.current[initialMode]);
+          setShowModeHint(false);
           return;
         }
 
@@ -330,7 +333,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         if (!cancelled) {
           setWalkthroughState('idle');
           setSelectedMode(initialMode);
-          setShowModeHint(!dismissedModeHintsRef.current[initialMode]);
+          setShowModeHint(false);
         }
       }
     };
@@ -348,7 +351,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     }
 
     setSelectedMode(initialMode);
-    setShowModeHint(!dismissedModeHintsRef.current[initialMode]);
+    setShowModeHint(false);
   }, [initialMode, walkthroughState]);
 
   useEffect(() => {
@@ -436,7 +439,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     }
 
     setSelectedMode(nextMode);
-    setShowModeHint(!dismissedModeHintsRef.current[nextMode]);
+    setShowModeHint(false);
     setScanned(false);
   }, [isWalkthroughActive]);
 
@@ -462,7 +465,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
     if (nextIndex >= walkthroughModeOrder.length) {
       try {
-        await AsyncStorage.setItem(SCANNER_WALKTHROUGH_STORAGE_KEY, '1');
+        await markScreenOnboardingSeen('scanner');
       } catch (error) {
         console.warn('[ScannerScreen] failed to persist walkthrough state:', error);
       }
@@ -1379,7 +1382,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                 </ScrollView>
               </View>
 
-                  {showModeHint ? (
+                  {showModeHint && !isWalkthroughActive ? (
                 <View style={styles.modeHintCard}>
                   <View style={styles.modeHintHeader}>
                     <View style={styles.modeHintTitleWrap}>
@@ -1421,29 +1424,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                       {selectedModeMeta.frameSubtitle}
                     </Text>
                   </View>
-                  {isWalkthroughActive ? (
-                    <TouchableOpacity
-                      style={[styles.modeHintAction, { backgroundColor: colors.primary }]}
-                      activeOpacity={0.88}
-                      onPress={() => {
-                        void advanceWalkthrough();
-                      }}
-                    >
-                      <Ionicons
-                        name="checkmark-outline"
-                        size={16}
-                        color={colors.primaryContrast}
-                      />
-                      <Text
-                        style={[
-                          styles.modeHintActionText,
-                          { color: colors.primaryContrast },
-                        ]}
-                      >
-                        {tt('scanner_walkthrough_continue', 'Tamam')}
-                      </Text>
-                    </TouchableOpacity>
-                  ) : selectedMode === 'text' ? (
+                  {selectedMode === 'text' ? (
                     <TouchableOpacity
                       style={[styles.modeHintAction, { backgroundColor: colors.primary }]}
                       activeOpacity={0.88}
@@ -1858,6 +1839,19 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         ]}
         onClose={closePreviewMarketSheet}
         colors={colors}
+      />
+
+      <ScreenOnboardingOverlay
+        visible={isWalkthroughActive}
+        icon={MODE_ICON_MAP[selectedMode]}
+        progressLabel={`${walkthroughStepIndex + 1}/${walkthroughModeOrder.length}`}
+        title={selectedModeMeta.hintTitle}
+        body={selectedModeMeta.hintBody}
+        actionLabel={tt('scanner_walkthrough_continue', 'Tamam')}
+        colors={colors}
+        onPress={() => {
+          void advanceWalkthrough();
+        }}
       />
 
       {isManualMode && (

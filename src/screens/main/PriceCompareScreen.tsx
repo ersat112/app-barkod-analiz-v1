@@ -19,6 +19,7 @@ import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { MarketOfferSheet } from '../../components/MarketOfferSheet';
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
 import { ProductSummaryCard } from '../../components/ProductSummaryCard';
+import { ScreenOnboardingOverlay } from '../../components/ScreenOnboardingOverlay';
 import { inferMarketDisplayProductType } from '../../config/marketDisplay';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, type ThemeColors } from '../../context/ThemeContext';
@@ -60,6 +61,10 @@ import { usePreferenceStore } from '../../store/usePreferenceStore';
 import { withAlpha } from '../../utils/color';
 import { MARKET_GELSIN_RUNTIME } from '../../config/marketGelsinRuntime';
 import { searchLocalPriceCompareProducts } from '../../services/priceCompareSearch.service';
+import {
+  hasSeenScreenOnboarding,
+  markScreenOnboardingSeen,
+} from '../../services/screenOnboarding.service';
 
 type PriceCompareRoute = RouteProp<RootStackParamList, 'PriceCompare'>;
 type TranslateFn = (key: string, fallback: string) => string;
@@ -419,6 +424,30 @@ export const PriceCompareScreen: React.FC = () => {
   const [basketCompareLoading, setBasketCompareLoading] = useState(false);
   const [basketCompareError, setBasketCompareError] = useState<string | null>(null);
   const [marketSheetState, setMarketSheetState] = useState<MarketSheetState>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadOnboarding = async () => {
+      const hasSeen = await hasSeenScreenOnboarding('price');
+
+      if (!cancelled) {
+        setShowOnboarding(!hasSeen);
+      }
+    };
+
+    void loadOnboarding();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleDismissOnboarding = useCallback(() => {
+    setShowOnboarding(false);
+    void markScreenOnboardingSeen('price');
+  }, []);
 
   const closeMarketSheet = useCallback(() => {
     setMarketSheetState(null);
@@ -2034,6 +2063,19 @@ export const PriceCompareScreen: React.FC = () => {
           </>
         ) : null}
       </ScrollView>
+
+      <ScreenOnboardingOverlay
+        visible={showOnboarding}
+        icon="pricetags-outline"
+        title={tt('price_onboarding_title', 'Fiyat karşılaştır burada')}
+        body={tt(
+          'price_onboarding_body',
+          'Barkod veya ürün adıyla ara, marketleri yan yana kıyasla ve istersen ürünleri sepete ekleyip toplam farkı gör.'
+        )}
+        actionLabel={tt('onboarding_continue', 'Tamam')}
+        colors={colors}
+        onPress={handleDismissOnboarding}
+      />
 
       <MarketOfferSheet
         visible={Boolean(marketSheetState && marketSheetDetails)}
