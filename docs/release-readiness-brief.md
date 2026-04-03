@@ -39,6 +39,9 @@ Bu branch BarkodAnaliz'i soft launch oncesi daha guvenli ve daha acik bir urun h
 - Firebase Android app bu package ile eslesmeli
 - `google-services.json` guncel olmali
 - Google Sign-In client id'leri son config ile uyumlu olmali
+- iOS icin ek not:
+  - `GoogleService-Info.plist` ile iOS bundle kimligi ayni olmali
+  - bugunku repo durumunda iOS bundle hizasi ayrica teyit edilmelidir
 
 ### 2. RevenueCat
 
@@ -78,6 +81,18 @@ Bu branch BarkodAnaliz'i soft launch oncesi daha guvenli ve daha acik bir urun h
   - `API: ON`
   - `Base URL` dolu
   - `Status error` ve `Integrations error` bos
+
+### 3.6. Android Release Signing
+
+- Lokal `bundleRelease` artik gizli env / gradle property ile profesyonel upload keystore destekler:
+  - `BARKODANALIZ_UPLOAD_STORE_FILE`
+  - `BARKODANALIZ_UPLOAD_STORE_PASSWORD`
+  - `BARKODANALIZ_UPLOAD_KEY_ALIAS`
+  - `BARKODANALIZ_UPLOAD_KEY_PASSWORD`
+- Bu degerler yoksa Gradle bilerek `debug.keystore` fallback'i ile bundle uretebilir.
+- Play'e update atilacak bundle icin fallback degil, yukaridaki upload key kullanilmalidir.
+- Lokal komut:
+  - `npm run bundle:android:release`
 
 ### 4. Hukuk ve Guven
 

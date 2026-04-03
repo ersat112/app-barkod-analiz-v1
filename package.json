@@ -21,6 +21,7 @@
     "market-gelsin:seed-runtime:from-env": "node ./scripts/seed-market-gelsin-runtime.mjs --from-env",
     "doctor": "npx expo-doctor",
     "check": "npm run type-check && npm run lint && npm run doctor",
+    "bundle:android:release": "cd android && ./gradlew :app:bundleRelease",
     "build:android": "eas build --platform android",
     "build:ios": "eas build --platform ios"
   },
