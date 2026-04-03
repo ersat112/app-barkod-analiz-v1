@@ -67,6 +67,8 @@ Bu branch BarkodAnaliz'i soft launch oncesi daha guvenli ve daha acik bir urun h
   - `baseUrl`
   - `enabled`
   - opsiyonel `timeoutMs`
+- Seed etmek icin:
+  - `npm run market-gelsin:seed-runtime -- --base-url https://... --enabled true`
 - Ayarlardaki `Market Fiyat Tanilama` kartinda su alanlar kontrol edilmeli:
   - `Runtime: ON`
   - `API: ON`
