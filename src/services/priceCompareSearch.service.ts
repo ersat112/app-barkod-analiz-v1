@@ -127,6 +127,7 @@ const computeLocalCandidateScore = (
 };
 
 const toMarketSearchProduct = (candidate: LocalSearchCandidate): MarketSearchProduct => ({
+  id: candidate.barcode,
   barcode: candidate.barcode,
   productName: candidate.productName,
   brand: candidate.brand ?? null,
@@ -134,6 +135,7 @@ const toMarketSearchProduct = (candidate: LocalSearchCandidate): MarketSearchPro
   imageUrl: candidate.imageUrl ?? null,
   marketLogoUrl: null,
   bestOffer: null,
+  seedOffers: [],
   marketCount: 0,
   inStockMarketCount: 0,
   dataFreshness: null,

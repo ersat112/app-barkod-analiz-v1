@@ -215,6 +215,9 @@ const parseHistoryPoint = (value: unknown): MarketPriceHistoryPoint => {
 
 const parseSearchProduct = (value: unknown): MarketSearchProduct => {
   const payload = toObject(value);
+  const barcode =
+    toText(payload.barcode ?? payload.code, '') ||
+    null;
   const nestedOffers = Array.isArray(payload.offers)
     ? payload.offers.map((item) => parseOffer(item))
     : [];
@@ -234,35 +237,52 @@ const parseSearchProduct = (value: unknown): MarketSearchProduct => {
   const inStockMarketCount =
     toNumber(payload.in_stock_market_count ?? payload.inStockMarketCount) ??
     nestedOffers.filter((item) => item.inStock).length;
+  const productName = toText(
+    payload.product_name ??
+      payload.productName ??
+      payload.normalized_product_name ??
+      payload.normalizedProductName ??
+      payload.display_name ??
+      payload.displayName ??
+      payload.name ??
+      payload.title,
+    '-'
+  );
+  const brand = toText(payload.brand ?? payload.brand_name ?? payload.brandName, '') || null;
+  const category =
+    toText(
+      payload.category ??
+        payload.category_name ??
+        payload.categoryName ??
+        payload.normalized_category ??
+        payload.normalizedCategory,
+      ''
+    ) ||
+    null;
+  const id =
+    barcode ||
+    [
+      productName,
+      brand ?? '',
+      category ?? '',
+      bestOffer?.marketKey ?? bestOffer?.marketName ?? '',
+      typeof bestOffer?.price === 'number' ? String(bestOffer.price) : '',
+    ]
+      .join('::')
+      .trim() ||
+    `market-search-${Math.random().toString(36).slice(2, 10)}`;
 
   return {
-    barcode: toText(payload.barcode ?? payload.code, ''),
-    productName: toText(
-      payload.product_name ??
-        payload.productName ??
-        payload.normalized_product_name ??
-        payload.normalizedProductName ??
-        payload.display_name ??
-        payload.displayName ??
-        payload.name ??
-        payload.title,
-      '-'
-    ),
-    brand: toText(payload.brand ?? payload.brand_name ?? payload.brandName, '') || null,
-    category:
-      toText(
-        payload.category ??
-          payload.category_name ??
-          payload.categoryName ??
-          payload.normalized_category ??
-          payload.normalizedCategory,
-        ''
-      ) ||
-      null,
+    id,
+    barcode,
+    productName,
+    brand,
+    category,
     imageUrl: toText(payload.image_url ?? payload.imageUrl, '') || null,
     marketLogoUrl:
       toText(payload.market_logo_url ?? payload.marketLogoUrl, '') || null,
     bestOffer,
+    seedOffers: nestedOffers,
     marketCount,
     inStockMarketCount,
     dataFreshness: parseFreshness(payload.data_freshness ?? payload.dataFreshness),
@@ -349,7 +369,7 @@ export async function fetchMarketProductSearch(params: {
       : [];
   const results = rawResults
     .map(parseSearchProduct)
-    .filter((item) => item.barcode)
+    .filter((item) => item.productName || item.seedOffers?.length)
 
   return {
     query: toText(payload.query ?? payload.q, params.query),
@@ -381,6 +401,7 @@ export async function fetchMarketBarcodeLookup(
   }
 
   return {
+    id: barcode,
     barcode,
     productName: displayName,
     brand: toText(payload.brand, '') || null,
@@ -388,6 +409,7 @@ export async function fetchMarketBarcodeLookup(
     imageUrl: bestOffer.imageUrl ?? null,
     marketLogoUrl: bestOffer.marketLogoUrl ?? null,
     bestOffer,
+    seedOffers: offers,
     marketCount:
       toNumber(payload.match_count ?? payload.market_count ?? payload.markets_seen_count) ??
       offers.length,
@@ -440,13 +462,15 @@ export async function fetchLegacyMarketOfferSearch(params: {
 
       return [
         {
-          barcode,
+          id: barcode,
+          barcode: bestOffer?.barcode || null,
           productName: bestOffer.displayName || barcode,
           brand: null,
           category: null,
           imageUrl: bestOffer.imageUrl ?? null,
           marketLogoUrl: bestOffer.marketLogoUrl ?? null,
           bestOffer,
+          seedOffers: offers,
           marketCount: offers.length,
           inStockMarketCount: offers.filter((item) => item.inStock).length,
           dataFreshness: parseFreshness(payload.data_freshness ?? payload.dataFreshness),

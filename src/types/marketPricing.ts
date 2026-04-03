@@ -115,13 +115,15 @@ export type MarketProductOffersResponse = {
 };
 
 export type MarketSearchProduct = {
-  barcode: string;
+  id: string;
+  barcode?: string | null;
   productName: string;
   brand?: string | null;
   category?: string | null;
   imageUrl?: string | null;
   marketLogoUrl?: string | null;
   bestOffer?: MarketOffer | null;
+  seedOffers?: MarketOffer[] | null;
   marketCount: number;
   inStockMarketCount: number;
   dataFreshness?: MarketDataFreshness | null;

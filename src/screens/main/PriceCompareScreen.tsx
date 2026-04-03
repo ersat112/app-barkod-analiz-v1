@@ -89,10 +89,10 @@ type MarketSheetState =
   | null;
 
 const SEARCH_MIN_LENGTH = 2;
-const REMOTE_SEARCH_TIMEOUT_MS = 2500;
-const REMOTE_AUTOCOMPLETE_TIMEOUT_MS = 1800;
-const REMOTE_OFFERS_TIMEOUT_MS = 2500;
-const REMOTE_BASKET_TIMEOUT_MS = 3000;
+const REMOTE_SEARCH_TIMEOUT_MS = 5000;
+const REMOTE_AUTOCOMPLETE_TIMEOUT_MS = 3000;
+const REMOTE_OFFERS_TIMEOUT_MS = 5000;
+const REMOTE_BASKET_TIMEOUT_MS = 4500;
 
 const resolveWithin = <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
   new Promise<T>((resolve, reject) => {
@@ -129,11 +129,17 @@ const buildSearchVariants = (query: string): string[] => {
 const isBarcodeLikeQuery = (query: string): boolean =>
   /^\d{8,14}$/.test(query.trim());
 
+const getProductIdentity = (item: MarketSearchProduct): string =>
+  item.id || item.barcode || `${item.productName}-${item.brand || ''}`;
+
+const hasComparableBarcode = (item: MarketSearchProduct): boolean =>
+  Boolean(item.barcode && item.barcode.trim().length > 0);
+
 const dedupeSearchProducts = (items: MarketSearchProduct[]): MarketSearchProduct[] => {
   const map = new Map<string, MarketSearchProduct>();
 
   items.forEach((item) => {
-    const key = item.barcode || `${item.productName}-${item.brand || ''}`;
+    const key = getProductIdentity(item);
     const existing = map.get(key);
 
     if (!existing) {
@@ -477,9 +483,24 @@ export const PriceCompareScreen: React.FC = () => {
       setOffersLoading(true);
       setOffersError(null);
 
+      if (!hasComparableBarcode(product)) {
+        setOffersResponse({
+          barcode: product.id,
+          fetchedAt: new Date().toISOString(),
+          requestId: null,
+          partial: true,
+          warnings: [],
+          city: cityCode && effectiveCity ? { code: cityCode, name: effectiveCity } : null,
+          dataFreshness: product.dataFreshness ?? null,
+          offers: product.seedOffers ?? [],
+        });
+        setOffersLoading(false);
+        return;
+      }
+
       try {
         const response = await resolveWithin(
-          fetchMarketProductOffers(product.barcode, {
+          fetchMarketProductOffers(product.barcode!, {
             cityCode: cityCode ?? undefined,
             districtName: effectiveDistrict ?? undefined,
             includeOutOfStock: true,
@@ -495,7 +516,7 @@ export const PriceCompareScreen: React.FC = () => {
         try {
           const legacyResponse = await resolveWithin(
             fetchLegacyMarketProductOffers({
-              barcode: product.barcode,
+              barcode: product.barcode!,
               citySlug: citySlug ?? undefined,
               limit: 24,
             }),
@@ -517,7 +538,7 @@ export const PriceCompareScreen: React.FC = () => {
         setOffersLoading(false);
       }
     },
-    [cityCode, citySlug, effectiveDistrict, tt]
+    [cityCode, citySlug, effectiveCity, effectiveDistrict, tt]
   );
 
   const searchProducts = useCallback(
@@ -654,7 +675,7 @@ export const PriceCompareScreen: React.FC = () => {
       setQuery(product.productName);
       setHasSearched(true);
       setResults((previous) => {
-        const hasProduct = previous.some((item) => item.barcode === product.barcode);
+        const hasProduct = previous.some((item) => getProductIdentity(item) === getProductIdentity(product));
         return hasProduct ? previous : [product, ...previous];
       });
       setAutocompleteResults([]);
@@ -670,7 +691,7 @@ export const PriceCompareScreen: React.FC = () => {
 
     setComparisonCart((previous) => {
       const existingIndex = previous.findIndex(
-        (item) => item.product.barcode === selectedProduct.barcode
+        (item) => getProductIdentity(item.product) === getProductIdentity(selectedProduct)
       );
 
       if (existingIndex === -1) {
@@ -696,16 +717,16 @@ export const PriceCompareScreen: React.FC = () => {
     });
   }, [offersResponse, selectedProduct]);
 
-  const handleRemoveFromCart = useCallback((barcode: string) => {
+  const handleRemoveFromCart = useCallback((productId: string) => {
     setComparisonCart((previous) =>
-      previous.filter((item) => item.product.barcode !== barcode)
+      previous.filter((item) => getProductIdentity(item.product) !== productId)
     );
   }, []);
 
-  const handleIncreaseCartQuantity = useCallback((barcode: string) => {
+  const handleIncreaseCartQuantity = useCallback((productId: string) => {
     setComparisonCart((previous) =>
       previous.map((item) =>
-        item.product.barcode === barcode
+        getProductIdentity(item.product) === productId
           ? {
               ...item,
               quantity: item.quantity + 1,
@@ -715,10 +736,10 @@ export const PriceCompareScreen: React.FC = () => {
     );
   }, []);
 
-  const handleDecreaseCartQuantity = useCallback((barcode: string) => {
+  const handleDecreaseCartQuantity = useCallback((productId: string) => {
     setComparisonCart((previous) =>
       previous.flatMap((item) => {
-        if (item.product.barcode !== barcode) {
+        if (getProductIdentity(item.product) !== productId) {
           return [item];
         }
 
@@ -830,7 +851,9 @@ export const PriceCompareScreen: React.FC = () => {
   }, [handleSearch, hasSearched, query, route.params?.initialQuery]);
 
   useEffect(() => {
-    if (!comparisonCart.length || !cityCode) {
+    const comparableItems = comparisonCart.filter((entry) => hasComparableBarcode(entry.product));
+
+    if (!comparisonCart.length || !cityCode || comparableItems.length !== comparisonCart.length) {
       setBasketCompareResponse(null);
       setBasketCompareError(null);
       setBasketCompareLoading(false);
@@ -850,8 +873,8 @@ export const PriceCompareScreen: React.FC = () => {
             districtName: effectiveDistrict ?? undefined,
             latitude: detectedLocation?.latitude,
             longitude: detectedLocation?.longitude,
-            items: comparisonCart.map((entry) => ({
-              barcode: entry.product.barcode,
+            items: comparableItems.map((entry) => ({
+              barcode: entry.product.barcode!,
               quantity: entry.quantity,
             })),
           }),
@@ -1153,7 +1176,9 @@ export const PriceCompareScreen: React.FC = () => {
   const selectedProductCartQuantity = useMemo(
     () =>
       selectedProduct
-        ? comparisonCart.find((entry) => entry.product.barcode === selectedProduct.barcode)?.quantity ?? 0
+        ? comparisonCart.find(
+            (entry) => getProductIdentity(entry.product) === getProductIdentity(selectedProduct)
+          )?.quantity ?? 0
         : 0,
     [comparisonCart, selectedProduct]
   );
@@ -1555,7 +1580,7 @@ export const PriceCompareScreen: React.FC = () => {
               ) : autocompleteResults.length ? (
                 autocompleteResults.map((item) => (
                   <TouchableOpacity
-                    key={`autocomplete-${item.barcode}`}
+                    key={`autocomplete-${item.id}`}
                     activeOpacity={0.88}
                     onPress={() => {
                       void handleSelectProduct(item);
@@ -1622,9 +1647,9 @@ export const PriceCompareScreen: React.FC = () => {
               <View style={styles.resultsWrap}>
                 {results.map((item) => (
                   <SearchResultCard
-                    key={item.barcode}
+                    key={item.id}
                     item={item}
-                    selected={selectedProduct?.barcode === item.barcode}
+                    selected={selectedProduct?.id === item.id}
                     onPress={() => {
                       void loadOffers(item);
                     }}
@@ -1933,7 +1958,7 @@ export const PriceCompareScreen: React.FC = () => {
             <View style={styles.cartItemsWrap}>
               {comparisonCart.map((entry) => (
                 <View
-                  key={`cart-${entry.product.barcode}`}
+                  key={`cart-${entry.product.id}`}
                   style={[
                     styles.cartItemCard,
                     {
@@ -1963,19 +1988,19 @@ export const PriceCompareScreen: React.FC = () => {
                       <TouchableOpacity
                         activeOpacity={0.88}
                         onPress={() => {
-                          handleDecreaseCartQuantity(entry.product.barcode);
+                          handleDecreaseCartQuantity(entry.product.id);
                         }}
                         style={styles.quantityButton}
                       >
                         <Ionicons name="remove-outline" size={18} color={colors.text} />
                       </TouchableOpacity>
-                      <Text style={[styles.quantityValue, { color: colors.text }]}>
-                        {entry.quantity}
-                      </Text>
+                        <Text style={[styles.quantityValue, { color: colors.text }]}>
+                          {entry.quantity}
+                        </Text>
                       <TouchableOpacity
                         activeOpacity={0.88}
                         onPress={() => {
-                          handleIncreaseCartQuantity(entry.product.barcode);
+                          handleIncreaseCartQuantity(entry.product.id);
                         }}
                         style={styles.quantityButton}
                       >
@@ -1985,7 +2010,7 @@ export const PriceCompareScreen: React.FC = () => {
                     <TouchableOpacity
                       activeOpacity={0.88}
                       onPress={() => {
-                        handleRemoveFromCart(entry.product.barcode);
+                        handleRemoveFromCart(entry.product.id);
                       }}
                       style={[
                         styles.cartRemoveButton,
