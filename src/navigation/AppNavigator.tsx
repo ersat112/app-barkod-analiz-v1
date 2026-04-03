@@ -50,7 +50,7 @@ import type { Product } from '../utils/analysis';
 import type { FamilyAllergenKey } from '../services/familyHealthProfile.service';
 import type { HelpArticleKey } from '../services/helpCenterContent.service';
 
-const SCAN_BUTTON_ART = require('../../assets/icon.png');
+const SCAN_BUTTON_ART = require('../../assets/icon-scan-transparent.png');
 
 export type MainTabParamList = {
   Home: undefined;
@@ -613,7 +613,7 @@ const styles = StyleSheet.create({
     borderRadius: 23,
   },
   centerScanLabel: {
-    marginTop: 2,
+    marginTop: -6,
     fontSize: 9,
     fontWeight: '900',
   },

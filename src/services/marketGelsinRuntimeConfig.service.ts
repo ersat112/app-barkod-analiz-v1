@@ -6,6 +6,7 @@ import {
   getDefaultMarketGelsinRuntimeSnapshot,
   getMarketGelsinRuntimeSnapshot,
   hasMarketGelsinEnvOverride,
+  normalizeMarketGelsinRuntimeBaseUrl,
   resetMarketGelsinRuntimeSnapshot,
   setMarketGelsinRuntimeSnapshot,
   type MarketGelsinRuntimeSnapshot,
@@ -58,7 +59,9 @@ function clampInteger(
 }
 
 function toBaseUrl(value: unknown): string {
-  return typeof value === 'string' ? value.trim().replace(/\/+$/g, '') : '';
+  return typeof value === 'string'
+    ? normalizeMarketGelsinRuntimeBaseUrl(value)
+    : '';
 }
 
 function isConfigFresh(config: MarketGelsinRuntimeSnapshot | null): boolean {

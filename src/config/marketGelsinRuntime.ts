@@ -35,6 +35,27 @@ export type MarketGelsinRuntimeSnapshot = {
 const normalizeBaseUrl = (value: string): string =>
   value.trim().replace(/\/+$/g, '');
 
+const rewriteLoopbackHostForEmulator = (baseUrl: string): string => {
+  const normalized = normalizeBaseUrl(baseUrl);
+
+  if (!normalized || !isProbablyAndroidEmulator()) {
+    return normalized;
+  }
+
+  try {
+    const parsed = new URL(normalized);
+
+    if (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost') {
+      parsed.hostname = '10.0.2.2';
+      return normalizeBaseUrl(parsed.toString());
+    }
+  } catch {
+    return normalized;
+  }
+
+  return normalized;
+};
+
 const getPlatformConstants = (): Record<string, unknown> => {
   const platformWithConstants = Platform as typeof Platform & {
     constants?: Record<string, unknown>;
@@ -109,13 +130,13 @@ const emulatorFallbackBaseUrl =
     : '';
 
 function resolveDefaultSnapshot(): MarketGelsinRuntimeSnapshot {
-  const envBaseUrl = normalizeBaseUrl(
+  const envBaseUrl = rewriteLoopbackHostForEmulator(
     getEnvString('EXPO_PUBLIC_MARKET_GELSIN_API_URL', '')
   );
   const baseUrl =
     envBaseUrl ||
-    normalizeBaseUrl(developmentFallbackBaseUrl) ||
-    normalizeBaseUrl(emulatorFallbackBaseUrl);
+    rewriteLoopbackHostForEmulator(developmentFallbackBaseUrl) ||
+    rewriteLoopbackHostForEmulator(emulatorFallbackBaseUrl);
   const enabledByEnv = getEnvBoolean(
     'EXPO_PUBLIC_MARKET_GELSIN_ENABLED',
     Boolean(envBaseUrl || developmentFallbackBaseUrl || emulatorFallbackBaseUrl)
@@ -178,10 +199,14 @@ export const setMarketGelsinRuntimeSnapshot = (
 ): MarketGelsinRuntimeSnapshot => {
   currentSnapshot = {
     ...nextSnapshot,
-    baseUrl: normalizeBaseUrl(nextSnapshot.baseUrl),
+    baseUrl: rewriteLoopbackHostForEmulator(nextSnapshot.baseUrl),
   };
   return currentSnapshot;
 };
+
+export const normalizeMarketGelsinRuntimeBaseUrl = (
+  value: string
+): string => rewriteLoopbackHostForEmulator(value);
 
 export const resetMarketGelsinRuntimeSnapshot = (): MarketGelsinRuntimeSnapshot =>
   setMarketGelsinRuntimeSnapshot(defaultSnapshot);
