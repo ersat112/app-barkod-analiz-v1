@@ -71,7 +71,7 @@ function toErrorMessage(error: unknown): string {
 }
 
 export const useSettingsProfileEditor = () => {
-  const { user, profile, refreshProfile } = useAuth();
+  const { user, profile, refreshProfile, applyProfileSnapshot } = useAuth();
 
   const sourceDraft = useMemo(
     () =>
@@ -203,8 +203,23 @@ export const useSettingsProfileEditor = () => {
         address: nextDraft.address,
       });
 
+      applyProfileSnapshot(
+        nextProfile ?? {
+          ...(profile ?? {}),
+          firstName: nextDraft.firstName,
+          lastName: nextDraft.lastName,
+          phone: nextDraft.phone,
+          city: nextDraft.city,
+          district: nextDraft.district,
+          address: nextDraft.address,
+        }
+      );
       setDraft(nextDraft);
-      await refreshProfile();
+      try {
+        await refreshProfile();
+      } catch (refreshError) {
+        console.warn('[useSettingsProfileEditor] refresh after save failed:', refreshError);
+      }
 
       const completion = calculateProfileCompletion({
         profile: nextProfile ?? {
@@ -242,7 +257,15 @@ export const useSettingsProfileEditor = () => {
     } finally {
       setIsSaving(false);
     }
-  }, [draft, hasChanges, profile, refreshProfile, sourceDraft, user]);
+  }, [
+    applyProfileSnapshot,
+    draft,
+    hasChanges,
+    profile,
+    refreshProfile,
+    sourceDraft,
+    user,
+  ]);
 
   return {
     draft,

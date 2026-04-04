@@ -32,6 +32,7 @@ type AuthContextValue = {
   isAuthenticated: boolean;
   profileError: string | null;
   refreshProfile: () => Promise<void>;
+  applyProfileSnapshot: (profile: AppUserProfile | null) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -184,6 +185,23 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   }, []);
 
+  const applyProfileSnapshot = useCallback((nextProfile: AppUserProfile | null) => {
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    if (!nextProfile) {
+      setProfile(null);
+      return;
+    }
+
+    setProfile((current) => ({
+      ...(current ?? {}),
+      ...nextProfile,
+    }));
+    setProfileError(null);
+  }, []);
+
   useEffect(() => {
     isMountedRef.current = true;
 
@@ -258,13 +276,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         lastSyncedNutritionPreferencesRef.current = serializedPreferences;
 
         if (nextProfile) {
-          setProfile((current) => ({
-            ...(current ?? {}),
-            ...nextProfile,
-          }));
+          applyProfileSnapshot(nextProfile);
         }
       } catch (error) {
         console.error('[AuthContext] nutrition preference sync failed:', error);
+        setProfileError(toErrorMessage(error));
       }
     };
 
@@ -273,7 +289,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return () => {
       cancelled = true;
     };
-  }, [nutritionPreferences, profile?.nutritionPreferences]);
+  }, [applyProfileSnapshot, nutritionPreferences, profile?.nutritionPreferences]);
 
   useEffect(() => {
     const currentUser = auth.currentUser;
@@ -308,13 +324,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         lastSyncedFamilyHealthProfileRef.current = serializedFamilyHealthProfile;
 
         if (nextProfile) {
-          setProfile((current) => ({
-            ...(current ?? {}),
-            ...nextProfile,
-          }));
+          applyProfileSnapshot(nextProfile);
         }
       } catch (error) {
         console.error('[AuthContext] family health profile sync failed:', error);
+        setProfileError(toErrorMessage(error));
       }
     };
 
@@ -323,7 +337,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     return () => {
       cancelled = true;
     };
-  }, [familyHealthProfile, profile?.familyHealthProfile]);
+  }, [applyProfileSnapshot, familyHealthProfile, profile?.familyHealthProfile]);
 
   useEffect(() => {
     const currentUser = auth.currentUser;
@@ -371,12 +385,10 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           return;
         }
 
-        setProfile((current) => ({
-          ...(current ?? {}),
-          ...nextProfile,
-        }));
+        applyProfileSnapshot(nextProfile);
       } catch (error) {
         console.error('[AuthContext] location snapshot sync failed:', error);
+        setProfileError(toErrorMessage(error));
       }
     };
 
@@ -386,6 +398,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       cancelled = true;
     };
   }, [
+    applyProfileSnapshot,
     locationPermissionGranted,
     locationPermissionPrompted,
     profile?.city,
@@ -404,8 +417,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       isAuthenticated: !!user,
       profileError,
       refreshProfile,
+      applyProfileSnapshot,
     }),
-    [loading, profile, profileError, refreshProfile, user]
+    [applyProfileSnapshot, loading, profile, profileError, refreshProfile, user]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -787,6 +787,23 @@ export async function updateCurrentUserProfile(input: {
     authProfile.lastName ??
     '';
 
+  const nextLocationContext =
+    normalizeLocationContext({
+      ...(existingProfile?.locationContext ?? {}),
+      city:
+        editableProfile.city ??
+        existingProfile?.locationContext?.city ??
+        existingProfile?.city,
+      district:
+        editableProfile.district ??
+        existingProfile?.locationContext?.district ??
+        existingProfile?.district,
+      source:
+        existingProfile?.locationContext?.source ??
+        ((editableProfile.city ?? editableProfile.district) ? 'manual' : undefined),
+      capturedAt: new Date().toISOString(),
+    }) ?? existingProfile?.locationContext;
+
   const mergedProfile = compactUserProfile({
     firstName,
     lastName,
@@ -811,7 +828,7 @@ export async function updateCurrentUserProfile(input: {
       existingProfile?.legalAcceptance ?? buildCurrentLegalAcceptance('profile_sync', now),
     nutritionPreferences: existingProfile?.nutritionPreferences,
     familyHealthProfile: existingProfile?.familyHealthProfile,
-    locationContext: existingProfile?.locationContext,
+    locationContext: nextLocationContext,
     createdAt: existingProfile?.createdAt ?? now,
     updatedAt: now,
     lastLoginAt: existingProfile?.lastLoginAt,

@@ -120,6 +120,9 @@ export type MarketSearchProduct = {
   productName: string;
   brand?: string | null;
   category?: string | null;
+  packSize?: number | null;
+  packUnit?: string | null;
+  matchConfidence?: number | null;
   imageUrl?: string | null;
   marketLogoUrl?: string | null;
   bestOffer?: MarketOffer | null;

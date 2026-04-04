@@ -28,6 +28,7 @@ import {
   signInWithEmailAndPassword,
 } from 'firebase/auth';
 
+import { APP_RUNTIME } from '../../config/appRuntime';
 import { AUTH_RUNTIME, getGoogleAuthRedirectUri } from '../../config/authRuntime';
 import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
@@ -285,7 +286,7 @@ const BrowserGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
 };
 
 const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = (props) => {
-  if (Platform.OS === 'android') {
+  if (Platform.OS === 'android' && !APP_RUNTIME.isDevelopment) {
     return <NativeGoogleAuthSection {...props} />;
   }
 

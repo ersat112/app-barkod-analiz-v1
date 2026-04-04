@@ -30,6 +30,7 @@ import {
   updateProfile,
 } from 'firebase/auth';
 
+import { APP_RUNTIME } from '../../config/appRuntime';
 import {
   AUTH_RUNTIME,
   getGoogleAuthRedirectUri,
@@ -393,7 +394,7 @@ const BrowserGoogleAuthSection: React.FC<GoogleAuthSectionProps> = ({
 };
 
 const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = (props) => {
-  if (Platform.OS === 'android') {
+  if (Platform.OS === 'android' && !APP_RUNTIME.isDevelopment) {
     return <NativeGoogleAuthSection {...props} />;
   }
 

@@ -89,8 +89,8 @@ type MarketSheetState =
   | null;
 
 const SEARCH_MIN_LENGTH = 2;
-const REMOTE_SEARCH_TIMEOUT_MS = 5000;
-const REMOTE_AUTOCOMPLETE_TIMEOUT_MS = 3000;
+const REMOTE_SEARCH_TIMEOUT_MS = 9000;
+const REMOTE_AUTOCOMPLETE_TIMEOUT_MS = 4500;
 const REMOTE_OFFERS_TIMEOUT_MS = 5000;
 const REMOTE_BASKET_TIMEOUT_MS = 4500;
 
@@ -123,7 +123,16 @@ const normalizeLooseSearchValue = (value?: string | null): string =>
 const buildSearchVariants = (query: string): string[] => {
   const trimmed = query.trim();
   const loose = normalizeLooseSearchValue(trimmed);
-  return Array.from(new Set([trimmed, loose].filter((item) => item.length >= SEARCH_MIN_LENGTH)));
+  const tokenVariants = loose
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= 3);
+
+  return Array.from(
+    new Set(
+      [trimmed, loose, ...tokenVariants].filter((item) => item.length >= SEARCH_MIN_LENGTH)
+    )
+  ).slice(0, 6);
 };
 
 const isBarcodeLikeQuery = (query: string): boolean =>
@@ -158,6 +167,77 @@ const dedupeSearchProducts = (items: MarketSearchProduct[]): MarketSearchProduct
 
   return Array.from(map.values());
 };
+
+const computeSearchProductScore = (
+  item: MarketSearchProduct,
+  query: string
+): number => {
+  const normalizedQuery = normalizeLooseSearchValue(query);
+  const haystack = normalizeLooseSearchValue(
+    [
+      item.productName,
+      item.brand ?? '',
+      item.category ?? '',
+      item.packSize != null ? String(item.packSize) : '',
+      item.packUnit ?? '',
+      item.barcode ?? '',
+    ].join(' ')
+  );
+  const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+
+  let score = 0;
+
+  if (item.barcode && item.barcode === query.trim()) {
+    score += 280;
+  } else if (item.barcode?.startsWith(query.trim())) {
+    score += 180;
+  }
+
+  if (haystack === normalizedQuery) {
+    score += 220;
+  } else if (haystack.startsWith(normalizedQuery)) {
+    score += 150;
+  } else if (haystack.includes(normalizedQuery)) {
+    score += 110;
+  }
+
+  if (queryTokens.length > 0) {
+    const matchedTokens = queryTokens.filter((token) => haystack.includes(token)).length;
+    score += matchedTokens * 26;
+
+    if (matchedTokens === queryTokens.length) {
+      score += 40;
+    }
+  }
+
+  if (typeof item.matchConfidence === 'number' && Number.isFinite(item.matchConfidence)) {
+    score += Math.round(item.matchConfidence * 100);
+  }
+
+  if (item.bestOffer?.inStock) {
+    score += 18;
+  }
+
+  score += Math.min(item.inStockMarketCount * 5, 30);
+  score += Math.min(item.marketCount * 2, 16);
+
+  return score;
+};
+
+const rankSearchProducts = (
+  items: MarketSearchProduct[],
+  query: string
+): MarketSearchProduct[] =>
+  [...items].sort((left, right) => {
+    const rightScore = computeSearchProductScore(right, query);
+    const leftScore = computeSearchProductScore(left, query);
+
+    if (rightScore !== leftScore) {
+      return rightScore - leftScore;
+    }
+
+    return left.productName.localeCompare(right.productName, 'tr');
+  });
 
 const MARKET_BRAND_ACCENTS = [
   '#167A78',
@@ -553,9 +633,10 @@ export const PriceCompareScreen: React.FC = () => {
       const variants = buildSearchVariants(trimmedQuery);
       const timeoutMs =
         mode === 'autocomplete' ? REMOTE_AUTOCOMPLETE_TIMEOUT_MS : REMOTE_SEARCH_TIMEOUT_MS;
+      const isBarcodeQuery = isBarcodeLikeQuery(trimmedQuery);
       const remoteTasks: Promise<MarketSearchProduct[]>[] = [];
 
-      if (isBarcodeLikeQuery(trimmedQuery)) {
+      if (isBarcodeQuery) {
         remoteTasks.push(
           resolveWithin(fetchMarketBarcodeLookup(trimmedQuery), timeoutMs)
             .then((result) => (result ? [result] : []))
@@ -564,6 +645,27 @@ export const PriceCompareScreen: React.FC = () => {
               return [];
             })
         );
+      }
+
+      if (citySlug) {
+        variants.forEach((variant, index) => {
+          remoteTasks.push(
+            resolveWithin(
+              fetchLegacyMarketOfferSearch({
+                query: variant,
+                citySlug,
+                barcode: isBarcodeQuery ? trimmedQuery : undefined,
+                limit: index === 0 ? limit : Math.max(4, Math.ceil(limit / 2)),
+              }),
+              timeoutMs
+            )
+              .then((response) => response.results)
+              .catch((error) => {
+                console.warn('[PriceCompareScreen] legacy search failed:', error);
+                return [];
+              })
+          );
+        });
       }
 
       variants.forEach((variant) => {
@@ -584,36 +686,18 @@ export const PriceCompareScreen: React.FC = () => {
         );
       });
 
-      if (citySlug) {
-        remoteTasks.push(
-          resolveWithin(
-            fetchLegacyMarketOfferSearch({
-              query: trimmedQuery,
-              citySlug,
-              barcode: isBarcodeLikeQuery(trimmedQuery) ? trimmedQuery : undefined,
-              limit,
-            }),
-            timeoutMs
-          )
-            .then((response) => response.results)
-            .catch((error) => {
-              console.warn('[PriceCompareScreen] legacy search failed:', error);
-              return [];
-            })
-        );
-      }
-
       const settled = await Promise.allSettled(remoteTasks);
       const remoteResults = settled.flatMap((result) =>
         result.status === 'fulfilled' ? result.value : []
       );
 
-      const mergedResults =
+      const mergedResults = dedupeSearchProducts(
         remoteResults.length > 0
-          ? dedupeSearchProducts([...remoteResults, ...localResults])
-          : dedupeSearchProducts([...localResults]);
+          ? [...remoteResults, ...localResults]
+          : [...localResults]
+      );
 
-      return mergedResults.slice(0, limit);
+      return rankSearchProducts(mergedResults, trimmedQuery).slice(0, limit);
     },
     [cityCode, citySlug]
   );

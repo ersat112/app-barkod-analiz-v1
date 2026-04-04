@@ -74,6 +74,15 @@ const toBoolean = (value: unknown, fallback = false): boolean =>
 const toStringArray = (value: unknown): string[] =>
   Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 
+const normalizeLooseSearchValue = (value?: string | null): string =>
+  String(value || '')
+    .toLocaleLowerCase('tr')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/ı/g, 'i')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
 const parseFreshness = (value: unknown): MarketDataFreshness | null => {
   const payload = toObject(value);
   const mode = toText(payload.mode);
@@ -259,12 +268,21 @@ const parseSearchProduct = (value: unknown): MarketSearchProduct => {
       ''
     ) ||
     null;
+  const packSize = toNumber(payload.pack_size ?? payload.packSize);
+  const packUnit =
+    toText(payload.pack_unit ?? payload.packUnit, '') ||
+    null;
+  const matchConfidence = toNumber(
+    payload.match_confidence ?? payload.matchConfidence
+  );
   const id =
     barcode ||
     [
       productName,
       brand ?? '',
       category ?? '',
+      packSize ?? '',
+      packUnit ?? '',
       bestOffer?.marketKey ?? bestOffer?.marketName ?? '',
       typeof bestOffer?.price === 'number' ? String(bestOffer.price) : '',
     ]
@@ -278,6 +296,9 @@ const parseSearchProduct = (value: unknown): MarketSearchProduct => {
     productName,
     brand,
     category,
+    packSize,
+    packUnit,
+    matchConfidence,
     imageUrl: toText(payload.image_url ?? payload.imageUrl, '') || null,
     marketLogoUrl:
       toText(payload.market_logo_url ?? payload.marketLogoUrl, '') || null,
@@ -287,6 +308,23 @@ const parseSearchProduct = (value: unknown): MarketSearchProduct => {
     inStockMarketCount,
     dataFreshness: parseFreshness(payload.data_freshness ?? payload.dataFreshness),
   };
+};
+
+const buildLegacyProductGroupKey = (
+  offer: ReturnType<typeof parseLegacyOffer>,
+  fallbackKey: string
+): string => {
+  if (offer.barcode && offer.barcode.trim()) {
+    return offer.barcode.trim();
+  }
+
+  const normalizedDisplayName = normalizeLooseSearchValue(offer.displayName);
+
+  if (normalizedDisplayName) {
+    return normalizedDisplayName;
+  }
+
+  return normalizeLooseSearchValue(fallbackKey) || fallbackKey;
 };
 
 const buildMarketPricingClient = (baseUrl: string, timeoutMs: number): AxiosInstance =>
@@ -440,7 +478,10 @@ export async function fetchLegacyMarketOfferSearch(params: {
 
   rawOffers.forEach((item) => {
     const offer = parseLegacyOffer(item, params.barcode);
-    const key = offer.barcode || `${offer.marketName}-${offer.displayName || ''}`;
+    const key = buildLegacyProductGroupKey(
+      offer,
+      `${offer.marketName}-${offer.displayName || ''}`
+    );
 
     if (!key) {
       return;
