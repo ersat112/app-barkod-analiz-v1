@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ScanScore | E-Posta Doğrulama</title>
+    <meta
+      name="description"
+      content="ScanScore hesap doğrulama ve hesap işlemleri için güvenli email action sayfasi."
+    />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0e1510;
+        --bg-muted: #152017;
+        --card: rgba(24, 34, 27, 0.94);
+        --card-border: rgba(139, 212, 80, 0.22);
+        --text: #f5f7fa;
+        --muted: rgba(245, 247, 250, 0.74);
+        --primary: #63ae2e;
+        --primary-strong: #8bd450;
+        --danger: #e26868;
+        --warning: #a9cf4b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background:
+          radial-gradient(circle at top, rgba(99, 174, 46, 0.18), transparent 36%),
+          linear-gradient(180deg, var(--bg) 0%, #101a12 100%);
+        color: var(--text);
+        font-family:
+          Inter,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      main {
+        width: min(560px, 100%);
+        padding: 32px;
+        border: 1px solid var(--card-border);
+        border-radius: 28px;
+        background: var(--card);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: rgba(99, 174, 46, 0.14);
+        border: 1px solid rgba(99, 174, 46, 0.26);
+        color: var(--primary-strong);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 20px 0 12px;
+        font-size: clamp(30px, 6vw, 40px);
+        line-height: 1.05;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.65;
+        font-size: 16px;
+      }
+
+      .status {
+        margin-top: 18px;
+        padding: 14px 16px;
+        border-radius: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(255, 255, 255, 0.03);
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .status[data-tone="success"] {
+        border-color: rgba(99, 174, 46, 0.28);
+        background: rgba(99, 174, 46, 0.12);
+        color: #d9f3c5;
+      }
+
+      .status[data-tone="danger"] {
+        border-color: rgba(226, 104, 104, 0.32);
+        background: rgba(226, 104, 104, 0.1);
+        color: #ffd1d1;
+      }
+
+      .status[data-tone="warning"] {
+        border-color: rgba(169, 207, 75, 0.28);
+        background: rgba(169, 207, 75, 0.1);
+        color: #e5f4b3;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .button {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 48px;
+        padding: 0 18px;
+        border-radius: 999px;
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 15px;
+        transition: transform 0.18s ease, opacity 0.18s ease;
+        border: 1px solid transparent;
+      }
+
+      .button:hover {
+        transform: translateY(-1px);
+      }
+
+      .button-primary {
+        color: #10200a;
+        background: linear-gradient(135deg, var(--primary) 0%, var(--primary-strong) 100%);
+      }
+
+      .button-secondary {
+        color: var(--text);
+        border-color: rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.04);
+      }
+
+      .meta {
+        margin-top: 18px;
+        font-size: 13px;
+        color: rgba(245, 247, 250, 0.5);
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      .spinner {
+        width: 18px;
+        height: 18px;
+        border-radius: 999px;
+        border: 2px solid rgba(255, 255, 255, 0.16);
+        border-top-color: var(--primary-strong);
+        animation: spin 0.9s linear infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      @media (max-width: 560px) {
+        body {
+          padding: 16px;
+        }
+
+        main {
+          padding: 24px;
+          border-radius: 22px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">
+        <span class="spinner" id="spinner" aria-hidden="true"></span>
+        <span>ScanScore</span>
+      </div>
+      <h1 id="title">E-posta doğrulaması kontrol ediliyor</h1>
+      <p id="description">
+        Lütfen birkaç saniye bekleyin. Güvenli doğrulama bağlantınızı işliyoruz.
+      </p>
+
+      <div class="status" id="status" data-tone="warning">
+        Doğrulama bağlantısı işleniyor...
+      </div>
+
+      <div class="actions">
+        <a
+          id="continue-button"
+          class="button button-primary hidden"
+          href="https://barkodanaliz-5ed4b.web.app"
+        >
+          ScanScore'a dön
+        </a>
+        <a class="button button-secondary" href="https://barkodanaliz-5ed4b.web.app">
+          Ana sayfaya git
+        </a>
+      </div>
+
+      <p class="meta" id="meta">
+        Sorun yaşarsanız destek için destekerenesal@gmail.com adresine ulaşabilirsiniz.
+      </p>
+    </main>
+
+    <script type="module">
+      import { initializeApp } from 'https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js';
+      import {
+        applyActionCode,
+        checkActionCode,
+        getAuth,
+      } from 'https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js';
+
+      const firebaseConfig = {
+        apiKey: 'AIzaSyCGQQASVvLt9XbXOt2GSb3Vlg5gf95IosU',
+        authDomain: 'barkodanaliz-5ed4b.firebaseapp.com',
+        projectId: 'barkodanaliz-5ed4b',
+        storageBucket: 'barkodanaliz-5ed4b.firebasestorage.app',
+        messagingSenderId: '1054230654930',
+        appId: '1:1054230654930:web:d9f0f54eb64f46747b620b',
+      };
+
+      const HOME_URL = 'https://barkodanaliz-5ed4b.web.app';
+      const ALLOWED_HOSTS = new Set([
+        'barkodanaliz-5ed4b.web.app',
+        'barkodanaliz-5ed4b.firebaseapp.com',
+      ]);
+
+      const titleEl = document.getElementById('title');
+      const descriptionEl = document.getElementById('description');
+      const statusEl = document.getElementById('status');
+      const metaEl = document.getElementById('meta');
+      const continueButton = document.getElementById('continue-button');
+      const spinner = document.getElementById('spinner');
+
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get('mode');
+      const oobCode = params.get('oobCode');
+      const continueUrl = sanitizeContinueUrl(params.get('continueUrl'));
+
+      continueButton.href = continueUrl;
+
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+
+      if (mode !== 'verifyEmail' || !oobCode) {
+        renderError(
+          'Bu bağlantı desteklenmiyor',
+          'Bu sayfa yalnızca e-posta doğrulama bağlantıları için kullanılabilir.',
+          'Geçersiz veya eksik doğrulama parametresi bulundu.'
+        );
+      } else {
+        verifyEmail(oobCode).catch((error) => {
+          const code = typeof error?.code === 'string' ? error.code : '';
+          renderError(
+            'Doğrulama tamamlanamadı',
+            mapErrorMessage(code),
+            code || 'Bilinmeyen doğrulama hatası'
+          );
+        });
+      }
+
+      async function verifyEmail(code) {
+        await checkActionCode(auth, code);
+        await applyActionCode(auth, code);
+
+        spinner.classList.add('hidden');
+        titleEl.textContent = 'E-posta adresiniz doğrulandı';
+        descriptionEl.textContent =
+          'Hesabınız artık kullanılabilir. Uygulamaya dönerek giriş yapabilirsiniz.';
+        statusEl.dataset.tone = 'success';
+        statusEl.textContent = 'Doğrulama başarıyla tamamlandı.';
+        metaEl.textContent =
+          'Doğrulama sonrası girişte sorun yaşarsanız destekerenesal@gmail.com adresine yazabilirsiniz.';
+        continueButton.classList.remove('hidden');
+      }
+
+      function renderError(title, description, meta) {
+        spinner.classList.add('hidden');
+        titleEl.textContent = title;
+        descriptionEl.textContent = description;
+        statusEl.dataset.tone = 'danger';
+        statusEl.textContent = 'Bağlantı şu an kullanılamıyor.';
+        metaEl.textContent = meta;
+        continueButton.classList.remove('hidden');
+      }
+
+      function sanitizeContinueUrl(rawValue) {
+        if (!rawValue) {
+          return HOME_URL;
+        }
+
+        try {
+          const url = new URL(rawValue);
+
+          if (!ALLOWED_HOSTS.has(url.host)) {
+            return HOME_URL;
+          }
+
+          return url.toString();
+        } catch {
+          return HOME_URL;
+        }
+      }
+
+      function mapErrorMessage(code) {
+        switch (code) {
+          case 'auth/expired-action-code':
+            return 'Bu doğrulama bağlantısının süresi dolmuş. Uygulama içinden yeni bir doğrulama e-postası isteyin.';
+          case 'auth/invalid-action-code':
+            return 'Bu doğrulama bağlantısı geçersiz veya daha önce kullanılmış olabilir.';
+          case 'auth/user-disabled':
+            return 'Bu hesap şu anda kullanılamıyor.';
+          case 'auth/user-not-found':
+            return 'Bu bağlantıya ait kullanıcı hesabı bulunamadı.';
+          default:
+            return 'Doğrulama bağlantısı işlenirken beklenmeyen bir sorun oluştu.';
+        }
+      }
+    </script>
+  </body>
+</html>

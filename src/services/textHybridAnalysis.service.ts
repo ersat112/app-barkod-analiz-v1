@@ -106,6 +106,26 @@ const NUTRITION_MARKERS = [
   'salt',
 ];
 
+const NUTRITION_ALIASES = {
+  energy: ['enerji', 'energy'],
+  fat: ['yağ', 'yag', 'fat'],
+  saturatedFat: ['doymuş yağ', 'doymus yag', 'saturated fat', 'saturates', 'saturated'],
+  carbohydrates: ['karbonhidrat', 'carbohydrate', 'carbohydrates'],
+  sugars: ['şeker', 'seker', 'sugar', 'sugars', 'of which sugars'],
+  proteins: ['protein', 'proteins'],
+  salt: ['tuz', 'salt'],
+  sodium: ['sodyum', 'sodium'],
+  fiber: ['lif', 'fiber', 'fibre'],
+  fruitVegetable: [
+    'meyve sebze',
+    'meyve / sebze',
+    'meyve sebze baklagil',
+    'fruit vegetable',
+    'fruit / vegetable',
+    'fruit vegetable legumes',
+  ],
+} as const;
+
 const normalizeForMatch = (value?: string | null): string =>
   String(value || '')
     .toLocaleLowerCase('tr')
@@ -122,6 +142,206 @@ const tokenize = (value?: string | null): string[] =>
     .map((item) => item.trim())
     .filter((item) => item.length >= 2 && !QUERY_STOP_WORDS.has(item));
 
+const findAliasIndex = (line: string, aliases: readonly string[]): number => {
+  const normalizedLine = normalizeForMatch(line);
+
+  return aliases.reduce((best, alias) => {
+    const index = normalizedLine.indexOf(normalizeForMatch(alias));
+    if (index === -1) {
+      return best;
+    }
+
+    return best === -1 ? index : Math.min(best, index);
+  }, -1);
+};
+
+const normalizeNumericString = (value: string): number | null => {
+  const cleaned = value
+    .replace(/([0-9])[oO](?=[0-9])/g, (_match, digit: string) => `${digit}0`)
+    .replace(',', '.')
+    .replace(/\s+/g, '')
+    .trim();
+
+  if (!cleaned) {
+    return null;
+  }
+
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const extractNumericCandidates = (
+  line: string
+): { value: number; unit: string | null }[] => {
+  const regex = /(\d+(?:[.,]\d+)?)\s*(kcal|kj|mg|g|gr|ml|%)?/gi;
+  const candidates: { value: number; unit: string | null }[] = [];
+
+  for (const match of line.matchAll(regex)) {
+    const parsedValue = normalizeNumericString(match[1] || '');
+    if (parsedValue === null) {
+      continue;
+    }
+
+    const unit = String(match[2] || '').toLowerCase() || null;
+
+    if (
+      parsedValue === 100 &&
+      (unit === 'g' || unit === 'gr' || unit === 'ml' || unit === '%')
+    ) {
+      continue;
+    }
+
+    candidates.push({ value: parsedValue, unit });
+  }
+
+  return candidates;
+};
+
+const extractEnergyKcalFromLine = (line: string): number | null => {
+  const kcalMatch = line.match(/(\d+(?:[.,]\d+)?)\s*kcal/i);
+  if (kcalMatch) {
+    return normalizeNumericString(kcalMatch[1] || '');
+  }
+
+  const kjMatch = line.match(/(\d+(?:[.,]\d+)?)\s*kj/i);
+  if (kjMatch) {
+    const kj = normalizeNumericString(kjMatch[1] || '');
+    return typeof kj === 'number' ? Number.parseFloat((kj / 4.184).toFixed(1)) : null;
+  }
+
+  const candidates = extractNumericCandidates(line);
+  if (candidates.length === 1) {
+    return candidates[0].value;
+  }
+
+  return null;
+};
+
+const extractLineValueByAliases = (
+  line: string,
+  aliases: readonly string[],
+  options?: { percent?: boolean }
+): number | null => {
+  const aliasIndex = findAliasIndex(line, aliases);
+  if (aliasIndex === -1) {
+    return null;
+  }
+
+  const sliced = line.slice(aliasIndex);
+  const candidates = extractNumericCandidates(sliced);
+  if (!candidates.length) {
+    return null;
+  }
+
+  const usableCandidate =
+    candidates.find((item) =>
+      options?.percent ? item.unit === '%' || item.unit === null : item.unit !== 'kcal' && item.unit !== 'kj'
+    ) || candidates[0];
+
+  if (!usableCandidate) {
+    return null;
+  }
+
+  if (usableCandidate.unit === 'mg') {
+    return Number.parseFloat((usableCandidate.value / 1000).toFixed(3));
+  }
+
+  return usableCandidate.value;
+};
+
+const countParsedNutriments = (nutriments?: Record<string, unknown>): number => {
+  if (!nutriments) {
+    return 0;
+  }
+
+  return [
+    'energy-kcal_100g',
+    'fat_100g',
+    'saturated-fat_100g',
+    'carbohydrates_100g',
+    'sugars_100g',
+    'proteins_100g',
+    'salt_100g',
+    'fiber_100g',
+    'fruits-vegetables-nuts_100g',
+  ].filter((key) => typeof nutriments[key] === 'number').length;
+};
+
+const extractNutritionTableFromText = (
+  rawText: string
+): Record<string, number> | undefined => {
+  const lines = rawText
+    .replace(/\r/g, '\n')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length >= 2);
+
+  const nutriments: Record<string, number> = {};
+
+  lines.forEach((line) => {
+    if (
+      nutriments['energy-kcal_100g'] == null &&
+      findAliasIndex(line, NUTRITION_ALIASES.energy) !== -1
+    ) {
+      const value = extractEnergyKcalFromLine(line);
+      if (value !== null) {
+        nutriments['energy-kcal_100g'] = value;
+      }
+    }
+
+    if (nutriments['fat_100g'] == null) {
+      const value = extractLineValueByAliases(line, NUTRITION_ALIASES.fat);
+      if (value !== null) nutriments['fat_100g'] = value;
+    }
+
+    if (nutriments['saturated-fat_100g'] == null) {
+      const value = extractLineValueByAliases(line, NUTRITION_ALIASES.saturatedFat);
+      if (value !== null) nutriments['saturated-fat_100g'] = value;
+    }
+
+    if (nutriments['carbohydrates_100g'] == null) {
+      const value = extractLineValueByAliases(line, NUTRITION_ALIASES.carbohydrates);
+      if (value !== null) nutriments['carbohydrates_100g'] = value;
+    }
+
+    if (nutriments['sugars_100g'] == null) {
+      const value = extractLineValueByAliases(line, NUTRITION_ALIASES.sugars);
+      if (value !== null) nutriments['sugars_100g'] = value;
+    }
+
+    if (nutriments['proteins_100g'] == null) {
+      const value = extractLineValueByAliases(line, NUTRITION_ALIASES.proteins);
+      if (value !== null) nutriments['proteins_100g'] = value;
+    }
+
+    if (nutriments['fiber_100g'] == null) {
+      const value = extractLineValueByAliases(line, NUTRITION_ALIASES.fiber);
+      if (value !== null) nutriments['fiber_100g'] = value;
+    }
+
+    if (nutriments['salt_100g'] == null) {
+      const saltValue = extractLineValueByAliases(line, NUTRITION_ALIASES.salt);
+      if (saltValue !== null) {
+        nutriments['salt_100g'] = saltValue;
+      } else {
+        const sodiumValue = extractLineValueByAliases(line, NUTRITION_ALIASES.sodium);
+        if (sodiumValue !== null) {
+          nutriments['salt_100g'] = Number.parseFloat((sodiumValue * 2.5).toFixed(3));
+        }
+      }
+    }
+
+    if (nutriments['fruits-vegetables-nuts_100g'] == null) {
+      const value = extractLineValueByAliases(line, NUTRITION_ALIASES.fruitVegetable, {
+        percent: true,
+      });
+      if (value !== null) nutriments['fruits-vegetables-nuts_100g'] = value;
+    }
+  });
+
+  return countParsedNutriments(nutriments) >= 3 ? nutriments : undefined;
+};
+
 const hasNutritionTableSignals = (value: string): boolean => {
   const normalized = normalizeForMatch(value);
   const markerHits = NUTRITION_MARKERS.filter((marker) =>
@@ -136,7 +356,7 @@ const hasNutritionTableSignals = (value: string): boolean => {
     return true;
   }
 
-  return false;
+  return Boolean(extractNutritionTableFromText(value));
 };
 
 export const inferTextProductType = (value: string): ProductType => {
@@ -186,6 +406,8 @@ const buildTextBackedProduct = (params: {
     image_url: FALLBACK_IMAGE,
     type: inferredType,
     ingredients_text: rawText,
+    nutriments:
+      inferredType === 'food' ? extractNutritionTableFromText(rawText) : undefined,
     intended_use_summary:
       inferredType === 'medicine' ? buildMedicineSummaryFromText(rawText) : undefined,
     sourceName:
@@ -363,20 +585,34 @@ const mergeStructuredProductWithRawText = (product: Product, rawText: string): P
   const hasIngredientMarker = INGREDIENT_MARKERS.some((marker) =>
     normalizeForMatch(rawText).includes(normalizeForMatch(marker))
   );
+  const parsedNutriments = extractNutritionTableFromText(rawText);
+  const currentNutrimentCount = countParsedNutriments(product.nutriments);
+  const parsedNutrimentCount = countParsedNutriments(parsedNutriments);
+
+  const nextProduct: Product =
+    parsedNutrimentCount > currentNutrimentCount
+      ? {
+          ...product,
+          nutriments: {
+            ...(product.nutriments || {}),
+            ...(parsedNutriments || {}),
+          },
+        }
+      : product;
 
   if (!hasIngredientMarker) {
-    return product;
+    return nextProduct;
   }
 
   const currentIngredientsLength = String(product.ingredients_text || '').trim().length;
   const incomingLength = rawText.trim().length;
 
   if (incomingLength <= currentIngredientsLength) {
-    return product;
+    return nextProduct;
   }
 
   return {
-    ...product,
+    ...nextProduct,
     ingredients_text: rawText.trim(),
   };
 };

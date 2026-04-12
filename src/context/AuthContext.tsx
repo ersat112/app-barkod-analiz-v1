@@ -9,6 +9,7 @@ import React, {
   type ReactNode,
 } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { auth } from '../config/firebase';
 import {
@@ -31,8 +32,11 @@ type AuthContextValue = {
   loading: boolean;
   isAuthenticated: boolean;
   profileError: string | null;
+  qaBypassEnabled: boolean;
   refreshProfile: () => Promise<void>;
   applyProfileSnapshot: (profile: AppUserProfile | null) => void;
+  enableQaBypass: () => Promise<void>;
+  disableQaBypass: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -53,11 +57,35 @@ function toErrorMessage(error: unknown): string {
   return 'auth_profile_sync_failed';
 }
 
+const AUTH_QA_BYPASS_STORAGE_KEY = '@auth/qa-bypass-v1';
+
+const QA_BYPASS_PROFILE: AppUserProfile = {
+  displayName: 'QA Kullanici',
+  firstName: 'QA',
+  lastName: 'Kullanici',
+  email: 'qa@local.scanscore',
+  emailVerified: true,
+  city: 'Istanbul',
+  district: 'Kadikoy',
+  nutritionPreferences: DEFAULT_NUTRITION_PREFERENCES,
+  familyHealthProfile: DEFAULT_FAMILY_HEALTH_PROFILE,
+  locationContext: {
+    permissionPrompted: true,
+    permissionGranted: true,
+    city: 'Istanbul',
+    district: 'Kadikoy',
+    source: 'manual',
+    capturedAt: new Date().toISOString(),
+  },
+};
+
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [user, setUser] = useState<User | null>(auth.currentUser);
   const [profile, setProfile] = useState<AppUserProfile | null>(null);
   const [loading, setLoading] = useState(Boolean(auth.currentUser));
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [qaBypassEnabled, setQaBypassEnabled] = useState(false);
+  const [qaBypassReady, setQaBypassReady] = useState(false);
   const nutritionPreferences = usePreferenceStore((state) => state.nutritionPreferences);
   const familyHealthProfile = usePreferenceStore((state) => state.familyHealthProfile);
   const setNutritionPreferences = usePreferenceStore((state) => state.setNutritionPreferences);
@@ -80,6 +108,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const preloadedUserUidRef = useRef<string | null>(auth.currentUser?.uid ?? null);
   const lastSyncedNutritionPreferencesRef = useRef<string>('');
   const lastSyncedFamilyHealthProfileRef = useRef<string>('');
+
+  const applyQaBypassProfile = useCallback(() => {
+    setProfile(QA_BYPASS_PROFILE);
+    setProfileError(null);
+    setNutritionPreferences(DEFAULT_NUTRITION_PREFERENCES);
+    setFamilyHealthProfile(DEFAULT_FAMILY_HEALTH_PROFILE);
+    setLocationPermissionPrompted(true);
+    setLocationPermissionGranted(true);
+    lastSyncedNutritionPreferencesRef.current = JSON.stringify(
+      DEFAULT_NUTRITION_PREFERENCES
+    );
+    lastSyncedFamilyHealthProfileRef.current = JSON.stringify(
+      DEFAULT_FAMILY_HEALTH_PROFILE
+    );
+  }, [
+    setFamilyHealthProfile,
+    setLocationPermissionGranted,
+    setLocationPermissionPrompted,
+    setNutritionPreferences,
+  ]);
 
   const syncProfileForUser = useCallback(
     async (nextUser: User, options?: { trackLogin?: boolean }) => {
@@ -129,8 +177,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
           setLocationPermissionGranted(nextProfile.locationContext.permissionGranted);
         }
       } catch (error) {
-        console.error('[AuthContext] profile reconcile failed:', error);
-
         if (!isMountedRef.current || syncId !== syncSequenceRef.current) {
           return;
         }
@@ -156,6 +202,11 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     const currentUser = auth.currentUser;
 
     if (!currentUser) {
+      if (qaBypassEnabled) {
+        applyQaBypassProfile();
+        return;
+      }
+
       setProfile(null);
       setProfileError(null);
       return;
@@ -171,8 +222,6 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setProfile(nextProfile);
       setProfileError(null);
     } catch (error) {
-      console.error('[AuthContext] refreshProfile failed:', error);
-
       if (!isMountedRef.current) {
         return;
       }
@@ -183,7 +232,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         return;
       }
     }
-  }, []);
+  }, [applyQaBypassProfile, qaBypassEnabled]);
 
   const applyProfileSnapshot = useCallback((nextProfile: AppUserProfile | null) => {
     if (!isMountedRef.current) {
@@ -202,8 +251,59 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     setProfileError(null);
   }, []);
 
+  const enableQaBypass = useCallback(async () => {
+    await AsyncStorage.setItem(AUTH_QA_BYPASS_STORAGE_KEY, 'true');
+
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    setQaBypassEnabled(true);
+    applyQaBypassProfile();
+    setLoading(false);
+  }, [applyQaBypassProfile]);
+
+  const disableQaBypass = useCallback(async () => {
+    await AsyncStorage.removeItem(AUTH_QA_BYPASS_STORAGE_KEY);
+
+    if (!isMountedRef.current) {
+      return;
+    }
+
+    setQaBypassEnabled(false);
+
+    if (!auth.currentUser) {
+      setProfile(null);
+      setProfileError(null);
+    }
+  }, []);
+
   useEffect(() => {
     isMountedRef.current = true;
+
+    void (async () => {
+      try {
+        const storedValue = await AsyncStorage.getItem(AUTH_QA_BYPASS_STORAGE_KEY);
+
+        if (!isMountedRef.current) {
+          return;
+        }
+
+        const enabled = storedValue === 'true';
+        setQaBypassEnabled(enabled);
+
+        if (enabled && !auth.currentUser) {
+          applyQaBypassProfile();
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('[AuthContext] qa bypass load failed:', error);
+      } finally {
+        if (isMountedRef.current) {
+          setQaBypassReady(true);
+        }
+      }
+    })();
 
     const initialUser = auth.currentUser;
 
@@ -222,10 +322,19 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         syncSequenceRef.current += 1;
         preloadedUserUidRef.current = null;
         void syncPurchaseProviderIdentity(null);
-        setProfile(null);
+        if (qaBypassEnabled) {
+          applyQaBypassProfile();
+        } else {
+          setProfile(null);
+        }
         setProfileError(null);
         setLoading(false);
         return;
+      }
+
+      if (qaBypassEnabled) {
+        setQaBypassEnabled(false);
+        void AsyncStorage.removeItem(AUTH_QA_BYPASS_STORAGE_KEY);
       }
 
        if (preloadedUserUidRef.current === nextUser.uid) {
@@ -241,7 +350,7 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       isMountedRef.current = false;
       unsubscribe();
     };
-  }, [syncProfileForUser]);
+  }, [applyQaBypassProfile, qaBypassEnabled, syncProfileForUser]);
 
   useEffect(() => {
     const currentUser = auth.currentUser;
@@ -413,13 +522,27 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     () => ({
       user,
       profile,
-      loading,
-      isAuthenticated: !!user,
+      loading: loading || !qaBypassReady,
+      isAuthenticated: !!user || qaBypassEnabled,
       profileError,
+      qaBypassEnabled,
       refreshProfile,
       applyProfileSnapshot,
+      enableQaBypass,
+      disableQaBypass,
     }),
-    [applyProfileSnapshot, loading, profile, profileError, refreshProfile, user]
+    [
+      applyProfileSnapshot,
+      disableQaBypass,
+      enableQaBypass,
+      loading,
+      profile,
+      profileError,
+      qaBypassEnabled,
+      qaBypassReady,
+      refreshProfile,
+      user,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -9,22 +9,26 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
+import { searchBeautyProductsByText } from '../../api/beautyApi';
+import { searchFoodProductsByText } from '../../api/foodApi';
 
 import type { RootStackParamList } from '../../navigation/AppNavigator';
 import { MarketOfferSheet } from '../../components/MarketOfferSheet';
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
 import { ProductSummaryCard } from '../../components/ProductSummaryCard';
 import { ScreenOnboardingOverlay } from '../../components/ScreenOnboardingOverlay';
-import { inferMarketDisplayProductType } from '../../config/marketDisplay';
 import {
-  getDefaultMarketGelsinRuntimeSnapshot,
-  getMarketGelsinEnvOverrideState,
-} from '../../config/marketGelsinRuntime';
+  buildMarketMonogram,
+  resolveMarketAccent,
+  resolveMarketLogoUrl,
+} from '../../config/marketBranding';
+import { inferMarketDisplayProductType } from '../../config/marketDisplay';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, type ThemeColors } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
@@ -32,13 +36,14 @@ import { useMarketGelsinRuntime } from '../../hooks/useMarketGelsinRuntime';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import {
   getBestInStockOffer,
+  getMarketOfferIdentity,
 } from '../../services/marketPricingContract.service';
 import {
-  fetchLegacyMarketOfferSearch,
-  fetchLegacyMarketProductOffers,
   fetchMarketBarcodeLookup,
-  fetchMarketBasketCompare,
+  fetchMarketCategoryProducts,
+  fetchMarketCategoryTree,
   fetchMarketProductOffers,
+  fetchMarketPriceHistory,
   fetchMarketProductSearch,
 } from '../../services/marketPricing.service';
 import {
@@ -49,16 +54,15 @@ import {
   resolveCanonicalCity,
   resolveCanonicalDistrict,
   resolveTurkeyCityCode,
-  resolveTurkeyCitySlug,
 } from '../../services/locationData';
 import {
   InfoActionCard,
   NoticeCard,
 } from './detail/DetailSections';
 import type {
-  MarketBasketCompareResponse,
-  MarketBasketMarketTotal,
+  MarketCategoryNode,
   MarketOffer,
+  MarketPriceHistoryResponse,
   MarketProductOffersResponse,
   MarketSearchProduct,
 } from '../../types/marketPricing';
@@ -69,30 +73,86 @@ import {
   hasSeenScreenOnboarding,
   markScreenOnboardingSeen,
 } from '../../services/screenOnboarding.service';
+import { usePriceCompareBasketStore } from '../../store/usePriceCompareBasketStore';
+import type { Product } from '../../utils/analysis';
 
 type PriceCompareRoute = RouteProp<RootStackParamList, 'PriceCompare'>;
 type TranslateFn = (key: string, fallback: string) => string;
-type ComparisonCartEntry = {
-  product: MarketSearchProduct;
-  offersResponse: MarketProductOffersResponse;
-  quantity: number;
-};
 type MarketSheetState =
   | {
       kind: 'offer';
       offer: MarketOffer;
     }
-  | {
-      kind: 'basket';
-      market: MarketBasketMarketTotal;
-    }
   | null;
+
+type SearchCategoryTreeNode = {
+  key: string;
+  label: string;
+  count: number | null;
+  depth: number;
+  pathLabel: string;
+  categoryId: string;
+  childrenCount: number;
+  sortOrder: number | null;
+  children: SearchCategoryTreeNode[];
+};
 
 const SEARCH_MIN_LENGTH = 2;
 const REMOTE_SEARCH_TIMEOUT_MS = 9000;
 const REMOTE_AUTOCOMPLETE_TIMEOUT_MS = 4500;
 const REMOTE_OFFERS_TIMEOUT_MS = 5000;
-const REMOTE_BASKET_TIMEOUT_MS = 4500;
+const REMOTE_CATEGORY_TREE_TIMEOUT_MS = 12000;
+const CATEGORY_ROOT_KEY = '__root__';
+const SYNTHETIC_CATEGORY_PREFIX = '__synthetic_category__:';
+const RESULT_GRID_COLUMNS = 4;
+const RESULT_GRID_GAP = 8;
+const SEARCH_RESULTS_PAGE_SIZE = 12;
+const SEARCH_RESULTS_FETCH_LIMIT = 48;
+const CATEGORY_ROOT_SPECS = Object.freeze([
+  { label: 'Gıda, Şekerleme', query: 'Gıda, Şekerleme' },
+  { label: 'Et, Tavuk', query: 'Et, Tavuk' },
+  { label: 'Süt, Kahvaltılık', query: 'Süt, Kahvaltılık' },
+  { label: 'İçecek', query: 'İçecek' },
+  { label: 'Deterjan, Temizlik', query: 'Deterjan, Temizlik' },
+  { label: 'Meyve, Sebze', query: 'Meyve, Sebze' },
+  { label: 'Kağıt, Kozmetik', query: 'Kağıt, Kozmetik' },
+  { label: 'Bebek', query: 'Bebek' },
+]);
+const CATEGORY_ROOT_GROUPS = Object.freeze([
+  {
+    label: 'Gıda',
+    members: ['Gıda, Şekerleme', 'Et, Tavuk', 'Süt, Kahvaltılık', 'İçecek', 'Meyve, Sebze'],
+  },
+  {
+    label: 'Kozmetik',
+    members: ['Kağıt, Kozmetik', 'Deterjan, Temizlik', 'Bebek'],
+  },
+]);
+const CATEGORY_BROWSE_QUERY_RULES = Object.freeze<Record<string, string[]>>({
+  bebek: ['prima', 'molfix', 'aptamil', 'milupa'],
+  'bebek bakim': ['islak mendil', 'pisik kremi', 'uni baby', 'dalin'],
+  'bebek banyo': ['dalin', 'bebek sampuani', 'johnsons baby'],
+  'bebek beslenme': ['aptamil', 'milupa', 'bebelac', 'hero baby'],
+  'bebek bezi': ['prima', 'molfix', 'sleepy', 'canbebe'],
+  'bebek deterjani ve yumusaticisi': ['bebek yumusatici', 'bebek deterjani'],
+  'deterjan temizlik': ['deterjan', 'sabun'],
+  'et tavuk': ['tavuk', 'kofte'],
+  'gida sekerleme': ['makarna', 'salca', 'atistirmalik'],
+  atistirmalik: ['cips', 'kraker'],
+  makarna: ['makarna'],
+  salca: ['salca'],
+  sos: ['sos'],
+  'icecek': ['coca cola', 'ayran', 'meyve suyu', 'kahve'],
+  'gazli icecek': ['kola'],
+  'gazsiz icecek': ['ayran', 'meyve suyu', 'limonata'],
+  cay: ['cay'],
+  kahve: ['kahve'],
+  'maden suyu': ['beypazari', 'maden suyu', 'uludag'],
+  su: ['erikli', 'hayat su', 'damla su'],
+  'kagit kozmetik': ['sampuan', 'kolonya', 'havlu kagit', 'dalin'],
+  'meyve sebze': ['domates', 'muz', 'patates'],
+  'sut kahvaltilik': ['sut', 'peynir', 'yumurta'],
+});
 
 const resolveWithin = <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
   new Promise<T>((resolve, reject) => {
@@ -120,6 +180,113 @@ const normalizeLooseSearchValue = (value?: string | null): string =>
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
 
+const tokenizeLooseSearchValue = (value?: string | null): string[] =>
+  normalizeLooseSearchValue(value)
+    .split(/\s+/)
+    .filter(Boolean);
+
+const toDisplayProductName = (value?: string | null): string =>
+  String(value || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      const lower = word.toLocaleLowerCase('tr');
+      return lower.charAt(0).toLocaleUpperCase('tr') + lower.slice(1);
+    })
+    .join(' ');
+
+const isSyntheticCategoryId = (value?: string | null): boolean =>
+  String(value || '').startsWith(SYNTHETIC_CATEGORY_PREFIX);
+
+const BEAUTY_CATEGORY_HINTS = [
+  'kozmetik',
+  'makyaj',
+  'parfum',
+  'parfüm',
+  'sampuan',
+  'şampuan',
+  'sac',
+  'saç',
+  'bakim',
+  'bakım',
+  'cilt',
+  'deodorant',
+  'ruj',
+];
+
+const inferBrowseProductTypeFromResult = (product: MarketSearchProduct): Product['type'] => {
+  const marketType = inferMarketDisplayProductType(
+    [
+      product.bestOffer?.marketKey,
+      product.bestOffer?.marketName,
+      product.marketLogoUrl,
+      ...(product.seedOffers || []).flatMap((offer) => [offer.marketKey, offer.marketName]),
+    ].filter(Boolean)
+  );
+
+  if (marketType === 'beauty') {
+    return 'beauty';
+  }
+
+  const haystack = normalizeLooseSearchValue(
+    [product.taxonomyLeaf, product.category, product.productName, product.brand].join(' ')
+  );
+
+  if (BEAUTY_CATEGORY_HINTS.some((hint) => haystack.includes(normalizeLooseSearchValue(hint)))) {
+    return 'beauty';
+  }
+
+  return 'food';
+};
+
+const buildReferenceSearchQuery = (product: MarketSearchProduct): string => {
+  const productName = String(product.productName || '').trim();
+  const brand = String(product.brand || '').trim();
+
+  if (brand && productName.toLocaleLowerCase('tr').startsWith(brand.toLocaleLowerCase('tr'))) {
+    return productName;
+  }
+
+  return [brand, productName].filter(Boolean).join(' ').trim();
+};
+
+const scoreReferenceProductMatch = (
+  product: MarketSearchProduct,
+  candidate: Product
+): number => {
+  const referenceQuery = buildReferenceSearchQuery(product);
+  const productTokens = tokenizeLooseSearchValue(referenceQuery);
+  const candidateName = normalizeLooseSearchValue(candidate.name);
+  const candidateBrand = normalizeLooseSearchValue(candidate.brand);
+  const candidateTokens = new Set(tokenizeLooseSearchValue([candidate.name, candidate.brand].join(' ')));
+  const normalizedBrand = normalizeLooseSearchValue(product.brand);
+  let score = 0;
+
+  if (!candidate.barcode) {
+    return 0;
+  }
+
+  if (normalizedBrand && candidateBrand === normalizedBrand) {
+    score += 28;
+  }
+
+  const matchedTokenCount = productTokens.filter((token) => candidateTokens.has(token)).length;
+  score += matchedTokenCount * 8;
+
+  if (candidateName === normalizeLooseSearchValue(product.productName)) {
+    score += 26;
+  } else if (candidateName.includes(normalizeLooseSearchValue(product.productName))) {
+    score += 16;
+  }
+
+  const productPackToken = [product.packSize, product.packUnit].filter(Boolean).join(' ');
+  if (productPackToken && candidateName.includes(normalizeLooseSearchValue(productPackToken))) {
+    score += 12;
+  }
+
+  return score;
+};
+
 const buildSearchVariants = (query: string): string[] => {
   const trimmed = query.trim();
   const loose = normalizeLooseSearchValue(trimmed);
@@ -135,11 +302,54 @@ const buildSearchVariants = (query: string): string[] => {
   ).slice(0, 6);
 };
 
+const resolveReferenceProductForMarketProduct = async (
+  product: MarketSearchProduct
+): Promise<Product | null> => {
+  const query = buildReferenceSearchQuery(product);
+
+  if (query.length < 3) {
+    return null;
+  }
+
+  const productType = inferBrowseProductTypeFromResult(product);
+  const searchFn =
+    productType === 'beauty' ? searchBeautyProductsByText : searchFoodProductsByText;
+  const variants = buildSearchVariants(query);
+  const settled = await Promise.allSettled(variants.map((variant) => searchFn(variant, 8)));
+  const candidates = settled.flatMap((result) =>
+    result.status === 'fulfilled' ? result.value : []
+  );
+
+  if (!candidates.length) {
+    return null;
+  }
+
+  const bestCandidate = candidates
+    .map((candidate) => ({
+      candidate,
+      score: scoreReferenceProductMatch(product, candidate),
+    }))
+    .sort((left, right) => right.score - left.score)[0];
+
+  if (!bestCandidate || bestCandidate.score < 12) {
+    return null;
+  }
+
+  return bestCandidate.candidate;
+};
+
+const resolveReferenceBarcodeForMarketProduct = async (
+  product: MarketSearchProduct
+): Promise<string | null> => {
+  const candidate = await resolveReferenceProductForMarketProduct(product);
+  return String(candidate?.barcode || '').trim() || null;
+};
+
 const isBarcodeLikeQuery = (query: string): boolean =>
   /^\d{8,14}$/.test(query.trim());
 
 const getProductIdentity = (item: MarketSearchProduct): string =>
-  item.id || item.barcode || `${item.productName}-${item.brand || ''}`;
+  item.productId || item.id || item.barcode || `${item.productName}-${item.brand || ''}`;
 
 const hasComparableBarcode = (item: MarketSearchProduct): boolean =>
   Boolean(item.barcode && item.barcode.trim().length > 0);
@@ -236,18 +446,484 @@ const rankSearchProducts = (
       return rightScore - leftScore;
     }
 
-    return left.productName.localeCompare(right.productName, 'tr');
+      return left.productName.localeCompare(right.productName, 'tr');
+    });
+
+const buildSearchCategoryTree = (items: MarketCategoryNode[]): SearchCategoryTreeNode[] => {
+  const nodeMap = new Map<string, SearchCategoryTreeNode>();
+  const rootNodes: SearchCategoryTreeNode[] = [];
+
+  items.forEach((item) => {
+    const exactCount = item.productCount ?? item.marketCount ?? item.inStockProductCount ?? null;
+    const displayCount =
+      item.childrenCount > 0 && (exactCount == null || exactCount <= 0) ? null : exactCount;
+
+    nodeMap.set(item.normalizedCategoryId, {
+      key: item.normalizedCategoryId,
+      label: item.taxonomyLeaf,
+      count: displayCount,
+      depth: item.depth,
+      pathLabel:
+        item.taxonomyPath ||
+        item.normalizedCategory ||
+        item.taxonomyLeaf,
+      categoryId: item.normalizedCategoryId,
+      childrenCount: item.childrenCount,
+      sortOrder: item.sortOrder ?? null,
+      children: [],
+    });
   });
 
-const MARKET_BRAND_ACCENTS = [
-  '#167A78',
-  '#B97719',
-  '#A855F7',
-  '#2563EB',
-  '#DC2626',
-  '#0F766E',
-  '#7C3AED',
-];
+  items.forEach((item) => {
+    const currentNode = nodeMap.get(item.normalizedCategoryId);
+
+    if (!currentNode) {
+      return;
+    }
+
+    if (item.parentCategoryId && nodeMap.has(item.parentCategoryId)) {
+      nodeMap.get(item.parentCategoryId)?.children.push(currentNode);
+      return;
+    }
+
+    rootNodes.push(currentNode);
+  });
+
+  const sortNodes = (nodes: SearchCategoryTreeNode[]): SearchCategoryTreeNode[] =>
+    [...nodes]
+      .map((node) => ({
+        ...node,
+        children: sortNodes(node.children),
+      }))
+      .sort((left, right) => {
+        const leftOrder = left.sortOrder ?? Number.MAX_SAFE_INTEGER;
+        const rightOrder = right.sortOrder ?? Number.MAX_SAFE_INTEGER;
+
+        if (leftOrder !== rightOrder) {
+          return leftOrder - rightOrder;
+        }
+
+        if ((right.count ?? -1) !== (left.count ?? -1)) {
+          return (right.count ?? -1) - (left.count ?? -1);
+        }
+
+        return left.label.localeCompare(right.label, 'tr');
+      });
+
+  return sortNodes(rootNodes);
+};
+
+const filterSeededCategoryChildren = (
+  label: string,
+  items: MarketCategoryNode[]
+): MarketCategoryNode[] => {
+  const normalizedLabel = normalizeLooseSearchValue(label);
+
+  const matches = items.filter((item) => {
+    const normalizedPath = normalizeLooseSearchValue(item.taxonomyPath);
+    const normalizedCategory = normalizeLooseSearchValue(item.normalizedCategory);
+    const normalizedLeaf = normalizeLooseSearchValue(item.taxonomyLeaf);
+
+    if (normalizedPath.startsWith(`${normalizedLabel} `) || normalizedPath.startsWith(`${normalizedLabel}`)) {
+      return normalizedPath.includes(' > ');
+    }
+
+    if (normalizedCategory === normalizedLabel && normalizedLeaf !== normalizedLabel) {
+      return true;
+    }
+
+    if (normalizedLabel === 'bebek' && normalizedLeaf.startsWith('bebek')) {
+      return true;
+    }
+
+    return false;
+  });
+
+  if (matches.length) {
+    return matches;
+  }
+
+  return items.slice(0, 8);
+};
+
+const buildSeededCategoryNodes = (
+  groups: { label: string; nodes: MarketCategoryNode[] }[]
+): MarketCategoryNode[] => {
+  const seededNodes: MarketCategoryNode[] = [];
+  const groupMap = new Map(groups.map((group) => [group.label, group.nodes]));
+
+  CATEGORY_ROOT_GROUPS.forEach((rootGroup, groupIndex) => {
+    const rootId = `${SYNTHETIC_CATEGORY_PREFIX}root:${groupIndex}:${normalizeLooseSearchValue(rootGroup.label).replace(/\s+/g, '-')}`;
+    const sectionEntries = rootGroup.members
+      .map((member) => ({
+        label: member,
+        nodes: groupMap.get(member) ?? [],
+      }))
+      .filter((entry) => entry.nodes.length > 0)
+      .map((entry) => ({
+        label: entry.label,
+        children: filterSeededCategoryChildren(entry.label, entry.nodes),
+      }))
+      .filter((entry) => entry.children.length > 0);
+
+    if (!sectionEntries.length) {
+      return;
+    }
+
+    seededNodes.push({
+      normalizedCategoryId: rootId,
+      taxonomyLeaf: rootGroup.label,
+      taxonomyPath: rootGroup.label,
+      normalizedCategory: rootGroup.label,
+      parentCategoryId: null,
+      depth: 1,
+      childrenCount: sectionEntries.length,
+      productCount: null,
+      inStockProductCount: null,
+      marketCount: null,
+      sortOrder: groupIndex + 1,
+    });
+
+    sectionEntries.forEach((section, sectionIndex) => {
+      const sectionId = `${SYNTHETIC_CATEGORY_PREFIX}${groupIndex}:${sectionIndex}:${normalizeLooseSearchValue(section.label).replace(/\s+/g, '-')}`;
+
+      seededNodes.push({
+        normalizedCategoryId: sectionId,
+        taxonomyLeaf: section.label,
+        taxonomyPath: `${rootGroup.label} > ${section.label}`,
+        normalizedCategory: section.label,
+        parentCategoryId: rootId,
+        depth: 2,
+        childrenCount: section.children.length,
+        productCount: null,
+        inStockProductCount: null,
+        marketCount: null,
+        sortOrder: sectionIndex + 1,
+      });
+
+      section.children.forEach((child, childIndex) => {
+        seededNodes.push({
+          ...child,
+          parentCategoryId: sectionId,
+          depth: 3,
+          sortOrder: child.sortOrder ?? childIndex + 1,
+        });
+      });
+    });
+  });
+
+  return seededNodes;
+};
+
+const findFirstBrowsableCategoryNode = (
+  nodes: SearchCategoryTreeNode[]
+): SearchCategoryTreeNode | null => {
+  for (const node of nodes) {
+    if (!isSyntheticCategoryId(node.categoryId)) {
+      return node;
+    }
+
+    const nested = findFirstBrowsableCategoryNode(node.children);
+
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+};
+
+const buildResultDerivedCategoryTree = (
+  items: MarketSearchProduct[]
+): SearchCategoryTreeNode[] => {
+  const grouped = new Map<string, SearchCategoryTreeNode>();
+
+  items.forEach((item) => {
+    const categoryId = item.normalizedCategoryId?.trim();
+    const label = item.taxonomyLeaf?.trim() || item.category?.trim() || '';
+
+    if (!categoryId || !label) {
+      return;
+    }
+
+    const existing = grouped.get(categoryId);
+
+    if (existing) {
+      existing.count = (existing.count ?? 0) + 1;
+      return;
+    }
+
+    grouped.set(categoryId, {
+      key: categoryId,
+      label,
+      count: 1,
+      depth: 0,
+      pathLabel: item.taxonomyPath?.trim() || label,
+      categoryId,
+      childrenCount: 0,
+      sortOrder: null,
+      children: [],
+    });
+  });
+
+  return Array.from(grouped.values()).sort((left, right) => {
+    if ((right.count ?? 0) !== (left.count ?? 0)) {
+      return (right.count ?? 0) - (left.count ?? 0);
+    }
+
+    return left.label.localeCompare(right.label, 'tr');
+  });
+};
+
+const buildCategoryBrowseQueries = (label?: string | null): string[] => {
+  const normalizedLabel = normalizeLooseSearchValue(label);
+  const mappedQueries = CATEGORY_BROWSE_QUERY_RULES[normalizedLabel];
+  const labelTokens = normalizedLabel
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter((item) => item.length >= SEARCH_MIN_LENGTH);
+
+  if (!normalizedLabel) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      [...(mappedQueries ?? []), normalizedLabel, ...labelTokens].filter(
+        (item) => item.length >= SEARCH_MIN_LENGTH
+      )
+    )
+  );
+};
+
+const annotateBrowseResult = (
+  item: MarketSearchProduct,
+  node: Pick<MarketCategoryNode, 'normalizedCategoryId' | 'taxonomyLeaf' | 'taxonomyPath' | 'normalizedCategory'>
+): MarketSearchProduct => {
+  if (item.normalizedCategoryId || item.taxonomyLeaf || item.category) {
+    return item;
+  }
+
+  return {
+    ...item,
+    category: node.normalizedCategory ?? node.taxonomyLeaf,
+    normalizedCategoryId: node.normalizedCategoryId,
+    taxonomyLeaf: node.taxonomyLeaf,
+    taxonomyPath: node.taxonomyPath ?? node.taxonomyLeaf,
+  };
+};
+
+const isSearchProductSparse = (item: MarketSearchProduct): boolean => {
+  const hasReadableName =
+    Boolean(item.productName) &&
+    item.productName !== '-' &&
+    item.productName !== item.barcode;
+  const hasMarketSignal =
+    item.marketCount > 0 ||
+    item.inStockMarketCount > 0 ||
+    Boolean(item.bestOffer) ||
+    Boolean(item.seedOffers?.length);
+
+  return !hasReadableName || !hasMarketSignal;
+};
+
+const mergeSearchProductDetails = (
+  base: MarketSearchProduct,
+  enriched: MarketSearchProduct | null
+): MarketSearchProduct => {
+  if (!enriched) {
+    return base;
+  }
+
+  const stableProductId = base.productId ?? enriched.productId ?? null;
+
+  return {
+    ...base,
+    id:
+      stableProductId ||
+      base.id ||
+      enriched.id ||
+      base.barcode ||
+      enriched.barcode ||
+      `market-search-${Math.random().toString(36).slice(2, 10)}`,
+    productId: stableProductId,
+    barcode: enriched.barcode || base.barcode,
+    productName:
+      enriched.productName && enriched.productName !== '-'
+        ? enriched.productName
+        : base.productName,
+    brand: enriched.brand ?? base.brand ?? null,
+    category: enriched.category ?? base.category ?? null,
+    normalizedCategoryId:
+      enriched.normalizedCategoryId ?? base.normalizedCategoryId ?? null,
+    taxonomyPath: enriched.taxonomyPath ?? base.taxonomyPath ?? null,
+    taxonomyLeaf: enriched.taxonomyLeaf ?? base.taxonomyLeaf ?? null,
+    packSize: enriched.packSize ?? base.packSize ?? null,
+    packUnit: enriched.packUnit ?? base.packUnit ?? null,
+    matchConfidence: enriched.matchConfidence ?? base.matchConfidence ?? null,
+    imageUrl: enriched.imageUrl ?? base.imageUrl ?? null,
+    marketLogoUrl: enriched.marketLogoUrl ?? base.marketLogoUrl ?? null,
+    bestOffer: enriched.bestOffer ?? base.bestOffer ?? null,
+    seedOffers:
+      (enriched.seedOffers && enriched.seedOffers.length ? enriched.seedOffers : base.seedOffers) ??
+      [],
+    marketCount: enriched.marketCount || base.marketCount,
+    inStockMarketCount: enriched.inStockMarketCount || base.inStockMarketCount,
+    dataFreshness: enriched.dataFreshness ?? base.dataFreshness ?? null,
+  };
+};
+
+const buildOffersResponseFromSearchProduct = (
+  item: MarketSearchProduct
+): MarketProductOffersResponse | null => {
+  const offers =
+    (item.seedOffers && item.seedOffers.length ? item.seedOffers : null) ??
+    (item.bestOffer ? [item.bestOffer] : null);
+
+  if (!offers?.length) {
+    return null;
+  }
+
+  const firstOffer = offers[0];
+
+  return {
+    barcode: item.barcode || item.id,
+    fetchedAt: new Date().toISOString(),
+    requestId: null,
+    partial: false,
+    warnings: [],
+    city:
+      firstOffer?.cityCode && firstOffer.cityName
+        ? {
+            code: firstOffer.cityCode,
+            name: firstOffer.cityName,
+          }
+        : null,
+    dataFreshness: item.dataFreshness ?? null,
+    offers,
+  };
+};
+
+const isLocationScopedOffer = (offer: MarketOffer): boolean => {
+  const coverage = String(offer.coverageScope || '').toLocaleLowerCase('tr');
+  const pricing = String(offer.pricingScope || '').toLocaleLowerCase('tr');
+
+  return (
+    offer.priceSourceType === 'local_market_price' ||
+    coverage.includes('city') ||
+    coverage.includes('district') ||
+    pricing.includes('city') ||
+    pricing.includes('district')
+  );
+};
+
+const rankDisplayOffer = (offer: MarketOffer, targetCityCode?: string | null): number => {
+  let score = 0;
+
+  if (offer.inStock) {
+    score += 1000;
+  }
+
+  if (
+    targetCityCode &&
+    offer.cityCode &&
+    offer.cityCode.trim() &&
+    offer.cityCode.trim() === targetCityCode.trim()
+  ) {
+    score += 160;
+  }
+
+  if (offer.priceSourceType === 'local_market_price') {
+    score += 90;
+  } else if (offer.priceSourceType === 'national_reference_price') {
+    score += 40;
+  }
+
+  if (isLocationScopedOffer(offer)) {
+    score += 50;
+  }
+
+  if (Number.isFinite(offer.sourceConfidence ?? NaN)) {
+    score += Math.round((offer.sourceConfidence ?? 0) * 10);
+  }
+
+  score -= Math.round((offer.price || 0) * 100) / 1000;
+
+  return score;
+};
+
+const normalizeOffersForDisplay = (
+  offers: MarketOffer[],
+  options?: {
+    cityCode?: string | null;
+  }
+): MarketOffer[] => {
+  if (!offers.length) {
+    return [];
+  }
+
+  const targetCityCode = options?.cityCode?.trim() || null;
+  const filteredOffers = offers.filter((offer) => {
+    if (!targetCityCode) {
+      return true;
+    }
+
+    const offerCityCode = offer.cityCode?.trim();
+
+    if (!offerCityCode) {
+      return true;
+    }
+
+    if (offerCityCode === targetCityCode) {
+      return true;
+    }
+
+    return !isLocationScopedOffer(offer);
+  });
+
+  const grouped = new Map<string, MarketOffer[]>();
+
+  filteredOffers.forEach((offer) => {
+    const identity = getMarketOfferIdentity(offer);
+
+    if (!identity) {
+      return;
+    }
+
+    const current = grouped.get(identity) ?? [];
+    current.push(offer);
+    grouped.set(identity, current);
+  });
+
+  return Array.from(grouped.values())
+    .map((entries) =>
+      [...entries].sort((left, right) => {
+        const scoreDiff =
+          rankDisplayOffer(right, targetCityCode) - rankDisplayOffer(left, targetCityCode);
+
+        if (scoreDiff !== 0) {
+          return scoreDiff;
+        }
+
+        if (left.price !== right.price) {
+          return left.price - right.price;
+        }
+
+        return left.marketName.localeCompare(right.marketName, 'tr');
+      })[0]
+    )
+    .filter(Boolean)
+    .sort((left, right) => {
+      const leftRank = rankDisplayOffer(left, targetCityCode);
+      const rightRank = rankDisplayOffer(right, targetCityCode);
+
+      if (leftRank !== rightRank) {
+        return rightRank - leftRank;
+      }
+
+      return left.price - right.price;
+    });
+};
 
 const formatLocalizedPrice = (locale: string, amount: number, currency: string): string => {
   try {
@@ -291,26 +967,117 @@ const formatDistanceMeters = (tt: TranslateFn, value?: number | null): string | 
   );
 };
 
-const resolveMarketAccent = (marketKey?: string | null, marketName?: string | null): string => {
-  const seed = `${marketKey || ''}${marketName || ''}`;
-  const hash = Array.from(seed).reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return MARKET_BRAND_ACCENTS[hash % MARKET_BRAND_ACCENTS.length] ?? MARKET_BRAND_ACCENTS[0];
+type WeeklyPriceHistoryBucket = {
+  key: string;
+  start: Date;
+  end: Date;
+  averagePrice: number;
+  lowestPrice: number;
+  highestPrice: number;
+  currency: string;
+  count: number;
+  shortLabel: string;
+  longLabel: string;
 };
 
-const buildMarketMonogram = (marketName?: string | null): string => {
-  const parts = String(marketName || '')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+const getWeekStart = (value: Date): Date => {
+  const next = new Date(value);
+  next.setHours(0, 0, 0, 0);
+  const day = (next.getDay() + 6) % 7;
+  next.setDate(next.getDate() - day);
+  return next;
+};
 
-  if (!parts.length) {
-    return 'M';
+const addDays = (value: Date, days: number): Date => {
+  const next = new Date(value);
+  next.setDate(next.getDate() + days);
+  return next;
+};
+
+const formatShortDate = (locale: string, value: Date): string => {
+  try {
+    return new Intl.DateTimeFormat(locale || 'tr-TR', {
+      day: '2-digit',
+      month: 'short',
+    }).format(value);
+  } catch {
+    return value.toISOString().slice(5, 10);
+  }
+};
+
+const formatLongDateRange = (locale: string, start: Date, end: Date): string => {
+  try {
+    const formatter = new Intl.DateTimeFormat(locale || 'tr-TR', {
+      day: '2-digit',
+      month: 'short',
+    });
+    return `${formatter.format(start)} - ${formatter.format(end)}`;
+  } catch {
+    return `${start.toISOString().slice(5, 10)} - ${end.toISOString().slice(5, 10)}`;
+  }
+};
+
+const buildWeeklyPriceHistory = (
+  history: MarketPriceHistoryResponse['history'],
+  locale: string,
+  limit = 8
+): WeeklyPriceHistoryBucket[] => {
+  if (!history.length) {
+    return [];
   }
 
-  return parts
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
-    .join('');
+  const grouped = new Map<
+    string,
+    {
+      start: Date;
+      prices: number[];
+      currency: string;
+    }
+  >();
+
+  history.forEach((entry) => {
+    const date = new Date(entry.capturedAt);
+
+    if (Number.isNaN(date.getTime()) || typeof entry.price !== 'number') {
+      return;
+    }
+
+    const start = getWeekStart(date);
+    const key = start.toISOString().slice(0, 10);
+    const current = grouped.get(key) ?? {
+      start,
+      prices: [],
+      currency: entry.currency,
+    };
+
+    current.prices.push(entry.price);
+    current.currency = entry.currency || current.currency;
+    grouped.set(key, current);
+  });
+
+  return Array.from(grouped.entries())
+    .map(([key, value]) => {
+      const sortedPrices = [...value.prices].sort((left, right) => left - right);
+      const start = value.start;
+      const end = addDays(start, 6);
+      const total = sortedPrices.reduce((sum, price) => sum + price, 0);
+      const averagePrice = total / sortedPrices.length;
+
+      return {
+        key,
+        start,
+        end,
+        averagePrice,
+        lowestPrice: sortedPrices[0],
+        highestPrice: sortedPrices[sortedPrices.length - 1],
+        currency: value.currency,
+        count: sortedPrices.length,
+        shortLabel: formatShortDate(locale, start),
+        longLabel: formatLongDateRange(locale, start, end),
+      } satisfies WeeklyPriceHistoryBucket;
+    })
+    .sort((left, right) => left.start.getTime() - right.start.getTime())
+    .slice(-limit);
 };
 
 const MarketBadge: React.FC<{
@@ -322,11 +1089,12 @@ const MarketBadge: React.FC<{
   const { colors } = useTheme();
   const accent = resolveMarketAccent(marketKey, marketName);
   const monogram = buildMarketMonogram(marketName);
+  const stableLogoUrl = resolveMarketLogoUrl(marketKey, marketName, logoUrl);
 
-  if (logoUrl) {
+  if (stableLogoUrl) {
     return (
       <Image
-        source={{ uri: logoUrl }}
+        source={{ uri: stableLogoUrl }}
         style={{
           width: size,
           height: size,
@@ -357,99 +1125,597 @@ const MarketBadge: React.FC<{
   );
 };
 
-const SearchResultCard: React.FC<{
-  item: MarketSearchProduct;
-  selected: boolean;
-  onPress: () => void;
+const SearchCategoryTreeSection: React.FC<{
+  nodes: SearchCategoryTreeNode[];
+  selectedCategoryId: string | null;
+  selectedCategoryLabel: string | null;
+  expandedKeys: string[];
+  loadingKeys: string[];
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  onToggle: (key: string) => void;
+  onSelect: (categoryId: string | null) => void;
   colors: ThemeColors;
-  locale: string;
   tt: TranslateFn;
-}> = ({ item, selected, onPress, colors, locale, tt }) => {
-  const bestOfferLabel =
-    item.bestOffer != null
-      ? formatLocalizedPrice(locale, item.bestOffer.price, item.bestOffer.currency)
-      : null;
+}> = ({
+  nodes,
+  selectedCategoryId,
+  selectedCategoryLabel,
+  expandedKeys,
+  loadingKeys,
+  collapsed,
+  onToggleCollapsed,
+  onToggle,
+  onSelect,
+  colors,
+  tt,
+}) => {
+  const renderNode = (node: SearchCategoryTreeNode): React.ReactNode => {
+    const isExpanded = expandedKeys.includes(node.key);
+    const hasChildren = node.childrenCount > 0 || node.children.length > 0;
+    const isSelected = selectedCategoryId === node.categoryId;
+    const isLoading = loadingKeys.includes(node.key);
+    const isChild = node.depth > 1;
+    const countLabel = typeof node.count === 'number' ? ` (${node.count})` : '';
 
-  const metaParts = [item.brand, item.category, item.barcode].filter(Boolean);
+    return (
+      <View key={node.key} style={styles.categoryTreeNodeWrap}>
+        <TouchableOpacity
+          activeOpacity={0.88}
+          onPress={() => {
+            onSelect(node.categoryId);
+            if (hasChildren && !isExpanded) {
+              onToggle(node.key);
+            }
+          }}
+          style={[
+            styles.categoryTreeRow,
+            {
+              marginLeft: isChild ? 18 : 0,
+              backgroundColor: withAlpha(
+                isSelected ? colors.primary : colors.cardElevated,
+                isSelected ? '10' : '00'
+              ),
+              borderColor: withAlpha(isSelected ? colors.primary : colors.border, '66'),
+            },
+          ]}
+        >
+          <View style={styles.categoryTreeMain}>
+            <View style={styles.categoryTreeTitleRow}>
+              <Text
+                style={[
+                  styles.categoryTreeTitle,
+                  { color: isSelected ? colors.primary : colors.text },
+                ]}
+                numberOfLines={2}
+              >
+                {`${node.label}${countLabel}`}
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            activeOpacity={0.82}
+            onPress={() => {
+              if (hasChildren) {
+                onToggle(node.key);
+              } else {
+                onSelect(node.categoryId);
+              }
+            }}
+            style={styles.categoryTreeToggleButton}
+          >
+            {isLoading ? (
+              <ActivityIndicator
+                size="small"
+                color={isSelected ? colors.primary : colors.mutedText}
+              />
+            ) : (
+              <Ionicons
+                name={
+                  hasChildren
+                    ? isExpanded
+                      ? 'chevron-down-outline'
+                      : 'chevron-forward-outline'
+                    : 'chevron-forward-outline'
+                }
+                size={20}
+                color={isSelected ? colors.primary : colors.mutedText}
+              />
+            )}
+          </TouchableOpacity>
+        </TouchableOpacity>
+
+        {hasChildren && isExpanded ? (
+          <View
+            style={[
+              styles.categoryTreeChildren,
+              { borderLeftColor: withAlpha(isSelected ? colors.primary : colors.border, '88') },
+            ]}
+          >
+            {node.children.map((child) => renderNode(child))}
+          </View>
+        ) : null}
+      </View>
+    );
+  };
 
   return (
-    <TouchableOpacity
-      activeOpacity={0.9}
-      onPress={onPress}
+    <View
       style={[
-        styles.resultCard,
+        styles.categoryTreeCard,
         {
-          backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-          borderColor: withAlpha(selected ? colors.primary : colors.border, selected ? 'FF' : 'BC'),
+          backgroundColor: withAlpha(colors.cardElevated, 'F9'),
+          borderColor: withAlpha(colors.border, '88'),
           shadowColor: colors.shadow,
         },
       ]}
     >
-      <View style={styles.resultCardRow}>
-        <View style={styles.resultVisualStack}>
-          {item.imageUrl ? (
-            <Image source={{ uri: item.imageUrl }} style={styles.resultImage} />
-          ) : (
-            <View
-              style={[
-                styles.resultImageFallback,
-                { backgroundColor: withAlpha(colors.primary, '12') },
-              ]}
-            >
-              <Ionicons name="pricetags-outline" size={20} color={colors.primary} />
-            </View>
-          )}
-          {item.bestOffer ? (
-            <View style={styles.resultLogoBadge}>
-              <MarketBadge
-                marketKey={item.bestOffer.marketKey}
-                marketName={item.bestOffer.marketName}
-                logoUrl={item.bestOffer.marketLogoUrl || item.marketLogoUrl}
-                size={26}
-              />
-            </View>
-          ) : null}
-        </View>
-
-        <View style={styles.resultTextWrap}>
-          <Text style={[styles.resultTitle, { color: colors.text }]} numberOfLines={2}>
-            {item.productName}
+      <TouchableOpacity
+        activeOpacity={0.88}
+        onPress={onToggleCollapsed}
+        style={[
+          styles.categoryTreeHeader,
+          { borderBottomColor: withAlpha(colors.border, '66') },
+        ]}
+      >
+        <Ionicons name="reorder-three-outline" size={20} color={colors.primary} />
+        <View style={styles.categoryTreeHeaderText}>
+          <Text style={[styles.categoryTreeHeaderTitle, { color: colors.text }]}>
+            {tt('price_compare_category_tree_title', 'Kategoriler')}
           </Text>
-          {metaParts.length ? (
-            <Text style={[styles.resultMeta, { color: colors.mutedText }]} numberOfLines={2}>
-              {metaParts.join(' • ')}
-            </Text>
-          ) : null}
+          <Text style={[styles.categoryTreeHeaderSubtitle, { color: colors.mutedText }]}>
+            {selectedCategoryId
+              ? tt('price_compare_category_tree_selected', 'Seçili: {{label}}').replace(
+                  '{{label}}',
+                  selectedCategoryLabel || tt('price_compare_category_all', 'Tümü')
+                )
+              : tt(
+                  'price_compare_category_tree_hint',
+                  'Reyonu aç, kategori seç, ürünleri aşağıda gör.'
+                )}
+          </Text>
         </View>
-      </View>
+        <Ionicons
+          name={collapsed ? 'chevron-down-outline' : 'chevron-up-outline'}
+          size={18}
+          color={colors.mutedText}
+        />
+      </TouchableOpacity>
 
-      <View style={styles.resultFooterRow}>
-        {bestOfferLabel ? (
-          <View
+      {collapsed ? null : (
+        <>
+          <TouchableOpacity
+            activeOpacity={0.88}
+            onPress={() => {
+              onSelect(null);
+            }}
             style={[
-              styles.resultPill,
-              { backgroundColor: withAlpha(colors.teal, '12') },
+              styles.categoryTreeRow,
+              styles.categoryTreeRowAll,
+              {
+                backgroundColor: withAlpha(
+                  selectedCategoryId ? colors.cardElevated : colors.primary,
+                  selectedCategoryId ? '00' : '10'
+                ),
+                borderColor: withAlpha(selectedCategoryId ? colors.border : colors.primary, '66'),
+              },
             ]}
           >
-            <Text style={[styles.resultPillText, { color: colors.teal }]}>
-              {bestOfferLabel}
-            </Text>
-          </View>
-        ) : null}
+            <View style={styles.categoryTreeMain}>
+              <View style={styles.categoryTreeTitleRow}>
+                <Text
+                  style={[
+                    styles.categoryTreeTitle,
+                    { color: selectedCategoryId ? colors.text : colors.primary },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {tt('price_compare_category_all', 'Tümü')}
+                </Text>
+              </View>
+            </View>
+            <Ionicons
+              name="chevron-forward-outline"
+              size={18}
+              color={selectedCategoryId ? colors.mutedText : colors.primary}
+            />
+          </TouchableOpacity>
+
+          <View style={styles.categoryTreeList}>{nodes.map((node) => renderNode(node))}</View>
+        </>
+      )}
+    </View>
+  );
+};
+
+const SearchResultCard: React.FC<{
+  item: MarketSearchProduct;
+  selected: boolean;
+  onOpenPricing: () => void;
+  onOpenScore: () => void;
+  onQuickAdd: () => void;
+  quickAddDisabled: boolean;
+  quickAddLoading: boolean;
+  cardWidth: number;
+  colors: ThemeColors;
+  locale: string;
+  tt: TranslateFn;
+}> = ({
+  item,
+  selected,
+  onOpenPricing,
+  onOpenScore,
+  onQuickAdd,
+  quickAddDisabled,
+  quickAddLoading,
+  cardWidth,
+  colors,
+  locale,
+  tt,
+}) => {
+  const thumbnailUri =
+    item.imageUrl ||
+    item.bestOffer?.imageUrl ||
+    item.seedOffers?.find((offer) => offer.imageUrl)?.imageUrl ||
+    null;
+  const normalizedMarketName = String(item.bestOffer?.marketName || '')
+    .trim()
+    .toLocaleLowerCase('tr');
+  const hasConcreteMarketName =
+    normalizedMarketName.length > 0 &&
+    normalizedMarketName !== 'market' &&
+    normalizedMarketName !== '-';
+  const bestOfferLabel =
+    item.bestOffer != null
+      ? formatLocalizedPrice(locale, item.bestOffer.price, item.bestOffer.currency)
+      : '—';
+  const bestMarketLabel =
+    item.marketCount > 1
+      ? tt('price_compare_result_market_count', '{{count}} market').replace(
+          '{{count}}',
+          String(item.marketCount)
+        )
+      : hasConcreteMarketName
+        ? item.bestOffer?.marketName
+        : item.marketCount > 0
+          ? tt('price_compare_result_market_count', '{{count}} market').replace(
+              '{{count}}',
+              String(item.marketCount)
+            )
+          : tt('price_compare_result_market_pending_short', 'Teklif bekliyor');
+  const visibleMarketNames = Array.from(
+    new Set(
+      (item.seedOffers ?? [])
+        .map((offer) => offer.marketName?.trim())
+        .filter((value): value is string => Boolean(value))
+        .concat(hasConcreteMarketName ? [item.bestOffer?.marketName?.trim() || ''] : [])
+        .filter(Boolean)
+    )
+  );
+  const marketSecondaryLabel =
+    visibleMarketNames.length > 0
+      ? `${visibleMarketNames.slice(0, 2).join(' • ')}${
+          item.marketCount > visibleMarketNames.length
+            ? ` +${item.marketCount - visibleMarketNames.length}`
+            : visibleMarketNames.length > 2
+              ? ` +${visibleMarketNames.length - 2}`
+              : ''
+        }`
+      : hasConcreteMarketName && item.marketCount > 1
+        ? `${item.bestOffer?.marketName} +${Math.max(item.marketCount - 1, 0)}`
+        : null;
+  const thumbnailIcon = (() => {
+    const source = `${item.taxonomyLeaf || ''} ${item.category || ''} ${item.productName || ''}`
+      .toLocaleLowerCase('tr');
+    if (source.includes('bebek')) {
+      return 'happy-outline' as const;
+    }
+    if (source.includes('meyve') || source.includes('sebze')) {
+      return 'leaf-outline' as const;
+    }
+    if (source.includes('içecek') || source.includes('icecek') || source.includes('soda')) {
+      return 'wine-outline' as const;
+    }
+    if (source.includes('et') || source.includes('tavuk') || source.includes('balık')) {
+      return 'restaurant-outline' as const;
+    }
+    if (source.includes('deterjan') || source.includes('temizlik')) {
+      return 'sparkles-outline' as const;
+    }
+    if (source.includes('kahvalt')) {
+      return 'cafe-outline' as const;
+    }
+    if (source.includes('kozmetik') || source.includes('bakım') || source.includes('bakim')) {
+      return 'flower-outline' as const;
+    }
+    return 'cube-outline' as const;
+  })();
+  const priceCaption =
+    item.bestOffer != null
+      ? bestOfferLabel
+      : tt('price_compare_result_market_pending_short', 'Teklif bekliyor');
+  const displayProductName = toDisplayProductName(item.productName);
+  const displayBrand = item.brand ? toDisplayProductName(item.brand) : null;
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={onOpenScore}
+      style={[
+        styles.resultGridCard,
+        {
+          width: cardWidth,
+          backgroundColor: withAlpha(colors.cardElevated, 'F4'),
+          borderColor: withAlpha(selected ? colors.primary : colors.border, selected ? 'BB' : '92'),
+          shadowColor: colors.shadow,
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.resultGridImageWrap,
+          {
+            backgroundColor: withAlpha(colors.backgroundMuted, 'D8'),
+            borderColor: withAlpha(colors.border, '78'),
+          },
+        ]}
+      >
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={onQuickAdd}
+          disabled={quickAddDisabled || quickAddLoading}
+          style={[
+            styles.resultGridAddButton,
+            {
+              backgroundColor: colors.primary,
+              opacity: quickAddDisabled ? 0.55 : 1,
+            },
+          ]}
+        >
+          {quickAddLoading ? (
+            <ActivityIndicator size="small" color={colors.primaryContrast} />
+          ) : (
+            <Ionicons name="add" size={16} color={colors.primaryContrast} />
+          )}
+        </TouchableOpacity>
 
         <View
           style={[
-            styles.resultPill,
+            styles.resultGridWishButton,
+            {
+              backgroundColor: withAlpha(colors.cardElevated, 'F6'),
+              borderColor: withAlpha(colors.border, '80'),
+            },
+          ]}
+        >
+          <Ionicons name="heart-outline" size={13} color={withAlpha(colors.mutedText, 'CC')} />
+        </View>
+
+        <View style={styles.resultGridImageInner}>
+          {thumbnailUri ? (
+            <Image source={{ uri: thumbnailUri }} style={styles.resultGridImage} resizeMode="contain" />
+          ) : (
+            <View
+              style={[
+                styles.resultGridFallback,
+                { backgroundColor: withAlpha(colors.primary, '12') },
+              ]}
+            >
+              <Ionicons name={thumbnailIcon} size={22} color={colors.primary} />
+            </View>
+          )}
+        </View>
+      </View>
+
+      <TouchableOpacity
+        activeOpacity={0.82}
+        onPress={onOpenPricing}
+        style={[
+          styles.resultGridMarketBadge,
+          {
+            backgroundColor: withAlpha(colors.primary, '12'),
+            borderColor: withAlpha(colors.primary, '24'),
+          },
+        ]}
+      >
+        <Text style={[styles.resultGridMarketBadgeText, { color: colors.primary }]} numberOfLines={1}>
+          {bestMarketLabel}
+        </Text>
+      </TouchableOpacity>
+
+      <Text style={[styles.resultGridTitle, { color: colors.text }]} numberOfLines={3}>
+        {displayProductName}
+      </Text>
+
+      {displayBrand || (item.packSize && item.packUnit) ? (
+        <Text style={[styles.resultGridMeta, { color: colors.mutedText }]} numberOfLines={2}>
+          {[displayBrand, item.packSize && item.packUnit ? `${item.packSize} ${item.packUnit}` : null]
+            .filter(Boolean)
+            .join(' • ')}
+        </Text>
+      ) : (
+        <View style={styles.resultGridMetaSpacer} />
+      )}
+
+      {marketSecondaryLabel ? (
+        <Text style={[styles.resultGridSubMeta, { color: colors.mutedText }]} numberOfLines={1}>
+          {marketSecondaryLabel}
+        </Text>
+      ) : (
+        <View style={styles.resultGridSubMetaSpacer} />
+      )}
+
+      <Text style={[styles.resultGridPrice, { color: colors.text }]} numberOfLines={1}>
+        {priceCaption}
+      </Text>
+    </TouchableOpacity>
+  );
+};
+const PriceHistoryTrendCard: React.FC<{
+  buckets: WeeklyPriceHistoryBucket[];
+  loading: boolean;
+  error: string | null;
+  locale: string;
+  colors: ThemeColors;
+  tt: TranslateFn;
+}> = ({ buckets, loading, error, locale, colors, tt }) => {
+  const averageValues = buckets.map((bucket) => bucket.averagePrice);
+  const minAverage = averageValues.length ? Math.min(...averageValues) : 0;
+  const maxAverage = averageValues.length ? Math.max(...averageValues) : 0;
+  const valueRange = Math.max(maxAverage - minAverage, 0.01);
+  const cheapestBucket = buckets.reduce<WeeklyPriceHistoryBucket | null>(
+    (current, bucket) =>
+      !current || bucket.averagePrice < current.averagePrice ? bucket : current,
+    null
+  );
+  const priciestBucket = buckets.reduce<WeeklyPriceHistoryBucket | null>(
+    (current, bucket) =>
+      !current || bucket.averagePrice > current.averagePrice ? bucket : current,
+    null
+  );
+  const currency =
+    cheapestBucket?.currency || priciestBucket?.currency || buckets[0]?.currency || 'TRY';
+
+  return (
+    <View
+      style={[
+        styles.historyCard,
+        {
+          backgroundColor: withAlpha(colors.cardElevated, 'F1'),
+          borderColor: withAlpha(colors.border, 'BC'),
+          shadowColor: colors.shadow,
+        },
+      ]}
+    >
+      <View style={styles.historyCardHeader}>
+        <View style={styles.historyCardHeaderText}>
+          <Text style={[styles.historyCardTitle, { color: colors.text }]}>
+            {tt('price_compare_history_title', 'Fiyat performansı')}
+          </Text>
+          <Text style={[styles.historyCardSubtitle, { color: colors.mutedText }]}>
+            {tt(
+              'price_compare_history_subtitle',
+              'Son haftalara göre fiyat hareketi ve en güçlü dönemler.'
+            )}
+          </Text>
+        </View>
+        <View
+          style={[
+            styles.historyPeriodBadge,
             { backgroundColor: withAlpha(colors.primary, '12') },
           ]}
         >
-          <Text style={[styles.resultPillText, { color: colors.primary }]}>
-            {tt('price_compare_result_market_count', '{{count}} market')
-              .replace('{{count}}', String(item.marketCount))}
+          <Text style={[styles.historyPeriodBadgeText, { color: colors.primary }]}>
+            {tt('price_compare_history_period_label', 'Haftalık')}
           </Text>
         </View>
       </View>
-    </TouchableOpacity>
+
+      {loading ? (
+        <View style={styles.historyLoadingWrap}>
+          <ActivityIndicator size="small" color={colors.primary} />
+        </View>
+      ) : error ? (
+        <NoticeCard text={error} colors={colors} />
+      ) : !buckets.length ? (
+        <NoticeCard
+          text={tt(
+            'price_compare_history_empty',
+            'Bu ürün için haftalık fiyat geçmişi henüz oluşmadı.'
+          )}
+          colors={colors}
+        />
+      ) : (
+        <>
+          <View style={styles.historySummaryRow}>
+            {cheapestBucket ? (
+              <View
+                style={[
+                  styles.historySummaryPill,
+                  { backgroundColor: withAlpha(colors.success, '12') },
+                ]}
+              >
+                <Text style={[styles.historySummaryLabel, { color: colors.success }]}>
+                  {tt('price_compare_history_cheapest_period', 'En ucuz dönem')}
+                </Text>
+                <Text style={[styles.historySummaryValue, { color: colors.text }]}>
+                  {formatLocalizedPrice(locale, cheapestBucket.averagePrice, currency)}
+                </Text>
+                <Text style={[styles.historySummaryMeta, { color: colors.mutedText }]}>
+                  {cheapestBucket.longLabel}
+                </Text>
+              </View>
+            ) : null}
+
+            {priciestBucket ? (
+              <View
+                style={[
+                  styles.historySummaryPill,
+                  { backgroundColor: withAlpha(colors.warning, '12') },
+                ]}
+              >
+                <Text style={[styles.historySummaryLabel, { color: colors.warning }]}>
+                  {tt('price_compare_history_priciest_period', 'En pahalı dönem')}
+                </Text>
+                <Text style={[styles.historySummaryValue, { color: colors.text }]}>
+                  {formatLocalizedPrice(locale, priciestBucket.averagePrice, currency)}
+                </Text>
+                <Text style={[styles.historySummaryMeta, { color: colors.mutedText }]}>
+                  {priciestBucket.longLabel}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.historyChartWrap}>
+            {buckets.map((bucket) => {
+              const normalizedHeight =
+                maxAverage === minAverage
+                  ? 0.58
+                  : (bucket.averagePrice - minAverage) / valueRange;
+              const barHeight = 28 + normalizedHeight * 92;
+              const isCheapest = cheapestBucket?.key === bucket.key;
+              const isPriciest = priciestBucket?.key === bucket.key;
+              const barColor = isCheapest
+                ? colors.success
+                : isPriciest
+                  ? colors.warning
+                  : colors.primary;
+
+              return (
+                <View key={bucket.key} style={styles.historyBarColumn}>
+                  <Text style={[styles.historyBarValue, { color: colors.text }]}>
+                    {formatLocalizedPrice(locale, bucket.averagePrice, currency)}
+                  </Text>
+                  <View style={styles.historyBarTrack}>
+                    <View
+                      style={[
+                        styles.historyBar,
+                        {
+                          height: barHeight,
+                          backgroundColor: barColor,
+                        },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.historyBarLabel, { color: colors.mutedText }]}>
+                    {bucket.shortLabel}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+
+          <Text style={[styles.historyFootnote, { color: colors.mutedText }]}>
+            {tt(
+              'price_compare_history_footnote',
+              'Grafik haftalık ortalama fiyatı gösterir. Çubuklar ürünün en ucuz ve en pahalı haftalarını vurgular.'
+            )}
+          </Text>
+        </>
+      )}
+    </View>
   );
 };
 
@@ -458,6 +1724,7 @@ export const PriceCompareScreen: React.FC = () => {
   const route = useRoute<PriceCompareRoute>();
   const { t, i18n } = useTranslation();
   const { colors, isDark } = useTheme();
+  const { width: viewportWidth } = useWindowDimensions();
   const { snapshot: marketRuntime } = useMarketGelsinRuntime();
   const { profile } = useAuth();
   const locationPermissionGranted = usePreferenceStore(
@@ -478,16 +1745,19 @@ export const PriceCompareScreen: React.FC = () => {
     },
     [t]
   );
-
+  const resultCardWidth = useMemo(() => {
+    const usableWidth = Math.max(
+      viewportWidth - 76 - RESULT_GRID_GAP * (RESULT_GRID_COLUMNS - 1),
+      160
+    );
+    return Math.floor(usableWidth / RESULT_GRID_COLUMNS);
+  }, [viewportWidth]);
   const preferredLocale = i18n.language || 'tr-TR';
-  const defaultMarketRuntime = useMemo(
-    () => getDefaultMarketGelsinRuntimeSnapshot(),
-    []
-  );
-  const marketRuntimeEnvState = useMemo(() => getMarketGelsinEnvOverrideState(), []);
   const [detectedLocation, setDetectedLocation] = useState<CurrentLocationContext | null>(null);
   const [detectedLocationLoading, setDetectedLocationLoading] = useState(false);
   const [detectedLocationResolved, setDetectedLocationResolved] = useState(false);
+  const [selectedReferenceProduct, setSelectedReferenceProduct] = useState<Product | null>(null);
+  const [selectedReferenceLoading, setSelectedReferenceLoading] = useState(false);
   const canonicalProfileCity = resolveCanonicalCity(profile?.city);
   const canonicalProfileDistrict = resolveCanonicalDistrict(profile?.city, profile?.district);
   const canonicalDetectedCity = resolveCanonicalCity(detectedLocation?.city);
@@ -498,7 +1768,6 @@ export const PriceCompareScreen: React.FC = () => {
   const effectiveCity = canonicalProfileCity || canonicalDetectedCity;
   const effectiveDistrict = canonicalProfileDistrict || canonicalDetectedDistrict;
   const cityCode = resolveTurkeyCityCode(effectiveCity);
-  const citySlug = resolveTurkeyCitySlug(effectiveCity);
   const locationLabel = effectiveDistrict
     ? `${effectiveDistrict}, ${effectiveCity ?? profile?.city ?? detectedLocation?.city ?? ''}`
     : effectiveCity || profile?.city || detectedLocation?.city || null;
@@ -508,19 +1777,72 @@ export const PriceCompareScreen: React.FC = () => {
   const [autocompleteLoading, setAutocompleteLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
+  const [categoryTreeCollapsed, setCategoryTreeCollapsed] = useState(false);
+  const [categoryNodes, setCategoryNodes] = useState<MarketCategoryNode[]>([]);
+  const [expandedCategoryKeys, setExpandedCategoryKeys] = useState<string[]>([]);
+  const [categoryLoadingKeys, setCategoryLoadingKeys] = useState<string[]>([]);
+  const [categoryTreeLoading, setCategoryTreeLoading] = useState(false);
+  const [categoryTreeError, setCategoryTreeError] = useState<string | null>(null);
+  const [loadedCategoryBranchIds, setLoadedCategoryBranchIds] = useState<string[]>([]);
   const [results, setResults] = useState<MarketSearchProduct[]>([]);
+  const [resultsPage, setResultsPage] = useState(1);
+  const [resultsNextCursor, setResultsNextCursor] = useState<number | null>(null);
+  const [resultsPaginationLoading, setResultsPaginationLoading] = useState(false);
+  const [resultsBrowseCategoryId, setResultsBrowseCategoryId] = useState<string | null>(null);
   const [autocompleteResults, setAutocompleteResults] = useState<MarketSearchProduct[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<MarketSearchProduct | null>(null);
   const [offersResponse, setOffersResponse] = useState<MarketProductOffersResponse | null>(null);
   const [offersLoading, setOffersLoading] = useState(false);
   const [offersError, setOffersError] = useState<string | null>(null);
-  const [comparisonCart, setComparisonCart] = useState<ComparisonCartEntry[]>([]);
-  const [basketCompareResponse, setBasketCompareResponse] =
-    useState<MarketBasketCompareResponse | null>(null);
-  const [basketCompareLoading, setBasketCompareLoading] = useState(false);
-  const [basketCompareError, setBasketCompareError] = useState<string | null>(null);
+  const [priceHistoryResponse, setPriceHistoryResponse] =
+    useState<MarketPriceHistoryResponse | null>(null);
+  const [priceHistoryLoading, setPriceHistoryLoading] = useState(false);
+  const [priceHistoryError, setPriceHistoryError] = useState<string | null>(null);
   const [marketSheetState, setMarketSheetState] = useState<MarketSheetState>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const [quickAddLoadingId, setQuickAddLoadingId] = useState<string | null>(null);
+  const initialCategoryBrowseBootstrappedRef = useRef(false);
+  const priceHistoryRequestRef = useRef(0);
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const resultsSectionOffsetRef = useRef<number>(0);
+  const selectedSectionOffsetRef = useRef<number>(0);
+  const comparisonCart = usePriceCompareBasketStore((state) => state.entries);
+  const addOrIncrementEntry = usePriceCompareBasketStore((state) => state.addOrIncrementEntry);
+  const loadedResultsPages = useMemo(
+    () => Math.max(1, Math.ceil(results.length / SEARCH_RESULTS_PAGE_SIZE)),
+    [results.length]
+  );
+  const totalResultsPages = useMemo(
+    () => loadedResultsPages + (resultsNextCursor != null ? 1 : 0),
+    [loadedResultsPages, resultsNextCursor]
+  );
+  const pagedResults = useMemo(() => {
+    const startIndex = (resultsPage - 1) * SEARCH_RESULTS_PAGE_SIZE;
+    return results.slice(startIndex, startIndex + SEARCH_RESULTS_PAGE_SIZE);
+  }, [results, resultsPage]);
+  const visibleResultsPageNumbers = useMemo(() => {
+    const maxButtons = 4;
+    const start = Math.max(1, Math.min(resultsPage - 1, totalResultsPages - maxButtons + 1));
+    const end = Math.min(totalResultsPages, start + maxButtons - 1);
+
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index);
+  }, [resultsPage, totalResultsPages]);
+  const categoryLabelLookup = useMemo(() => {
+    const next = new Map<string, string>();
+
+    categoryNodes.forEach((node) => {
+      const label = node.taxonomyLeaf?.trim() || node.normalizedCategory?.trim() || '';
+      if (label) {
+        next.set(node.normalizedCategoryId, label);
+      }
+    });
+
+    return next;
+  }, [categoryNodes]);
+  const selectedCategoryLabel = selectedCategoryId
+    ? categoryLabelLookup.get(selectedCategoryId) ?? null
+    : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -545,6 +1867,16 @@ export const PriceCompareScreen: React.FC = () => {
     void markScreenOnboardingSeen('price');
   }, []);
 
+  useEffect(() => {
+    setResultsPage(1);
+  }, [query, selectedCategoryId]);
+
+  useEffect(() => {
+    if (resultsPage > totalResultsPages) {
+      setResultsPage(totalResultsPages);
+    }
+  }, [resultsPage, totalResultsPages]);
+
   const closeMarketSheet = useCallback(() => {
     setMarketSheetState(null);
   }, []);
@@ -553,26 +1885,78 @@ export const PriceCompareScreen: React.FC = () => {
     setMarketSheetState({ kind: 'offer', offer });
   }, []);
 
-  const openBasketMarketSheet = useCallback((market: MarketBasketMarketTotal) => {
-    setMarketSheetState({ kind: 'basket', market });
-  }, []);
+  const loadPriceHistory = useCallback(
+    async (product: MarketSearchProduct) => {
+      const requestId = ++priceHistoryRequestRef.current;
+
+      setPriceHistoryError(null);
+
+      if (!marketRuntime.isEnabled || !hasComparableBarcode(product)) {
+        setPriceHistoryResponse(null);
+        setPriceHistoryLoading(false);
+        return;
+      }
+
+      setPriceHistoryLoading(true);
+
+      try {
+        const response = await resolveWithin(
+          fetchMarketPriceHistory(product.barcode!, {
+            cityCode: cityCode ?? undefined,
+            days: 84,
+          }),
+          REMOTE_SEARCH_TIMEOUT_MS
+        );
+
+        if (requestId !== priceHistoryRequestRef.current) {
+          return;
+        }
+
+        setPriceHistoryResponse(response);
+      } catch (error) {
+        console.warn('[PriceCompareScreen] price history load failed:', error);
+
+        if (requestId !== priceHistoryRequestRef.current) {
+          return;
+        }
+
+        setPriceHistoryResponse(null);
+        setPriceHistoryError(
+          tt(
+            'price_compare_history_error',
+            'Fiyat geçmişi şu anda yüklenemedi. Lütfen biraz sonra tekrar deneyin.'
+          )
+        );
+      } finally {
+        if (requestId === priceHistoryRequestRef.current) {
+          setPriceHistoryLoading(false);
+        }
+      }
+    },
+    [cityCode, marketRuntime.isEnabled, tt]
+  );
 
   const loadOffers = useCallback(
     async (product: MarketSearchProduct) => {
       setSelectedProduct(product);
+      setSelectedReferenceProduct(null);
       setOffersLoading(true);
       setOffersError(null);
+      void loadPriceHistory(product);
 
       if (!hasComparableBarcode(product)) {
+        const fallbackResponse = buildOffersResponseFromSearchProduct(product);
         setOffersResponse({
-          barcode: product.id,
-          fetchedAt: new Date().toISOString(),
+          barcode: fallbackResponse?.barcode ?? product.id,
+          fetchedAt: fallbackResponse?.fetchedAt ?? new Date().toISOString(),
           requestId: null,
           partial: true,
           warnings: [],
-          city: cityCode && effectiveCity ? { code: cityCode, name: effectiveCity } : null,
-          dataFreshness: product.dataFreshness ?? null,
-          offers: product.seedOffers ?? [],
+          city:
+            fallbackResponse?.city ??
+            (cityCode && effectiveCity ? { code: cityCode, name: effectiveCity } : null),
+          dataFreshness: fallbackResponse?.dataFreshness ?? product.dataFreshness ?? null,
+          offers: fallbackResponse?.offers ?? [],
         });
         setOffersLoading(false);
         return;
@@ -584,61 +1968,179 @@ export const PriceCompareScreen: React.FC = () => {
             cityCode: cityCode ?? undefined,
             districtName: effectiveDistrict ?? undefined,
             includeOutOfStock: true,
-            limit: 24,
+            limit: 200,
           }),
           REMOTE_OFFERS_TIMEOUT_MS
         );
 
         setOffersResponse(response);
       } catch (error) {
-        console.warn('[PriceCompareScreen] primary offer load failed, trying legacy:', error);
-
-        try {
-          const legacyResponse = await resolveWithin(
-            fetchLegacyMarketProductOffers({
-              barcode: product.barcode!,
-              citySlug: citySlug ?? undefined,
-              limit: 24,
-            }),
-            REMOTE_OFFERS_TIMEOUT_MS
-          );
-
-          setOffersResponse(legacyResponse);
-        } catch (legacyError) {
-          console.error('[PriceCompareScreen] offer load failed:', legacyError);
-          setOffersResponse(null);
-          setOffersError(
-            tt(
-              'price_compare_offers_error',
-              'Seçilen ürün için market teklifleri şu anda yüklenemedi.'
-            )
-          );
-        }
+        console.error('[PriceCompareScreen] offer load failed:', error);
+        setOffersResponse(null);
+        setOffersError(
+          tt(
+            'price_compare_offers_error',
+            'Seçilen ürün için market teklifleri şu anda yüklenemedi.'
+          )
+        );
       } finally {
         setOffersLoading(false);
       }
     },
-    [cityCode, citySlug, effectiveCity, effectiveDistrict, tt]
+    [cityCode, effectiveCity, effectiveDistrict, loadPriceHistory, tt]
   );
 
-  const searchProducts = useCallback(
-    async (rawQuery: string, limit: number, mode: 'search' | 'autocomplete') => {
-      const trimmedQuery = rawQuery.trim();
+  const loadCategoryBrowsePage = useCallback(
+    async (categoryId: string, cursor: number) => {
+      const selectedCategoryNode =
+        categoryNodes.find((item) => item.normalizedCategoryId === categoryId) ?? null;
 
-      if (trimmedQuery.length < SEARCH_MIN_LENGTH) {
+      if (!selectedCategoryNode) {
+        return {
+          results: [] as MarketSearchProduct[],
+          nextCursor: null as number | null,
+        };
+      }
+
+      try {
+        const browseResponse = await resolveWithin(
+          fetchMarketCategoryProducts({
+            categoryId: selectedCategoryNode.normalizedCategoryId,
+            cityCode: cityCode ?? undefined,
+            limit: SEARCH_RESULTS_PAGE_SIZE,
+            cursor,
+            sort: 'popular',
+          }),
+          REMOTE_SEARCH_TIMEOUT_MS
+        );
+
+        if (browseResponse.results.length > 0) {
+          return {
+            results: browseResponse.results.map((item) =>
+              annotateBrowseResult(item, selectedCategoryNode)
+            ),
+            nextCursor: browseResponse.nextCursor ?? null,
+          };
+        }
+      } catch (error) {
+        console.warn('[PriceCompareScreen] category browse RPC failed:', error);
+      }
+
+      if (cursor > 0) {
+        return {
+          results: [] as MarketSearchProduct[],
+          nextCursor: null as number | null,
+        };
+      }
+
+      try {
+        const fallbackQuery =
+          buildCategoryBrowseQueries(selectedCategoryNode.taxonomyLeaf)[0] ??
+          selectedCategoryNode.taxonomyLeaf;
+        const response = await resolveWithin(
+          fetchMarketProductSearch({
+            query: fallbackQuery,
+            cityCode: cityCode ?? undefined,
+            categoryId: selectedCategoryNode.normalizedCategoryId,
+            limit: SEARCH_RESULTS_PAGE_SIZE,
+          }),
+          REMOTE_SEARCH_TIMEOUT_MS
+        );
+
+        return {
+          results: response.results.map((item) =>
+            annotateBrowseResult(item, selectedCategoryNode)
+          ),
+          nextCursor: null as number | null,
+        };
+      } catch (error) {
+        console.warn('[PriceCompareScreen] category browse search failed:', error);
+        return {
+          results: [] as MarketSearchProduct[],
+          nextCursor: null as number | null,
+        };
+      }
+    },
+    [categoryNodes, cityCode]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!selectedProduct || selectedProduct.barcode) {
+      setSelectedReferenceLoading(false);
+      setSelectedReferenceProduct(null);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setSelectedReferenceLoading(true);
+    setSelectedReferenceProduct(null);
+
+    void resolveReferenceProductForMarketProduct(selectedProduct)
+      .then((candidate) => {
+        if (!cancelled) {
+          setSelectedReferenceProduct(candidate);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          console.warn('[PriceCompareScreen] selected reference resolve failed:', error);
+          setSelectedReferenceProduct(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setSelectedReferenceLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedProduct]);
+
+  const searchProducts = useCallback(
+    async (
+      rawQuery: string,
+      limit: number,
+      mode: 'search' | 'autocomplete',
+      categoryIdOverride?: string | null
+    ) => {
+      const trimmedQuery = rawQuery.trim();
+      const effectiveCategoryId = categoryIdOverride ?? selectedCategoryId;
+      const selectedCategoryNode =
+        effectiveCategoryId
+          ? categoryNodes.find((item) => item.normalizedCategoryId === effectiveCategoryId) ?? null
+          : null;
+      const isCategoryBrowseMode =
+        Boolean(effectiveCategoryId) && trimmedQuery.length < SEARCH_MIN_LENGTH;
+
+      if (trimmedQuery.length < SEARCH_MIN_LENGTH && !isCategoryBrowseMode) {
         return [];
       }
 
-      const localResults = searchLocalPriceCompareProducts(trimmedQuery, limit);
+      const localResults = effectiveCategoryId || isCategoryBrowseMode
+        ? []
+        : searchLocalPriceCompareProducts(trimmedQuery, limit);
       const variants = buildSearchVariants(trimmedQuery);
       const timeoutMs =
         mode === 'autocomplete' ? REMOTE_AUTOCOMPLETE_TIMEOUT_MS : REMOTE_SEARCH_TIMEOUT_MS;
       const isBarcodeQuery = isBarcodeLikeQuery(trimmedQuery);
       const remoteTasks: Promise<MarketSearchProduct[]>[] = [];
+      let categoryBrowseFallbackNeeded = isCategoryBrowseMode && Boolean(selectedCategoryNode);
 
       if (isBarcodeQuery) {
         remoteTasks.push(
-          resolveWithin(fetchMarketBarcodeLookup(trimmedQuery), timeoutMs)
+          resolveWithin(
+            fetchMarketBarcodeLookup(trimmedQuery, {
+              cityCode: cityCode ?? undefined,
+              limit,
+              includeOutOfStock: true,
+            }),
+            timeoutMs
+          )
             .then((result) => (result ? [result] : []))
             .catch((error) => {
               console.warn('[PriceCompareScreen] barcode lookup failed:', error);
@@ -647,44 +2149,103 @@ export const PriceCompareScreen: React.FC = () => {
         );
       }
 
-      if (citySlug) {
-        variants.forEach((variant, index) => {
+      if (!isCategoryBrowseMode) {
+        variants.forEach((variant) => {
           remoteTasks.push(
             resolveWithin(
-              fetchLegacyMarketOfferSearch({
+              fetchMarketProductSearch({
                 query: variant,
-                citySlug,
-                barcode: isBarcodeQuery ? trimmedQuery : undefined,
-                limit: index === 0 ? limit : Math.max(4, Math.ceil(limit / 2)),
+                cityCode: cityCode ?? undefined,
+                categoryId: effectiveCategoryId ?? undefined,
+                limit,
               }),
               timeoutMs
             )
               .then((response) => response.results)
               .catch((error) => {
-                console.warn('[PriceCompareScreen] legacy search failed:', error);
+                console.warn('[PriceCompareScreen] v1 product search failed:', error);
                 return [];
               })
           );
         });
-      }
-
-      variants.forEach((variant) => {
-        remoteTasks.push(
-          resolveWithin(
-            fetchMarketProductSearch({
-              query: variant,
+      } else if (selectedCategoryNode) {
+        try {
+          const browseResponse = await resolveWithin(
+            fetchMarketCategoryProducts({
+              categoryId: selectedCategoryNode.normalizedCategoryId,
               cityCode: cityCode ?? undefined,
-              limit,
+              limit: Math.max(limit, 12),
+              cursor: 0,
+              sort: 'popular',
             }),
             timeoutMs
-          )
-            .then((response) => response.results)
-            .catch((error) => {
-              console.warn('[PriceCompareScreen] v1 product search failed:', error);
+          );
+
+          if (browseResponse.results.length) {
+            remoteTasks.push(
+              Promise.resolve(
+                browseResponse.results.map((item) => annotateBrowseResult(item, selectedCategoryNode))
+              )
+            );
+            categoryBrowseFallbackNeeded = false;
+          }
+        } catch (error) {
+          console.warn('[PriceCompareScreen] category browse RPC failed:', error);
+        }
+      }
+
+      if (categoryBrowseFallbackNeeded && selectedCategoryNode) {
+        const fallbackQuery =
+          buildCategoryBrowseQueries(selectedCategoryNode.taxonomyLeaf)[0] ??
+          selectedCategoryNode.taxonomyLeaf;
+
+        remoteTasks.push(
+          (async () => {
+            try {
+              const attempts: {
+                query: string;
+                cityCode?: string;
+                categoryId?: string;
+              }[] = [
+                {
+                  query: fallbackQuery,
+                  cityCode: cityCode ?? undefined,
+                  categoryId: selectedCategoryNode.normalizedCategoryId,
+                },
+                {
+                  query: fallbackQuery,
+                  categoryId: selectedCategoryNode.normalizedCategoryId,
+                },
+              ];
+
+              for (const attempt of attempts) {
+                const response = await resolveWithin(
+                  fetchMarketProductSearch({
+                    query: attempt.query,
+                    cityCode: attempt.cityCode,
+                    categoryId: attempt.categoryId,
+                    limit: Math.max(limit, 12),
+                  }),
+                  timeoutMs
+                );
+
+                if (!response.results.length) {
+                  continue;
+                }
+
+                return response.results.map((item) =>
+                  annotateBrowseResult(item, selectedCategoryNode)
+                );
+              }
+
               return [];
-            })
+            } catch (error) {
+              console.warn('[PriceCompareScreen] category browse search failed:', error);
+              return [];
+            }
+          })()
         );
-      });
+      }
 
       const settled = await Promise.allSettled(remoteTasks);
       const remoteResults = settled.flatMap((result) =>
@@ -696,20 +2257,259 @@ export const PriceCompareScreen: React.FC = () => {
           ? [...remoteResults, ...localResults]
           : [...localResults]
       );
+      const rankingQuery =
+        trimmedQuery ||
+        selectedCategoryNode?.taxonomyLeaf ||
+        categoryLabelLookup.get(effectiveCategoryId || '') ||
+        '';
+      const rankedResults = rankSearchProducts(mergedResults, rankingQuery).slice(0, limit);
+      const sparseResults = rankedResults.filter(
+        (item) => item.barcode && isSearchProductSparse(item)
+      );
+      const enrichmentLimit = mode === 'autocomplete' ? 3 : 6;
 
-      return rankSearchProducts(mergedResults, trimmedQuery).slice(0, limit);
+      if (!sparseResults.length) {
+        return rankedResults;
+      }
+
+      const enrichedByBarcode = new Map<string, MarketSearchProduct>();
+      const enrichedResults = await Promise.allSettled(
+        sparseResults.slice(0, enrichmentLimit).map(async (item) => {
+          const resolved = await resolveWithin(
+            fetchMarketBarcodeLookup(item.barcode!, {
+              cityCode: cityCode ?? undefined,
+              includeOutOfStock: true,
+            }),
+            timeoutMs
+          );
+
+          if (resolved?.barcode) {
+            enrichedByBarcode.set(resolved.barcode, resolved);
+          }
+        })
+      );
+
+      enrichedResults.forEach((result) => {
+        if (result.status === 'rejected') {
+          console.warn('[PriceCompareScreen] search result enrichment failed:', result.reason);
+        }
+      });
+
+      return rankedResults.map((item) =>
+        item.barcode ? mergeSearchProductDetails(item, enrichedByBarcode.get(item.barcode) ?? null) : item
+      );
     },
-    [cityCode, citySlug]
+    [categoryLabelLookup, categoryNodes, cityCode, selectedCategoryId]
   );
 
-  const handleSearch = useCallback(async () => {
-    const trimmedQuery = query.trim();
+  const remoteCategoryTree = useMemo(
+    () => buildSearchCategoryTree(categoryNodes),
+    [categoryNodes]
+  );
+  const resultDerivedCategoryTree = useMemo(
+    () => buildResultDerivedCategoryTree(results),
+    [results]
+  );
+  const categoryTreeUsesResultsFallback =
+    !remoteCategoryTree.length && Boolean(categoryTreeError) && resultDerivedCategoryTree.length > 0;
+  const categoryTree = categoryTreeUsesResultsFallback
+    ? resultDerivedCategoryTree
+    : remoteCategoryTree;
 
-    if (trimmedQuery.length < SEARCH_MIN_LENGTH) {
+  useEffect(() => {
+    if (!categoryTree.length) {
+      setExpandedCategoryKeys([]);
+      return;
+    }
+
+    const validKeys = new Set<string>();
+
+    const collectKeys = (nodes: SearchCategoryTreeNode[]) => {
+      nodes.forEach((node) => {
+        validKeys.add(node.key);
+        if (node.children.length) {
+          collectKeys(node.children);
+        }
+      });
+    };
+
+    collectKeys(categoryTree);
+
+    setExpandedCategoryKeys((previous) => previous.filter((key) => validKeys.has(key)));
+  }, [categoryTree]);
+
+  const mergeCategoryNodes = useCallback((incoming: MarketCategoryNode[]) => {
+    setCategoryNodes((previous) => {
+      const next = new Map<string, MarketCategoryNode>(
+        previous.map((item) => [item.normalizedCategoryId, item])
+      );
+
+      incoming.forEach((item) => {
+        next.set(item.normalizedCategoryId, item);
+      });
+
+      return Array.from(next.values());
+    });
+  }, []);
+
+  const loadSeededRootCategories = useCallback(async () => {
+    const settled = await Promise.allSettled(
+      CATEGORY_ROOT_SPECS.map(async (spec) => {
+        const response = await resolveWithin(
+          fetchMarketCategoryTree({
+            cityCode: cityCode ?? undefined,
+            query: spec.query,
+            depthLimit: 2,
+            includeCounts: false,
+            onlyActive: true,
+          }),
+          REMOTE_CATEGORY_TREE_TIMEOUT_MS
+        );
+
+        return {
+          label: spec.label,
+          nodes: response.nodes,
+        };
+      })
+    );
+
+    const groups = settled.flatMap((result) =>
+      result.status === 'fulfilled' && result.value.nodes.length > 0 ? [result.value] : []
+    );
+
+    return buildSeededCategoryNodes(groups);
+  }, [cityCode]);
+
+  const loadRootCategories = useCallback(async () => {
+    if (!marketRuntime.isEnabled) {
+      setCategoryNodes([]);
+      setExpandedCategoryKeys([]);
+      setLoadedCategoryBranchIds([]);
+      setCategoryTreeError(null);
+      setCategoryTreeLoading(false);
+      return;
+    }
+
+    setCategoryTreeLoading(true);
+    setCategoryTreeError(null);
+
+    try {
+      const response = await resolveWithin(
+        fetchMarketCategoryTree({
+          depthLimit: 1,
+          includeCounts: true,
+          onlyActive: true,
+        }),
+        REMOTE_CATEGORY_TREE_TIMEOUT_MS
+      );
+
+      const resolvedNodes =
+        response.nodes.length > 0 ? response.nodes : await loadSeededRootCategories();
+
+      setCategoryNodes(resolvedNodes);
+      setExpandedCategoryKeys([]);
+      setLoadedCategoryBranchIds([CATEGORY_ROOT_KEY]);
+    } catch (error) {
+      console.warn('[PriceCompareScreen] category root load failed:', error);
+      setCategoryNodes([]);
+      setExpandedCategoryKeys([]);
+      setLoadedCategoryBranchIds([]);
+      setCategoryTreeError(
+        tt(
+          'price_compare_category_tree_error',
+          'Market reyonları şu anda yüklenemedi. Aramaya yine de devam edebilirsin.'
+        )
+      );
+    } finally {
+      setCategoryTreeLoading(false);
+    }
+  }, [loadSeededRootCategories, marketRuntime.isEnabled, tt]);
+
+  useEffect(() => {
+    void loadRootCategories();
+  }, [loadRootCategories]);
+
+  const loadCategoryChildren = useCallback(
+    async (rootCategoryId: string) => {
+      if (
+        !marketRuntime.isEnabled ||
+        isSyntheticCategoryId(rootCategoryId) ||
+        loadedCategoryBranchIds.includes(rootCategoryId)
+      ) {
+        return;
+      }
+
+      setCategoryLoadingKeys((previous) =>
+        previous.includes(rootCategoryId) ? previous : [...previous, rootCategoryId]
+      );
+
+      try {
+        const response = await resolveWithin(
+          fetchMarketCategoryTree({
+            cityCode: cityCode ?? undefined,
+            rootCategoryId,
+            depthLimit: 1,
+            includeCounts: false,
+            onlyActive: true,
+          }),
+          REMOTE_CATEGORY_TREE_TIMEOUT_MS
+        );
+
+        mergeCategoryNodes(response.nodes);
+        setLoadedCategoryBranchIds((previous) =>
+          previous.includes(rootCategoryId) ? previous : [...previous, rootCategoryId]
+        );
+      } catch (error) {
+        console.warn('[PriceCompareScreen] category child load failed:', error);
+        setCategoryTreeError(
+          tt(
+            'price_compare_category_tree_error',
+            'Market reyonları şu anda yüklenemedi. Aramaya yine de devam edebilirsin.'
+          )
+        );
+      } finally {
+        setCategoryLoadingKeys((previous) =>
+          previous.filter((item) => item !== rootCategoryId)
+        );
+      }
+    },
+    [cityCode, loadedCategoryBranchIds, marketRuntime.isEnabled, mergeCategoryNodes, tt]
+  );
+
+  const toggleCategoryNode = useCallback(
+    (key: string) => {
+      setExpandedCategoryKeys((previous) => {
+        if (previous.includes(key)) {
+          return previous.filter((item) => item !== key);
+        }
+
+        return [...previous, key];
+      });
+
+      void loadCategoryChildren(key);
+    },
+    [loadCategoryChildren]
+  );
+
+  const handleSearch = useCallback(async (categoryIdOverride?: string | null) => {
+    const trimmedQuery = query.trim();
+    const effectiveCategoryId = categoryIdOverride ?? selectedCategoryId;
+    const isCategoryBrowseMode =
+      Boolean(effectiveCategoryId) && trimmedQuery.length < SEARCH_MIN_LENGTH;
+    const effectiveQuery = trimmedQuery;
+
+    if (effectiveQuery.length < SEARCH_MIN_LENGTH && !isCategoryBrowseMode) {
       setHasSearched(false);
+      setSelectedCategoryId(effectiveCategoryId ?? null);
       setResults([]);
+      setResultsNextCursor(null);
+      setResultsBrowseCategoryId(null);
       setSelectedProduct(null);
       setOffersResponse(null);
+      priceHistoryRequestRef.current += 1;
+      setPriceHistoryResponse(null);
+      setPriceHistoryError(null);
+      setPriceHistoryLoading(false);
       setSearchError(
         tt(
           'price_compare_search_validation',
@@ -726,15 +2526,38 @@ export const PriceCompareScreen: React.FC = () => {
     setSelectedProduct(null);
     setOffersResponse(null);
     setOffersError(null);
+    priceHistoryRequestRef.current += 1;
+    setPriceHistoryResponse(null);
+    setPriceHistoryError(null);
+    setPriceHistoryLoading(false);
+    setResultsNextCursor(null);
+    setResultsBrowseCategoryId(null);
 
     try {
-      const resolvedResults = await searchProducts(trimmedQuery, 12, 'search');
+      const resolvedResults = isCategoryBrowseMode && effectiveCategoryId
+        ? await loadCategoryBrowsePage(effectiveCategoryId, 0)
+        : {
+            results: await searchProducts(
+              isCategoryBrowseMode ? '' : effectiveQuery,
+              SEARCH_RESULTS_FETCH_LIMIT,
+              'search',
+              effectiveCategoryId
+            ),
+            nextCursor: null as number | null,
+          };
 
-      setResults(resolvedResults);
+      setResults(resolvedResults.results);
+      setResultsPage(1);
+      setResultsNextCursor(resolvedResults.nextCursor ?? null);
+      setResultsBrowseCategoryId(isCategoryBrowseMode ? effectiveCategoryId : null);
 
-      if (resolvedResults.length === 1 || isBarcodeLikeQuery(trimmedQuery)) {
+      if (
+        !isCategoryBrowseMode &&
+        (resolvedResults.results.length === 1 || isBarcodeLikeQuery(effectiveQuery))
+      ) {
         const exactMatch =
-          resolvedResults.find((item) => item.barcode === trimmedQuery) ?? resolvedResults[0];
+          resolvedResults.results.find((item) => item.barcode === effectiveQuery) ??
+          resolvedResults.results[0];
 
         if (exactMatch) {
           void loadOffers(exactMatch);
@@ -743,6 +2566,8 @@ export const PriceCompareScreen: React.FC = () => {
     } catch (error) {
       console.error('[PriceCompareScreen] search failed:', error);
       setResults([]);
+      setResultsNextCursor(null);
+      setResultsBrowseCategoryId(null);
       setSearchError(
         tt(
           'price_compare_results_error',
@@ -752,94 +2577,235 @@ export const PriceCompareScreen: React.FC = () => {
     } finally {
       setSearchLoading(false);
     }
-  }, [loadOffers, query, searchProducts, tt]);
+  }, [loadCategoryBrowsePage, loadOffers, query, searchProducts, selectedCategoryId, tt]);
+
+  const handleResultsPageChange = useCallback(
+    async (targetPage: number) => {
+      const safeTargetPage = Math.max(1, Math.min(totalResultsPages, targetPage));
+
+      if (safeTargetPage <= loadedResultsPages) {
+        setResultsPage(safeTargetPage);
+        return;
+      }
+
+      if (
+        resultsPaginationLoading ||
+        !resultsBrowseCategoryId ||
+        resultsNextCursor == null
+      ) {
+        setResultsPage(Math.min(safeTargetPage, loadedResultsPages));
+        return;
+      }
+
+      setResultsPaginationLoading(true);
+
+      try {
+        const response = await loadCategoryBrowsePage(resultsBrowseCategoryId, resultsNextCursor);
+
+        if (response.results.length > 0) {
+          setResults((previous) => dedupeSearchProducts([...previous, ...response.results]));
+          setResultsNextCursor(response.nextCursor ?? null);
+          setResultsPage(safeTargetPage);
+          return;
+        }
+
+        setResultsNextCursor(null);
+      } catch (error) {
+        console.warn('[PriceCompareScreen] results page load failed:', error);
+      } finally {
+        setResultsPaginationLoading(false);
+      }
+    },
+    [
+      loadCategoryBrowsePage,
+      loadedResultsPages,
+      resultsBrowseCategoryId,
+      resultsNextCursor,
+      resultsPaginationLoading,
+      totalResultsPages,
+    ]
+  );
+
+  useEffect(() => {
+    if (initialCategoryBrowseBootstrappedRef.current) {
+      return;
+    }
+    if (query.trim().length > 0 || hasSearched || selectedCategoryId || searchLoading || categoryTreeLoading) {
+      return;
+    }
+    if (!categoryTree.length) {
+      return;
+    }
+
+    const initialNode = findFirstBrowsableCategoryNode(
+      categoryTree.filter((node) => node.categoryId !== CATEGORY_ROOT_KEY)
+    );
+
+    if (!initialNode) {
+      return;
+    }
+
+    initialCategoryBrowseBootstrappedRef.current = true;
+    setSelectedCategoryId(initialNode.categoryId);
+    setCategoryTreeCollapsed(true);
+    void handleSearch(initialNode.categoryId);
+  }, [
+    categoryTree,
+    categoryTreeLoading,
+    handleSearch,
+    hasSearched,
+    query,
+    searchLoading,
+    selectedCategoryId,
+  ]);
+
+  const resolveComparableProduct = useCallback(
+    async (product: MarketSearchProduct): Promise<MarketSearchProduct> => {
+      if (product.barcode) {
+        return product;
+      }
+
+      if (!product.productId) {
+        return product;
+      }
+
+      try {
+        const inferredBarcode = await resolveWithin(
+          resolveReferenceBarcodeForMarketProduct(product),
+          REMOTE_SEARCH_TIMEOUT_MS
+        );
+
+        if (!inferredBarcode) {
+          return product;
+        }
+
+        const enrichedProduct = {
+          ...product,
+          barcode: inferredBarcode,
+        };
+
+        setResults((previous) =>
+          previous.map((item) =>
+            getProductIdentity(item) === getProductIdentity(product) ? enrichedProduct : item
+          )
+        );
+
+        return enrichedProduct;
+      } catch (error) {
+        console.warn('[PriceCompareScreen] comparable product resolve failed:', error);
+        return product;
+      }
+    },
+    []
+  );
 
   const handleSelectProduct = useCallback(
     async (product: MarketSearchProduct) => {
       setQuery(product.productName);
+      setSelectedCategoryId(product.normalizedCategoryId ?? null);
       setHasSearched(true);
       setResults((previous) => {
         const hasProduct = previous.some((item) => getProductIdentity(item) === getProductIdentity(product));
         return hasProduct ? previous : [product, ...previous];
       });
       setAutocompleteResults([]);
-      await loadOffers(product);
+      const resolvedProduct = await resolveComparableProduct(product);
+      await loadOffers(resolvedProduct);
     },
-    [loadOffers]
+    [loadOffers, resolveComparableProduct]
+  );
+
+  const handleOpenPricingFromResult = useCallback(
+    async (product: MarketSearchProduct) => {
+      const resolvedProduct = await resolveComparableProduct(product);
+      await loadOffers(resolvedProduct);
+    },
+    [loadOffers, resolveComparableProduct]
+  );
+
+  const handleOpenScoreFromResult = useCallback(
+    async (product: MarketSearchProduct) => {
+      const resolvedProduct = await resolveComparableProduct(product);
+
+      if (resolvedProduct.barcode) {
+        navigation.navigate('Detail', {
+          barcode: resolvedProduct.barcode,
+          entrySource: 'unknown',
+          lookupMode: 'auto',
+        });
+        return;
+      }
+
+      await loadOffers(resolvedProduct);
+    },
+    [loadOffers, navigation, resolveComparableProduct]
+  );
+
+  const handleQuickAddFromResult = useCallback(
+    async (product: MarketSearchProduct) => {
+      const resolvedProduct = await resolveComparableProduct(product);
+      const identity = getProductIdentity(resolvedProduct);
+      const immediateOffersResponse = buildOffersResponseFromSearchProduct(resolvedProduct);
+
+      if (immediateOffersResponse) {
+        addOrIncrementEntry(resolvedProduct, immediateOffersResponse);
+        return;
+      }
+
+      if (!resolvedProduct.barcode) {
+        return;
+      }
+
+      setQuickAddLoadingId(identity);
+
+      try {
+        const response = await resolveWithin(
+          fetchMarketProductOffers(resolvedProduct.barcode, {
+            cityCode: cityCode ?? undefined,
+            districtName: effectiveDistrict ?? undefined,
+            includeOutOfStock: true,
+            limit: 200,
+          }),
+          REMOTE_OFFERS_TIMEOUT_MS
+        );
+
+        if (!response.offers.length) {
+          setOffersError(
+            tt(
+              'price_compare_selected_no_live_offers',
+              'Bu ürün için henüz canlı market teklifi bulunamadı.'
+            )
+          );
+          return;
+        }
+
+        addOrIncrementEntry(resolvedProduct, response);
+      } catch (error) {
+        console.warn('[PriceCompareScreen] quick add failed:', error);
+        setOffersError(
+          tt(
+            'price_compare_offers_error',
+            'Seçilen ürün için market teklifleri şu anda yüklenemedi.'
+          )
+        );
+      } finally {
+        setQuickAddLoadingId((current) => (current === identity ? null : current));
+      }
+    },
+    [addOrIncrementEntry, cityCode, effectiveDistrict, resolveComparableProduct, tt]
   );
 
   const handleAddSelectedToCart = useCallback(() => {
-    if (!selectedProduct || !offersResponse) {
+    const effectiveResponse =
+      offersResponse ??
+      (selectedProduct ? buildOffersResponseFromSearchProduct(selectedProduct) : null);
+
+    if (!selectedProduct || !effectiveResponse || !effectiveResponse.offers.length) {
       return;
     }
 
-    setComparisonCart((previous) => {
-      const existingIndex = previous.findIndex(
-        (item) => getProductIdentity(item.product) === getProductIdentity(selectedProduct)
-      );
-
-      if (existingIndex === -1) {
-        return [
-          ...previous,
-          {
-            product: selectedProduct,
-            offersResponse,
-            quantity: 1,
-          },
-        ];
-      }
-
-      return previous.map((item, index) =>
-        index === existingIndex
-          ? {
-              ...item,
-              offersResponse,
-              quantity: item.quantity + 1,
-            }
-          : item
-      );
-    });
-  }, [offersResponse, selectedProduct]);
-
-  const handleRemoveFromCart = useCallback((productId: string) => {
-    setComparisonCart((previous) =>
-      previous.filter((item) => getProductIdentity(item.product) !== productId)
-    );
-  }, []);
-
-  const handleIncreaseCartQuantity = useCallback((productId: string) => {
-    setComparisonCart((previous) =>
-      previous.map((item) =>
-        getProductIdentity(item.product) === productId
-          ? {
-              ...item,
-              quantity: item.quantity + 1,
-            }
-          : item
-      )
-    );
-  }, []);
-
-  const handleDecreaseCartQuantity = useCallback((productId: string) => {
-    setComparisonCart((previous) =>
-      previous.flatMap((item) => {
-        if (getProductIdentity(item.product) !== productId) {
-          return [item];
-        }
-
-        if (item.quantity <= 1) {
-          return [];
-        }
-
-        return [
-          {
-            ...item,
-            quantity: item.quantity - 1,
-          },
-        ];
-      })
-    );
-  }, []);
+    addOrIncrementEntry(selectedProduct, effectiveResponse);
+  }, [addOrIncrementEntry, offersResponse, selectedProduct]);
 
   useEffect(() => {
     if (
@@ -934,73 +2900,17 @@ export const PriceCompareScreen: React.FC = () => {
     }
   }, [handleSearch, hasSearched, query, route.params?.initialQuery]);
 
-  useEffect(() => {
-    const comparableItems = comparisonCart.filter((entry) => hasComparableBarcode(entry.product));
+  const selectedEffectiveOffersResponse = useMemo(
+    () =>
+      offersResponse ??
+      (selectedProduct ? buildOffersResponseFromSearchProduct(selectedProduct) : null),
+    [offersResponse, selectedProduct]
+  );
 
-    if (!comparisonCart.length || !cityCode || comparableItems.length !== comparisonCart.length) {
-      setBasketCompareResponse(null);
-      setBasketCompareError(null);
-      setBasketCompareLoading(false);
-      return;
-    }
-
-    let isActive = true;
-    setBasketCompareLoading(true);
-    setBasketCompareError(null);
-
-    void (async () => {
-      try {
-        const response = await resolveWithin(
-          fetchMarketBasketCompare({
-            cityCode,
-            citySlug,
-            districtName: effectiveDistrict ?? undefined,
-            latitude: detectedLocation?.latitude,
-            longitude: detectedLocation?.longitude,
-            items: comparableItems.map((entry) => ({
-              barcode: entry.product.barcode!,
-              quantity: entry.quantity,
-            })),
-          }),
-          REMOTE_BASKET_TIMEOUT_MS
-        );
-
-        if (isActive) {
-          setBasketCompareResponse(response);
-        }
-      } catch (error) {
-        console.warn('[PriceCompareScreen] basket compare failed:', error);
-
-        if (isActive) {
-          setBasketCompareResponse(null);
-          setBasketCompareError(
-            tt(
-              'price_compare_basket_compare_error',
-              'Canlı sepet kıyası şu anda alınamadı. Yerel toplamlar gösteriliyor.'
-            )
-          );
-        }
-      } finally {
-        if (isActive) {
-          setBasketCompareLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      isActive = false;
-    };
-  }, [
-    cityCode,
-    citySlug,
-    comparisonCart,
-    detectedLocation?.latitude,
-    detectedLocation?.longitude,
-    effectiveDistrict,
-    tt,
-  ]);
-
-  const offerItems = useMemo(() => offersResponse?.offers ?? [], [offersResponse?.offers]);
+  const offerItems = useMemo(
+    () => normalizeOffersForDisplay(selectedEffectiveOffersResponse?.offers ?? [], { cityCode }),
+    [cityCode, selectedEffectiveOffersResponse]
+  );
 
   const sortedOffers = useMemo(() => {
     const rankByType = (offer: MarketOffer): number => {
@@ -1047,212 +2957,44 @@ export const PriceCompareScreen: React.FC = () => {
     );
   }, [locationLabel, offerItems.length, selectedProduct, tt]);
 
-  const runtimeDiagnosticSummary = useMemo(() => {
-    const baseUrlLabel = marketRuntime.baseUrl || defaultMarketRuntime.baseUrl || '-';
-    const disableReasonLabel = marketRuntime.disableReason || '-';
-    const envStateLabel = [
-      marketRuntimeEnvState.apiUrl ? 'url' : null,
-      marketRuntimeEnvState.enabled ? 'enabled' : null,
-      marketRuntimeEnvState.timeoutMs ? 'timeout' : null,
-    ]
-      .filter(Boolean)
-      .join(', ');
-
-    return tt(
-      'price_compare_runtime_diagnostics_template',
-      'Tanılama: kaynak {{source}} • url {{url}} • neden {{reason}} • env {{env}}'
-    )
-      .replace('{{source}}', marketRuntime.source)
-      .replace('{{url}}', baseUrlLabel)
-      .replace('{{reason}}', disableReasonLabel)
-      .replace('{{env}}', envStateLabel || 'yok');
-  }, [
-    defaultMarketRuntime.baseUrl,
-    marketRuntime.baseUrl,
-    marketRuntime.disableReason,
-    marketRuntime.source,
-    marketRuntimeEnvState.apiUrl,
-    marketRuntimeEnvState.enabled,
-    marketRuntimeEnvState.timeoutMs,
-    tt,
-  ]);
-
   const selectedBestOffer = useMemo(() => {
     return getBestInStockOffer(offerItems.filter((offer) => offer.inStock));
   }, [offerItems]);
 
-  const cartSummary = useMemo(() => {
-    if (!comparisonCart.length) {
-      return {
-        cheapestTotal: 0,
-        cheapestCoveredCount: 0,
-        bestSingleMarket: null as null | {
-          marketKey: string;
-          marketName: string;
-          marketLogoUrl?: string | null;
-          total: number;
-          coveredCount: number;
-          distanceMeters?: number | null;
-        },
-        perMarketTotals: [] as {
-          marketKey: string;
-          marketName: string;
-          marketLogoUrl?: string | null;
-          total: number;
-          coveredCount: number;
-          distanceMeters?: number | null;
-        }[],
-      };
-    }
+  const selectedDisplayProductName = useMemo(
+    () => (selectedProduct ? toDisplayProductName(selectedProduct.productName) : ''),
+    [selectedProduct]
+  );
 
-    let cheapestTotal = 0;
-    let cheapestCoveredCount = 0;
-    const marketMap = new Map<
-      string,
-      {
-        marketKey: string;
-        marketName: string;
-        marketLogoUrl?: string | null;
-        total: number;
-        coveredCount: number;
-        distanceMeters?: number | null;
-      }
-    >();
+  const selectedDisplayBrand = useMemo(
+    () => (selectedProduct?.brand ? toDisplayProductName(selectedProduct.brand) : null),
+    [selectedProduct]
+  );
 
-    comparisonCart.forEach((entry) => {
-      const inStockOffers = entry.offersResponse.offers.filter((offer) => offer.inStock);
-      const cheapestOffer = getBestInStockOffer(inStockOffers);
-      const quantity = Math.max(1, entry.quantity);
+  const selectedDisplayCategory = useMemo(
+    () => (selectedProduct?.category ? toDisplayProductName(selectedProduct.category) : null),
+    [selectedProduct]
+  );
 
-      if (cheapestOffer) {
-        cheapestTotal += cheapestOffer.price * quantity;
-        cheapestCoveredCount += quantity;
-      }
+  const selectedDetailBarcode = useMemo(
+    () => selectedProduct?.barcode ?? selectedReferenceProduct?.barcode ?? null,
+    [selectedProduct?.barcode, selectedReferenceProduct?.barcode]
+  );
 
-      const seenMarkets = new Set<string>();
+  const selectedScorePreview = useMemo(
+    () =>
+      typeof selectedReferenceProduct?.score === 'number'
+        ? Math.round(selectedReferenceProduct.score)
+        : null,
+    [selectedReferenceProduct?.score]
+  );
 
-      inStockOffers.forEach((offer) => {
-        const id = offer.marketKey || offer.marketName;
+  const weeklyPriceHistory = useMemo(
+    () => buildWeeklyPriceHistory(priceHistoryResponse?.history ?? [], preferredLocale, 8),
+    [preferredLocale, priceHistoryResponse?.history]
+  );
 
-        if (!id || seenMarkets.has(id)) {
-          return;
-        }
-
-        seenMarkets.add(id);
-
-        const existing = marketMap.get(id) ?? {
-          marketKey: offer.marketKey || offer.marketName,
-          marketName: offer.marketName,
-          marketLogoUrl: offer.marketLogoUrl ?? null,
-          total: 0,
-          coveredCount: 0,
-          distanceMeters: offer.distanceMeters ?? null,
-        };
-
-        existing.total += offer.price * quantity;
-        existing.coveredCount += quantity;
-
-        if (
-          existing.distanceMeters == null &&
-          typeof offer.distanceMeters === 'number' &&
-          Number.isFinite(offer.distanceMeters)
-        ) {
-          existing.distanceMeters = offer.distanceMeters;
-        }
-
-        marketMap.set(id, existing);
-      });
-    });
-
-    const perMarketTotals = Array.from(marketMap.values()).sort((left, right) => {
-      if (left.coveredCount !== right.coveredCount) {
-        return right.coveredCount - left.coveredCount;
-      }
-
-      if (
-        typeof left.distanceMeters === 'number' &&
-        typeof right.distanceMeters === 'number' &&
-        left.distanceMeters !== right.distanceMeters
-      ) {
-        return left.distanceMeters - right.distanceMeters;
-      }
-
-      return left.total - right.total;
-    });
-
-    return {
-      cheapestTotal,
-      cheapestCoveredCount,
-      bestSingleMarket: perMarketTotals[0] ?? null,
-      perMarketTotals,
-    };
-  }, [comparisonCart]);
-
-  const cartDifferenceValue = useMemo(() => {
-    if (
-      comparisonCart.length &&
-      basketCompareResponse != null &&
-      typeof basketCompareResponse.bestSingleMarketTotal === 'number'
-    ) {
-      return Math.max(
-        0,
-        basketCompareResponse.bestSingleMarketTotal - basketCompareResponse.mixedCheapestTotal
-      );
-    }
-
-    if (!comparisonCart.length || !cartSummary.bestSingleMarket) {
-      return null;
-    }
-
-    return Math.max(0, cartSummary.bestSingleMarket.total - cartSummary.cheapestTotal);
-  }, [
-    basketCompareResponse,
-    cartSummary.bestSingleMarket,
-    cartSummary.cheapestTotal,
-    comparisonCart.length,
-  ]);
-
-  const basketDisplayTotals = useMemo(() => {
-    const totalRequestedQuantity = comparisonCart.reduce(
-      (sum, entry) => sum + Math.max(1, entry.quantity),
-      0
-    );
-
-    if (basketCompareResponse) {
-      return {
-        mixedCheapestTotal: basketCompareResponse.mixedCheapestTotal,
-        bestSingleMarketTotal:
-          basketCompareResponse.bestSingleMarketTotal ??
-          basketCompareResponse.marketTotals[0]?.basketTotal ??
-          null,
-        nearestMarketTotal: basketCompareResponse.nearestMarketTotal ?? null,
-        marketTotals: basketCompareResponse.marketTotals,
-        missingItems: basketCompareResponse.missingItems,
-      };
-    }
-
-    return {
-      mixedCheapestTotal: cartSummary.cheapestTotal,
-      bestSingleMarketTotal: cartSummary.bestSingleMarket?.total ?? null,
-      nearestMarketTotal: null,
-      marketTotals: cartSummary.perMarketTotals.map((market) => ({
-        marketKey: market.marketKey,
-        marketName: market.marketName,
-        marketLogoUrl: market.marketLogoUrl ?? null,
-        distanceMeters: market.distanceMeters ?? null,
-        branchId: null,
-        branchName: null,
-        latitude: null,
-        longitude: null,
-        basketTotal: market.total,
-        availableItemCount: market.coveredCount,
-        missingItemCount: Math.max(0, totalRequestedQuantity - market.coveredCount),
-      })),
-      missingItems: [],
-    };
-  }, [basketCompareResponse, cartSummary, comparisonCart]);
-
-  const totalRequestedCartQuantity = useMemo(
+  const cartItemCount = useMemo(
     () => comparisonCart.reduce((sum, entry) => sum + Math.max(1, entry.quantity), 0),
     [comparisonCart]
   );
@@ -1265,33 +3007,6 @@ export const PriceCompareScreen: React.FC = () => {
           )?.quantity ?? 0
         : 0,
     [comparisonCart, selectedProduct]
-  );
-
-  const cartSummaryRows = useMemo(
-    () => [
-      {
-        key: 'mix',
-        label: tt('price_compare_cart_best_mix', 'En ucuz karışık sepet'),
-        value: formatLocalizedPrice(preferredLocale, basketDisplayTotals.mixedCheapestTotal, 'TRY'),
-      },
-      {
-        key: 'single',
-        label: tt('price_compare_cart_single_market', 'Tek market toplamı'),
-        value:
-          typeof basketDisplayTotals.bestSingleMarketTotal === 'number'
-            ? formatLocalizedPrice(preferredLocale, basketDisplayTotals.bestSingleMarketTotal, 'TRY')
-            : '-',
-      },
-      {
-        key: 'nearest',
-        label: tt('price_compare_cart_nearest_market', 'En yakın market'),
-        value:
-          typeof basketDisplayTotals.nearestMarketTotal === 'number'
-            ? formatLocalizedPrice(preferredLocale, basketDisplayTotals.nearestMarketTotal, 'TRY')
-            : tt('price_compare_nearest_pending', 'Hazır değil'),
-      },
-    ],
-    [basketDisplayTotals, preferredLocale, tt]
   );
 
   const marketSheetDetails = useMemo(() => {
@@ -1375,57 +3090,8 @@ export const PriceCompareScreen: React.FC = () => {
       };
     }
 
-    const { market } = marketSheetState;
-    const details = [
-      {
-        key: 'total',
-        label: tt('price_compare_market_sheet_total', 'Toplam'),
-        value: formatLocalizedPrice(preferredLocale, market.basketTotal, 'TRY'),
-      },
-      {
-        key: 'coverage',
-        label: tt('price_compare_market_sheet_coverage', 'Kapsam'),
-        value: tt('price_compare_cart_coverage', '{{covered}}/{{total}} ürün')
-          .replace('{{covered}}', String(market.availableItemCount))
-          .replace('{{total}}', String(totalRequestedCartQuantity)),
-      },
-      {
-        key: 'status',
-        label: tt('price_compare_market_sheet_status', 'Sepet durumu'),
-        value: market.missingItemCount
-          ? tt('price_compare_missing_count', '{{count}} eksik').replace(
-              '{{count}}',
-              String(market.missingItemCount)
-            )
-          : tt('price_compare_market_complete', 'Tam'),
-      },
-      formatDistanceMeters(tt, market.distanceMeters)
-        ? {
-            key: 'distance',
-            label: tt('price_compare_market_sheet_distance', 'Mesafe'),
-            value: formatDistanceMeters(tt, market.distanceMeters) ?? '',
-          }
-        : null,
-      market.branchName
-        ? {
-            key: 'branch',
-            label: tt('price_compare_market_sheet_branch', 'Şube'),
-            value: market.branchName,
-          }
-        : null,
-    ].filter(Boolean) as { key: string; label: string; value: string }[];
-
-    return {
-      title: market.marketName,
-      subtitle: tt('price_compare_cart_market_totals', 'Market Toplamları'),
-      logoUrl: market.marketLogoUrl,
-      marketKey: market.marketKey,
-      canOpenSource: false,
-      canOpenMap:
-        typeof market.latitude === 'number' && typeof market.longitude === 'number',
-      details,
-    };
-  }, [marketSheetState, preferredLocale, totalRequestedCartQuantity, tt]);
+    return null;
+  }, [marketSheetState, preferredLocale, tt]);
 
   const handleOpenMarketSource = useCallback(async () => {
     if (marketSheetState?.kind !== 'offer' || !marketSheetState.offer.sourceUrl) {
@@ -1445,17 +3111,9 @@ export const PriceCompareScreen: React.FC = () => {
 
   const handleOpenMarketMap = useCallback(async () => {
     const latitude =
-      marketSheetState?.kind === 'offer'
-        ? marketSheetState.offer.latitude
-        : marketSheetState?.kind === 'basket'
-          ? marketSheetState.market.latitude
-          : null;
+      marketSheetState?.kind === 'offer' ? marketSheetState.offer.latitude : null;
     const longitude =
-      marketSheetState?.kind === 'offer'
-        ? marketSheetState.offer.longitude
-        : marketSheetState?.kind === 'basket'
-          ? marketSheetState.market.longitude
-          : null;
+      marketSheetState?.kind === 'offer' ? marketSheetState.offer.longitude : null;
 
     if (typeof latitude !== 'number' || typeof longitude !== 'number') {
       return;
@@ -1474,16 +3132,55 @@ export const PriceCompareScreen: React.FC = () => {
     }
   }, [marketSheetState]);
 
+  const handleOpenBasketScreen = useCallback(() => {
+    navigation.navigate('PriceCompareBasket');
+  }, [navigation]);
+
+  useEffect(() => {
+    if (!selectedCategoryId || !hasSearched || searchLoading || !results.length) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      scrollViewRef.current?.scrollTo({
+        y: Math.max(resultsSectionOffsetRef.current - 18, 0),
+        animated: true,
+      });
+    }, 180);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [hasSearched, results.length, searchLoading, selectedCategoryId]);
+
+  useEffect(() => {
+    if (!selectedProduct || offersLoading) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      scrollViewRef.current?.scrollTo({
+        y: Math.max(selectedSectionOffsetRef.current - 18, 0),
+        animated: true,
+      });
+    }, 180);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [offersLoading, selectedProduct]);
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <AmbientBackdrop colors={colors} variant="settings" />
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
 
       <ScrollView
+        ref={scrollViewRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{
           paddingTop: layout.headerTopPadding,
-          paddingBottom: layout.contentBottomPadding,
+          paddingBottom: layout.contentBottomPadding + 92,
           paddingHorizontal: layout.horizontalPadding,
         }}
       >
@@ -1491,46 +3188,67 @@ export const PriceCompareScreen: React.FC = () => {
           style={[
             styles.heroCard,
             {
-              backgroundColor: withAlpha(colors.card, isDark ? 'F1' : 'FC'),
-              borderColor: withAlpha(colors.border, 'BC'),
+              backgroundColor: isDark ? '#447B22' : '#63AE2E',
+              borderColor: 'rgba(255,255,255,0.10)',
               shadowColor: colors.shadow,
             },
           ]}
         >
           <View style={styles.headerRow}>
-            <TouchableOpacity
-              style={[
-                styles.backButtonCompact,
-                { backgroundColor: withAlpha(colors.primary, '10') },
-              ]}
-              onPress={() => navigation.goBack()}
-              activeOpacity={0.85}
-            >
-              <Ionicons name="chevron-back" size={18} color={colors.primary} />
-            </TouchableOpacity>
-
             <View style={styles.headerTextWrap}>
-              <Text style={[styles.headerTitle, { color: colors.text }]}>
+              <Text style={styles.heroEyebrow}>
+                {tt('price_compare_hero_eyebrow', 'Canlı Fiyat')}
+              </Text>
+              <Text style={styles.headerTitle}>
                 {tt('price_compare_screen_title', 'Market bazında fiyat kıyasla')}
               </Text>
-              <Text style={[styles.headerSubtitle, { color: colors.mutedText }]}>
+              <Text style={styles.headerSubtitle}>
                 {tt(
                   'price_compare_screen_subtitle',
                   'Barkod veya ürün adıyla arama yap, ardından market tekliflerini tek ekranda karşılaştır.'
                 )}
               </Text>
             </View>
+
+            <TouchableOpacity
+              activeOpacity={0.88}
+              onPress={handleOpenBasketScreen}
+              style={[
+                styles.cartIconButton,
+                {
+                  backgroundColor: 'rgba(255,255,255,0.12)',
+                  borderColor: 'rgba(255,255,255,0.18)',
+                },
+              ]}
+            >
+              <Ionicons name="basket-outline" size={22} color="#FFFFFF" />
+              {cartItemCount ? (
+                <View
+                  style={[
+                    styles.cartBadge,
+                    {
+                      backgroundColor: colors.primary,
+                      borderColor: '#63AE2E',
+                    },
+                  ]}
+                >
+                  <Text style={[styles.cartBadgeText, { color: colors.primaryContrast }]}>
+                    {cartItemCount > 99 ? '99+' : String(cartItemCount)}
+                  </Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
           </View>
 
           <View style={styles.locationPillRow}>
             <View
               style={[
                 styles.locationPill,
-                { backgroundColor: withAlpha(colors.teal, '12') },
+                { backgroundColor: 'rgba(255,255,255,0.12)' },
               ]}
             >
-              <Ionicons name="location-outline" size={14} color={colors.teal} />
-              <Text style={[styles.locationPillText, { color: colors.teal }]}>
+              <Ionicons name="location-outline" size={14} color="#FFFFFF" />
+              <Text style={styles.locationPillText}>
                 {locationLabel ||
                   tt('price_compare_location_missing', 'Konum eklenmedi')}
               </Text>
@@ -1538,14 +3256,15 @@ export const PriceCompareScreen: React.FC = () => {
             <View
               style={[
                 styles.locationPill,
-                { backgroundColor: withAlpha(colors.primary, '12') },
+                { backgroundColor: 'rgba(255,255,255,0.12)' },
               ]}
             >
-              <Ionicons name="server-outline" size={14} color={colors.primary} />
-              <Text style={[styles.locationPillText, { color: colors.primary }]}>
-                {marketRuntime.isEnabled
-                  ? tt('price_compare_live_runtime', 'Canlı fiyat akışı')
-                  : tt('price_compare_runtime_disabled', 'Fiyat servisi kapalı')}
+              <Ionicons name="basket-outline" size={14} color="#FFFFFF" />
+              <Text style={styles.locationPillText}>
+                {tt('price_compare_cart_count_summary', '{{count}} ürün').replace(
+                  '{{count}}',
+                  String(cartItemCount)
+                )}
               </Text>
             </View>
           </View>
@@ -1570,19 +3289,11 @@ export const PriceCompareScreen: React.FC = () => {
           <View style={styles.runtimeNoticeWrap}>
             <NoticeCard
               text={tt(
-                'price_compare_runtime_disabled_notice',
-                'Fiyat servisi şu anda bağlı değil. Yerel ürün eşleşmelerini göstermeye devam ediyoruz.'
+                'price_compare_service_unavailable_notice',
+                'Market fiyatları şu anda yüklenemiyor. Lütfen biraz sonra tekrar deneyin.'
               )}
               colors={colors}
             />
-            <Text
-              style={[
-                styles.runtimeDiagnosticsText,
-                { color: withAlpha(colors.mutedText, isDark ? 'D8' : 'CC') },
-              ]}
-            >
-              {runtimeDiagnosticSummary}
-            </Text>
           </View>
         ) : null}
 
@@ -1602,7 +3313,11 @@ export const PriceCompareScreen: React.FC = () => {
           <View style={styles.searchInputRow}>
             <TextInput
               value={query}
-              onChangeText={setQuery}
+              onChangeText={(value) => {
+                setQuery(value);
+                setSelectedCategoryId(null);
+                setCategoryTreeCollapsed(false);
+              }}
               autoCapitalize="none"
               autoCorrect={false}
               placeholder={tt(
@@ -1709,8 +3424,75 @@ export const PriceCompareScreen: React.FC = () => {
 
         {searchError ? <NoticeCard text={searchError} colors={colors} /> : null}
 
+        {categoryTreeLoading ? (
+          <View
+            style={[
+              styles.loadingCard,
+              {
+                backgroundColor: withAlpha(colors.cardElevated, 'F1'),
+                borderColor: withAlpha(colors.border, 'BC'),
+                marginBottom: 14,
+              },
+            ]}
+          >
+            <ActivityIndicator size="small" color={colors.primary} />
+          </View>
+        ) : null}
+
+        {!categoryTreeLoading && categoryTreeError && !categoryTreeUsesResultsFallback ? (
+          <NoticeCard text={categoryTreeError} colors={colors} />
+        ) : null}
+
+        {!categoryTreeLoading && categoryTreeUsesResultsFallback ? (
+          <NoticeCard
+            text={tt(
+              'price_compare_category_tree_fallback',
+              'Canli reyon agaci geciktigi icin arama sonuclarindan kategori filtresi olusturuldu.'
+            )}
+            colors={colors}
+          />
+        ) : null}
+
+        {!categoryTreeLoading && categoryTree.length ? (
+          <SearchCategoryTreeSection
+            nodes={categoryTree}
+            selectedCategoryId={selectedCategoryId}
+            selectedCategoryLabel={selectedCategoryLabel}
+            expandedKeys={expandedCategoryKeys}
+            loadingKeys={categoryLoadingKeys}
+            collapsed={categoryTreeCollapsed}
+            onToggleCollapsed={() => {
+              setCategoryTreeCollapsed((current) => !current);
+            }}
+            onToggle={toggleCategoryNode}
+            onSelect={(categoryId) => {
+              if (categoryId && isSyntheticCategoryId(categoryId)) {
+                return;
+              }
+
+              setSelectedCategoryId(categoryId);
+              setCategoryTreeCollapsed(Boolean(categoryId));
+              if (query.trim().length >= SEARCH_MIN_LENGTH || Boolean(categoryId)) {
+                void handleSearch(categoryId);
+              } else {
+                setHasSearched(false);
+                setResults([]);
+                setSelectedProduct(null);
+                setOffersResponse(null);
+                setOffersError(null);
+              }
+            }}
+            colors={colors}
+            tt={tt}
+          />
+        ) : null}
+
         {hasSearched ? (
-          <>
+          <View
+            onLayout={(event) => {
+              resultsSectionOffsetRef.current = event.nativeEvent.layout.y;
+            }}
+          >
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
               {tt('price_compare_results_title', 'Arama Sonuçları')}
             </Text>
@@ -1728,21 +3510,132 @@ export const PriceCompareScreen: React.FC = () => {
                 <ActivityIndicator size="small" color={colors.primary} />
               </View>
             ) : results.length ? (
-              <View style={styles.resultsWrap}>
-                {results.map((item) => (
-                  <SearchResultCard
-                    key={item.id}
-                    item={item}
-                    selected={selectedProduct?.id === item.id}
-                    onPress={() => {
-                      void loadOffers(item);
-                    }}
-                    colors={colors}
-                    locale={preferredLocale}
-                    tt={tt}
-                  />
-                ))}
-              </View>
+              <>
+                <View
+                  style={[
+                    styles.resultsGridWrap,
+                    {
+                      backgroundColor: withAlpha(colors.cardElevated, 'B8'),
+                      borderColor: withAlpha(colors.border, '8F'),
+                    },
+                  ]}
+                >
+                  <View style={styles.resultsGrid}>
+                    {pagedResults.map((item) => (
+                      <SearchResultCard
+                        key={getProductIdentity(item)}
+                        item={item}
+                        selected={
+                          selectedProduct ? getProductIdentity(selectedProduct) === getProductIdentity(item) : false
+                        }
+                        onOpenPricing={() => {
+                          void handleOpenPricingFromResult(item);
+                        }}
+                        onOpenScore={() => {
+                          void handleOpenScoreFromResult(item);
+                        }}
+                        onQuickAdd={() => {
+                          void handleQuickAddFromResult(item);
+                        }}
+                        quickAddDisabled={
+                          !buildOffersResponseFromSearchProduct(item) &&
+                          !item.barcode &&
+                          !item.productId
+                        }
+                        quickAddLoading={quickAddLoadingId === getProductIdentity(item)}
+                        cardWidth={resultCardWidth}
+                        colors={colors}
+                        locale={preferredLocale}
+                        tt={tt}
+                      />
+                    ))}
+                  </View>
+                </View>
+                {totalResultsPages > 1 ? (
+                  <View
+                    style={[
+                      styles.resultsPaginationRow,
+                      { borderTopColor: withAlpha(colors.border, '8F') },
+                    ]}
+                  >
+                    <TouchableOpacity
+                      activeOpacity={0.88}
+                      onPress={() => {
+                        void handleResultsPageChange(resultsPage - 1);
+                      }}
+                      disabled={resultsPage === 1}
+                      style={[
+                        styles.resultsPaginationButton,
+                        {
+                          borderColor: withAlpha(colors.border, '9A'),
+                          backgroundColor: withAlpha(colors.cardElevated, 'FA'),
+                          opacity: resultsPage === 1 ? 0.45 : 1,
+                        },
+                      ]}
+                    >
+                      <Ionicons name="chevron-back" size={14} color={colors.text} />
+                    </TouchableOpacity>
+
+                    {visibleResultsPageNumbers.map((pageNumber) => {
+                      const isActive = pageNumber === resultsPage;
+
+                      return (
+                        <TouchableOpacity
+                          key={`result-page-${pageNumber}`}
+                          activeOpacity={0.88}
+                          onPress={() => {
+                            void handleResultsPageChange(pageNumber);
+                          }}
+                          style={[
+                            styles.resultsPaginationButton,
+                            {
+                              borderColor: withAlpha(isActive ? colors.primary : colors.border, '9A'),
+                              backgroundColor: withAlpha(
+                                isActive ? colors.primary : colors.cardElevated,
+                                isActive ? '18' : 'FA'
+                              ),
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.resultsPaginationButtonText,
+                              { color: isActive ? colors.primary : colors.text },
+                            ]}
+                          >
+                            {pageNumber}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                    <TouchableOpacity
+                      activeOpacity={0.88}
+                      onPress={() => {
+                        void handleResultsPageChange(resultsPage + 1);
+                      }}
+                      disabled={resultsPage === totalResultsPages}
+                      style={[
+                        styles.resultsPaginationButton,
+                        {
+                          borderColor: withAlpha(colors.border, '9A'),
+                          backgroundColor: withAlpha(colors.cardElevated, 'FA'),
+                          opacity: resultsPage === totalResultsPages ? 0.45 : 1,
+                        },
+                      ]}
+                    >
+                      <Ionicons name="chevron-forward" size={14} color={colors.text} />
+                    </TouchableOpacity>
+                    {resultsPaginationLoading ? (
+                      <ActivityIndicator
+                        size="small"
+                        color={colors.primary}
+                        style={styles.resultsPaginationSpinner}
+                      />
+                    ) : null}
+                  </View>
+                ) : null}
+              </>
             ) : (
               <NoticeCard
                 text={tt(
@@ -1752,11 +3645,15 @@ export const PriceCompareScreen: React.FC = () => {
                 colors={colors}
               />
             )}
-          </>
+          </View>
         ) : null}
 
         {selectedProduct ? (
-          <>
+          <View
+            onLayout={(event) => {
+              selectedSectionOffsetRef.current = event.nativeEvent.layout.y;
+            }}
+          >
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
               {tt('price_compare_selected_section', 'Seçilen Ürün')}
             </Text>
@@ -1770,12 +3667,47 @@ export const PriceCompareScreen: React.FC = () => {
                 },
               ]}
             >
+              {selectedReferenceLoading ? (
+                <View
+                  style={[
+                    styles.selectedScorePreview,
+                    {
+                      backgroundColor: withAlpha(colors.primary, '10'),
+                      borderColor: withAlpha(colors.primary, '24'),
+                    },
+                  ]}
+                >
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={[styles.selectedScorePreviewText, { color: colors.primary }]}>
+                    {tt('price_compare_score_loading', 'Skor referansı aranıyor...')}
+                  </Text>
+                </View>
+              ) : selectedScorePreview != null ? (
+                <View
+                  style={[
+                    styles.selectedScorePreview,
+                    {
+                      backgroundColor: withAlpha(colors.primary, '10'),
+                      borderColor: withAlpha(colors.primary, '24'),
+                    },
+                  ]}
+                >
+                  <Ionicons name="speedometer-outline" size={15} color={colors.primary} />
+                  <Text style={[styles.selectedScorePreviewText, { color: colors.primary }]}>
+                    {tt('price_compare_score_preview', 'Sağlık skoru: {{score}}/100').replace(
+                      '{{score}}',
+                      String(selectedScorePreview)
+                    )}
+                  </Text>
+                </View>
+              ) : null}
+
               <ProductSummaryCard
                 imageUrl={selectedProduct.imageUrl}
                 fallbackIconName="pricetags-outline"
-                eyebrow={selectedProduct.brand}
-                title={selectedProduct.productName}
-                meta={[selectedProduct.category, selectedProduct.barcode].filter(Boolean).join(' • ')}
+                eyebrow={selectedDisplayBrand}
+                title={selectedDisplayProductName}
+                meta={[selectedDisplayCategory, selectedDetailBarcode].filter(Boolean).join(' • ')}
                 supportingText={
                   selectedProductCartQuantity
                     ? tt('price_compare_selected_quantity', 'Sepette {{count}} adet var').replace(
@@ -1791,6 +3723,11 @@ export const PriceCompareScreen: React.FC = () => {
                             selectedBestOffer.currency
                           )
                         )
+                      : offersResponse && !offersLoading
+                        ? tt(
+                            'price_compare_selected_no_live_offers',
+                            'Bu ürün için henüz canlı market teklifi bulunamadı.'
+                          )
                       : tt(
                           'price_compare_selected_pending',
                           'Canlı market teklifleri bu bölümde görünecek.'
@@ -1807,16 +3744,30 @@ export const PriceCompareScreen: React.FC = () => {
                 alignItems="flex-start"
                 imageSize={68}
                 imageRadius={20}
+                onPress={
+                  selectedDetailBarcode
+                    ? () => {
+                        navigation.navigate('Detail', {
+                          barcode: selectedDetailBarcode,
+                          entrySource: 'unknown',
+                          lookupMode: 'auto',
+                        });
+                      }
+                    : undefined
+                }
                 trailing={
                   <TouchableOpacity
                     activeOpacity={0.88}
                     onPress={handleAddSelectedToCart}
-                    disabled={!offersResponse || offersLoading}
+                    disabled={!selectedEffectiveOffersResponse || offersLoading || offerItems.length === 0}
                     style={[
                       styles.addToCartButton,
                       {
                         backgroundColor: colors.primary,
-                        opacity: !offersResponse || offersLoading ? 0.65 : 1,
+                        opacity:
+                          !selectedEffectiveOffersResponse || offersLoading || offerItems.length === 0
+                            ? 0.65
+                            : 1,
                       },
                     ]}
                   >
@@ -1834,22 +3785,38 @@ export const PriceCompareScreen: React.FC = () => {
             {offersError ? <NoticeCard text={offersError} colors={colors} /> : null}
 
             {!offersError ? (
-              <MarketPriceTableCard
-                title={tt('market_price_table_title', 'Market Fiyat Tablosu')}
-                subtitle={
-                  pricingSubtitle ??
-                  tt(
-                    'market_price_table_subtitle',
-                    'Ulusal marketleri ve konumundaki marketleri yana kaydırarak karşılaştır.'
-                  )
-                }
-                offers={offersResponse?.offers ?? []}
-                productType={pricingTableProductType}
-                locale={preferredLocale}
-                colors={colors}
-                tt={tt}
-                loading={offersLoading}
-              />
+              <>
+                <MarketPriceTableCard
+                  title={tt('market_price_table_title', 'Market Fiyat Tablosu')}
+                  subtitle={
+                    pricingSubtitle ??
+                    tt(
+                      'market_price_table_subtitle',
+                      'Ulusal marketleri ve konumundaki marketleri yana kaydırarak karşılaştır.'
+                    )
+                  }
+                  offers={selectedEffectiveOffersResponse?.offers ?? []}
+                  productType={pricingTableProductType}
+                  locale={preferredLocale}
+                  colors={colors}
+                  tt={tt}
+                  loading={offersLoading}
+                />
+                <PriceHistoryTrendCard
+                  buckets={weeklyPriceHistory}
+                  loading={priceHistoryLoading}
+                  error={priceHistoryError}
+                  locale={preferredLocale}
+                  colors={colors}
+                  tt={tt}
+                />
+                <Text style={[styles.marketCoverageHint, { color: colors.mutedText }]}>
+                  {tt(
+                    'price_compare_market_coverage_hint',
+                    'Her üründe tüm marketlerde fiyat bulunmayabilir; barkod veya isim-gramaj eşleşmesi geldikçe kapsama genişler.'
+                  )}
+                </Text>
+              </>
             ) : null}
 
             {sortedOffers.length ? (
@@ -1946,286 +3913,20 @@ export const PriceCompareScreen: React.FC = () => {
                 </View>
               </>
             ) : null}
-          </>
+          </View>
         ) : null}
 
-        {comparisonCart.length ? (
-          <>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {tt('price_compare_cart_title', 'Karşılaştırma Sepeti')}
-            </Text>
-            <View
-              style={[
-                styles.cartSummaryCard,
-                {
-                  backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-                  borderColor: withAlpha(colors.border, 'BC'),
-                  shadowColor: colors.shadow,
-                },
-              ]}
-            >
-              <View style={styles.cartSummaryTopRow}>
-                <View style={styles.cartSummaryHeadingWrap}>
-                  <Text style={[styles.cartSummaryTitle, { color: colors.text }]}>
-                    {tt('price_compare_cart_title', 'Karşılaştırma Sepeti')}
-                  </Text>
-                  <Text style={[styles.cartSummarySubtitle, { color: colors.mutedText }]}>
-                    {tt(
-                      'price_compare_cart_subtitle_compact',
-                      'Karışık sepet, tek market ve yakın market toplamlarını tek yerde gör.'
-                    )}
-                  </Text>
-                </View>
-              </View>
-
-              <View
-                style={[
-                  styles.cartMetricsStack,
-                  { borderTopColor: withAlpha(colors.border, '80') },
-                ]}
-              >
-                {cartSummaryRows.map((row) => (
-                  <View
-                    key={row.key}
-                    style={[
-                      styles.cartMetricRow,
-                      {
-                        borderBottomColor: withAlpha(colors.border, '80'),
-                      },
-                    ]}
-                  >
-                    <Text style={[styles.cartMetricLabel, { color: colors.mutedText }]}>
-                      {row.label}
-                    </Text>
-                    <Text style={[styles.cartMetricValue, { color: colors.text }]}>
-                      {row.value}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-
-              {typeof cartDifferenceValue === 'number' ? (
-                <Text style={[styles.cartDifferenceText, { color: colors.teal }]}>
-                  {tt(
-                    'price_compare_cart_difference',
-                    'Parça parça en ucuzları alırsan {{value}} avantaj var.'
-                  ).replace(
-                    '{{value}}',
-                    formatLocalizedPrice(preferredLocale, cartDifferenceValue, 'TRY')
-                  )}
-                </Text>
-              ) : null}
-
-              {basketCompareLoading ? (
-                <Text style={[styles.cartHelperText, { color: colors.mutedText }]}>
-                  {tt(
-                    'price_compare_basket_loading',
-                    'Canlı sepet kıyası hazırlanıyor...'
-                  )}
-                </Text>
-              ) : null}
-
-              {basketCompareError ? (
-                <Text style={[styles.cartHelperText, { color: colors.warning }]}>
-                  {basketCompareError}
-                </Text>
-              ) : null}
-
-              <Text style={[styles.cartHelperText, { color: colors.mutedText }]}>
-                {tt(
-                  'price_compare_cart_helper',
-                  'Yakın market metriği API tarafında mesafe verisi geldiğinde otomatik aktive olacak.'
-                )}
-              </Text>
-            </View>
-
-            <View style={styles.cartItemsWrap}>
-              {comparisonCart.map((entry) => (
-                <View
-                  key={`cart-${entry.product.id}`}
-                  style={[
-                    styles.cartItemCard,
-                    {
-                      backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-                      borderColor: withAlpha(colors.border, 'BC'),
-                    },
-                  ]}
-                >
-                  <View style={styles.cartItemTextWrap}>
-                    <Text style={[styles.cartItemTitle, { color: colors.text }]} numberOfLines={2}>
-                      {entry.product.productName}
-                    </Text>
-                    <Text style={[styles.cartItemMeta, { color: colors.mutedText }]} numberOfLines={1}>
-                      {[entry.product.brand, entry.product.barcode].filter(Boolean).join(' • ')}
-                    </Text>
-                  </View>
-                  <View style={styles.cartItemActions}>
-                    <View
-                      style={[
-                        styles.quantityStepper,
-                        {
-                          backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'B8' : 'F5'),
-                          borderColor: withAlpha(colors.border, 'B8'),
-                        },
-                      ]}
-                    >
-                      <TouchableOpacity
-                        activeOpacity={0.88}
-                        onPress={() => {
-                          handleDecreaseCartQuantity(entry.product.id);
-                        }}
-                        style={styles.quantityButton}
-                      >
-                        <Ionicons name="remove-outline" size={18} color={colors.text} />
-                      </TouchableOpacity>
-                        <Text style={[styles.quantityValue, { color: colors.text }]}>
-                          {entry.quantity}
-                        </Text>
-                      <TouchableOpacity
-                        activeOpacity={0.88}
-                        onPress={() => {
-                          handleIncreaseCartQuantity(entry.product.id);
-                        }}
-                        style={styles.quantityButton}
-                      >
-                        <Ionicons name="add-outline" size={18} color={colors.text} />
-                      </TouchableOpacity>
-                    </View>
-                    <TouchableOpacity
-                      activeOpacity={0.88}
-                      onPress={() => {
-                        handleRemoveFromCart(entry.product.id);
-                      }}
-                      style={[
-                        styles.cartRemoveButton,
-                        { backgroundColor: withAlpha(colors.danger, '12') },
-                      ]}
-                    >
-                      <Ionicons name="close-outline" size={18} color={colors.danger} />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))}
-            </View>
-
-            {basketDisplayTotals.missingItems.length ? (
-              <>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  {tt('price_compare_missing_items_title', 'Eksik Ürünler')}
-                </Text>
-                <View style={styles.cartItemsWrap}>
-                  {basketDisplayTotals.missingItems.map((item) => {
-                    const matchedProduct = comparisonCart.find(
-                      (entry) => entry.product.barcode === item.barcode
-                    )?.product;
-
-                    return (
-                      <View
-                        key={`missing-${item.barcode}`}
-                        style={[
-                          styles.cartItemCard,
-                          {
-                            backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-                            borderColor: withAlpha(colors.warning, '40'),
-                          },
-                        ]}
-                      >
-                        <View style={styles.cartItemTextWrap}>
-                          <Text style={[styles.cartItemTitle, { color: colors.text }]} numberOfLines={2}>
-                            {matchedProduct?.productName || item.barcode}
-                          </Text>
-                          <Text style={[styles.cartItemMeta, { color: colors.mutedText }]} numberOfLines={1}>
-                            {tt('price_compare_missing_item_quantity', '{{count}} adet eksik')
-                              .replace('{{count}}', String(item.quantity))}
-                          </Text>
-                        </View>
-                        <Ionicons name="alert-circle-outline" size={20} color={colors.warning} />
-                      </View>
-                    );
-                  })}
-                </View>
-              </>
-            ) : null}
-
-            {basketDisplayTotals.marketTotals.length ? (
-              <>
-                <Text style={[styles.sectionTitle, { color: colors.text }]}>
-                  {tt('price_compare_cart_market_totals', 'Market Toplamları')}
-                </Text>
-                <View
-                  style={[
-                    styles.offerListCard,
-                    {
-                      backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-                      borderColor: withAlpha(colors.border, 'BC'),
-                      shadowColor: colors.shadow,
-                    },
-                  ]}
-                >
-                  {basketDisplayTotals.marketTotals.map((market) => (
-                    <TouchableOpacity
-                      key={`cart-market-${market.marketKey}-${market.branchId || 'default'}`}
-                      activeOpacity={0.88}
-                      onPress={() => {
-                        openBasketMarketSheet(market);
-                      }}
-                      style={[
-                        styles.offerRow,
-                        { borderBottomColor: withAlpha(colors.border, '80') },
-                      ]}
-                    >
-                      <MarketBadge
-                        marketKey={market.marketKey}
-                        marketName={market.marketName}
-                        logoUrl={market.marketLogoUrl}
-                        size={38}
-                      />
-                      <View style={styles.offerTextWrap}>
-                        <Text style={[styles.offerTitle, { color: colors.text }]}>
-                          {market.marketName}
-                        </Text>
-                        <Text style={[styles.offerMeta, { color: colors.mutedText }]}>
-                          {tt('price_compare_cart_coverage', '{{covered}}/{{total}} ürün')
-                            .replace('{{covered}}', String(market.availableItemCount))
-                            .replace('{{total}}', String(totalRequestedCartQuantity))}
-                          {market.branchName ? ` • ${market.branchName}` : ''}
-                        </Text>
-                      </View>
-
-                      <View style={styles.offerPriceWrap}>
-                        <Text style={[styles.offerPrice, { color: colors.text }]}>
-                          {formatLocalizedPrice(preferredLocale, market.basketTotal, 'TRY')}
-                        </Text>
-                        <View style={styles.offerSignalsRow}>
-                          {market.missingItemCount ? (
-                            <Text style={[styles.offerStock, { color: colors.warning }]}>
-                              {tt('price_compare_missing_count', '{{count}} eksik')
-                                .replace('{{count}}', String(market.missingItemCount))}
-                            </Text>
-                          ) : (
-                            <Text style={[styles.offerStock, { color: colors.success }]}>
-                              {tt('price_compare_market_complete', 'Tam')}
-                            </Text>
-                          )}
-                          {formatDistanceMeters(tt, market.distanceMeters) ? (
-                            <Text style={[styles.offerDistance, { color: colors.teal }]}>
-                              {formatDistanceMeters(tt, market.distanceMeters)}
-                            </Text>
-                          ) : null}
-                        </View>
-                        <Ionicons
-                          name="chevron-forward-outline"
-                          size={16}
-                          color={colors.mutedText}
-                        />
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </>
-            ) : null}
-          </>
-        ) : null}
+        <Text style={[styles.coverageHintText, { color: colors.mutedText }]}>
+          {comparisonCart.length
+            ? tt(
+                'price_compare_cart_shortcut_subtitle',
+                'Sepetinde {{count}} ürün var. Tüm işlemler sağ üstteki sepet ekranında.'
+              ).replace('{{count}}', String(cartItemCount))
+            : tt(
+                'price_compare_market_coverage_hint',
+                'Her üründe tüm marketlerde fiyat bulunmayabilir; barkod veya isim-gramaj eşleşmesi geldikçe kapsama genişler.'
+              )}
+        </Text>
       </ScrollView>
 
       <ScreenOnboardingOverlay
@@ -2304,23 +4005,53 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 12,
   },
-  backButtonCompact: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   headerTextWrap: {
     flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
     gap: 4,
   },
+  heroEyebrow: {
+    color: 'rgba(255,255,255,0.76)',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  cartIconButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    flexShrink: 0,
+  },
+  cartBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+    borderWidth: 2,
+  },
+  cartBadgeText: {
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: '900',
+  },
   headerTitle: {
+    color: '#FFFFFF',
     fontSize: 21,
     lineHeight: 27,
     fontWeight: '800',
   },
   headerSubtitle: {
+    color: 'rgba(255,255,255,0.82)',
     fontSize: 13,
     lineHeight: 19,
   },
@@ -2341,15 +4072,10 @@ const styles = StyleSheet.create({
   locationPillText: {
     fontSize: 12,
     fontWeight: '700',
+    color: '#FFFFFF',
   },
   runtimeNoticeWrap: {
-    gap: 8,
     marginBottom: 14,
-  },
-  runtimeDiagnosticsText: {
-    fontSize: 11,
-    lineHeight: 16,
-    paddingHorizontal: 6,
   },
   searchCard: {
     borderWidth: 1,
@@ -2391,12 +4117,225 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginTop: 10,
   },
-  sectionTitle: {
-    fontSize: 17,
-    lineHeight: 22,
-    fontWeight: '800',
+  listNameInput: {
+    minHeight: 50,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 15,
+    fontSize: 14,
     marginTop: 8,
-    marginBottom: 12,
+  },
+  listActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+  },
+  listActionButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+  },
+  listActionButtonText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  listActionGhostButton: {
+    minHeight: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+  },
+  listActionGhostText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  savedListsWrap: {
+    marginTop: 14,
+    gap: 10,
+  },
+  savedListsTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
+  savedListsHelper: {
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  savedListsStack: {
+    gap: 8,
+  },
+  savedListCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  savedListMain: {
+    flex: 1,
+    gap: 2,
+  },
+  savedListTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  savedListTitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+  savedListMeta: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  savedListActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  savedListActionButton: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sectionTitle: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '800',
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  marketCoverageHint: {
+    fontSize: 11,
+    lineHeight: 17,
+    marginTop: 10,
+    marginHorizontal: 4,
+  },
+  historyCard: {
+    borderWidth: 1,
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 14,
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
+  },
+  historyCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 14,
+  },
+  historyCardHeaderText: {
+    flex: 1,
+    gap: 4,
+  },
+  historyCardTitle: {
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: '800',
+  },
+  historyCardSubtitle: {
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  historyPeriodBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  historyPeriodBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  historyLoadingWrap: {
+    minHeight: 112,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  historySummaryRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 16,
+  },
+  historySummaryPill: {
+    flex: 1,
+    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  historySummaryLabel: {
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '800',
+  },
+  historySummaryValue: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '800',
+  },
+  historySummaryMeta: {
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  historyChartWrap: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 8,
+    minHeight: 170,
+  },
+  historyBarColumn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  historyBarValue: {
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  historyBarTrack: {
+    width: '100%',
+    height: 126,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+  },
+  historyBar: {
+    width: '74%',
+    borderRadius: 12,
+    minHeight: 24,
+  },
+  historyBarLabel: {
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  historyFootnote: {
+    marginTop: 12,
+    fontSize: 11,
+    lineHeight: 17,
   },
   loadingCard: {
     minHeight: 88,
@@ -2406,72 +4345,352 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   resultsWrap: {
-    gap: 12,
+    gap: 0,
   },
-  resultCard: {
+  resultsGridWrap: {
     borderWidth: 1,
-    borderRadius: 22,
-    padding: 16,
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 5,
-  },
-  resultCardRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  resultVisualStack: {
-    width: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  resultImage: {
-    width: 54,
-    height: 54,
     borderRadius: 16,
-    backgroundColor: '#E5E7EB',
+    overflow: 'hidden',
+    paddingHorizontal: 6,
+    paddingVertical: 8,
   },
-  resultImageFallback: {
-    width: 54,
-    height: 54,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  resultLogoBadge: {
-    position: 'absolute',
-    right: -2,
-    bottom: -2,
-  },
-  resultTextWrap: {
-    flex: 1,
-    gap: 4,
-  },
-  resultTitle: {
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: '700',
-  },
-  resultMeta: {
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  resultFooterRow: {
+  resultsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
+    gap: RESULT_GRID_GAP,
+    justifyContent: 'flex-start',
   },
-  resultPill: {
-    borderRadius: 999,
+  resultsPaginationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingTop: 12,
+    paddingBottom: 4,
+    marginTop: 8,
+    borderTopWidth: 1,
+  },
+  resultsPaginationButton: {
+    minWidth: 32,
+    height: 32,
     paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resultsPaginationButtonText: {
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: '800',
+  },
+  resultsPaginationSpinner: {
+    marginLeft: 4,
+  },
+  resultsTableWrap: {
+    borderWidth: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  categoryTreeCard: {
+    borderWidth: 1,
+    borderRadius: 16,
+    marginBottom: 12,
+    shadowOpacity: 0.04,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+    overflow: 'hidden',
+  },
+  categoryTreeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  categoryTreeHeaderText: {
+    flex: 1,
+  },
+  categoryTreeHeaderTitle: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '800',
+  },
+  categoryTreeHeaderSubtitle: {
+    marginTop: 2,
+    fontSize: 11,
+    lineHeight: 15,
+  },
+  categoryTreeList: {
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+  },
+  categoryTreeNodeWrap: {
+    gap: 2,
+  },
+  categoryTreeToggleButton: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  categoryTreeRow: {
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingLeft: 10,
+    paddingRight: 6,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  categoryTreeRowAll: {
+    marginBottom: 4,
+  },
+  categoryTreeMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  categoryTreeTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  categoryTreeTitle: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '700',
+  },
+  categoryTreePath: {
+    fontSize: 10,
+    lineHeight: 13,
+  },
+  categoryTreeChildren: {
+    gap: 2,
+    marginLeft: 14,
+    paddingLeft: 8,
+    borderLeftWidth: 1,
+  },
+  resultsTableHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    paddingBottom: 6,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  resultsTableHeaderText: {
+    fontSize: 9,
+    lineHeight: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.35,
+  },
+  resultsTableHeaderRightText: {
+    textAlign: 'right',
+  },
+  resultTableRow: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 8,
+    paddingVertical: 7,
+  },
+  resultCompactRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  resultCompactThumbCol: {
+    width: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resultCompactImage: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: '#E5E7EB',
+  },
+  resultCompactFallback: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resultCompactProductCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  resultCompactTitle: {
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  resultCompactMeta: {
+    fontSize: 9,
+    lineHeight: 12,
+  },
+  resultCompactMarketCol: {
+    width: 120,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  resultCompactMarket: {
+    fontSize: 9.5,
+    lineHeight: 12,
+    fontWeight: '700',
+  },
+  resultCompactMarketMeta: {
+    fontSize: 8.5,
+    lineHeight: 11,
+  },
+  resultCompactPriceCol: {
+    width: 72,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  resultCompactPrice: {
+    fontSize: 11.5,
+    lineHeight: 14,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  resultCompactActionCol: {
+    width: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 4,
+  },
+  resultCompactIconButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resultGridCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingHorizontal: 5,
+    paddingTop: 5,
+    paddingBottom: 8,
+    minHeight: 182,
+    alignItems: 'center',
+  },
+  resultGridImageWrap: {
+    width: '100%',
+    height: 88,
+    borderRadius: 10,
+    borderWidth: 1,
+    overflow: 'hidden',
+    position: 'relative',
+    marginBottom: 6,
+  },
+  resultGridWishButton: {
+    position: 'absolute',
+    top: 5,
+    right: 5,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  resultGridAddButton: {
+    position: 'absolute',
+    right: 5,
+    bottom: 5,
+    width: 24,
+    height: 24,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  resultGridImageInner: {
+    flex: 1,
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
     paddingVertical: 6,
   },
-  resultPillText: {
-    fontSize: 12,
+  resultGridImage: {
+    width: '86%',
+    height: '86%',
+    alignSelf: 'center',
+  },
+  resultGridFallback: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resultGridMarketBadge: {
+    minHeight: 18,
+    borderRadius: 7,
+    borderWidth: 1,
+    paddingHorizontal: 5,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 5,
+    maxWidth: '100%',
+  },
+  resultGridMarketBadgeText: {
+    fontSize: 8,
+    lineHeight: 10,
+    fontWeight: '800',
+  },
+  resultGridTitle: {
+    width: '100%',
+    fontSize: 10,
+    lineHeight: 13,
     fontWeight: '700',
+    minHeight: 39,
+    textAlign: 'center',
+  },
+  resultGridMeta: {
+    width: '100%',
+    marginTop: 3,
+    fontSize: 8,
+    lineHeight: 11,
+    minHeight: 22,
+    textAlign: 'center',
+  },
+  resultGridMetaSpacer: {
+    height: 22,
+  },
+  resultGridSubMeta: {
+    width: '100%',
+    marginTop: 2,
+    fontSize: 7.5,
+    lineHeight: 10,
+    minHeight: 18,
+    textAlign: 'center',
+  },
+  resultGridSubMetaSpacer: {
+    height: 18,
+  },
+  resultGridPrice: {
+    width: '100%',
+    marginTop: 6,
+    fontSize: 10.5,
+    lineHeight: 13,
+    fontWeight: '900',
+    textAlign: 'center',
   },
   autocompleteWrap: {
     marginTop: 12,
@@ -2520,6 +4739,22 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 5,
   },
+  selectedScorePreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 12,
+    alignSelf: 'flex-start',
+  },
+  selectedScorePreviewText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '800',
+  },
   selectedInfoRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -2555,6 +4790,11 @@ const styles = StyleSheet.create({
   addToCartButtonText: {
     fontSize: 12,
     fontWeight: '800',
+  },
+  coverageHintText: {
+    fontSize: 11,
+    lineHeight: 17,
+    marginBottom: 12,
   },
   cartSummaryCard: {
     borderWidth: 1,
@@ -2611,6 +4851,24 @@ const styles = StyleSheet.create({
   },
   cartHelperText: {
     marginTop: 8,
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  cartEmptyWrap: {
+    marginTop: 14,
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  cartEmptyTitle: {
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: '800',
+  },
+  cartEmptyText: {
     fontSize: 12,
     lineHeight: 18,
   },

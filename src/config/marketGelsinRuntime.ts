@@ -1,7 +1,6 @@
 import { NativeModules, Platform } from 'react-native';
 
 import {
-  APP_RUNTIME,
   getEnvBoolean,
   getEnvNumber,
   getEnvString,
@@ -10,14 +9,13 @@ import {
 
 export type MarketGelsinRuntimeSource =
   | 'env_override'
-  | 'development_fallback'
-  | 'emulator_fallback'
   | 'local_cache'
   | 'remote_live'
   | 'fallback';
 
 export type MarketGelsinDisableReason =
   | 'missing_base_url'
+  | 'missing_anon_key'
   | 'disabled_by_env'
   | 'disabled_by_remote'
   | null;
@@ -27,10 +25,17 @@ export type MarketGelsinRuntimeSnapshot = {
   version: number;
   fetchedAt: number | null;
   baseUrl: string;
+  anonKey: string | null;
   timeoutMs: number;
   isEnabled: boolean;
   disableReason: MarketGelsinDisableReason;
 };
+
+const SUPABASE_RUNTIME_API_KEY_ENV_KEYS = [
+  'EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+  'EXPO_PUBLIC_SUPABASE_PUBLIC_KEY',
+  'EXPO_PUBLIC_SUPABASE_ANON_KEY',
+] as const;
 
 const normalizeBaseUrl = (value: string): string =>
   value.trim().replace(/\/+$/g, '');
@@ -96,69 +101,53 @@ const isProbablyAndroidEmulator = (): boolean => {
   );
 };
 
-const resolveDevelopmentHost = (): string | null => {
-  if (!APP_RUNTIME.isDevelopment) {
-    return null;
-  }
-
-  const scriptUrl = String(NativeModules?.SourceCode?.scriptURL || '').trim();
-
-  if (scriptUrl) {
-    try {
-      const parsed = new URL(scriptUrl);
-      const hostname = parsed.hostname.trim();
-
-      if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
-        return hostname;
-      }
-    } catch {
-      // Development fallback below handles malformed URLs.
+export const getMarketGelsinSupabaseApiKey = (): string | null => {
+  for (const key of SUPABASE_RUNTIME_API_KEY_ENV_KEYS) {
+    const value = getEnvString(key, '').trim();
+    if (value) {
+      return value;
     }
   }
 
-  return Platform.OS === 'android' ? '10.0.2.2' : '127.0.0.1';
+  return null;
 };
 
-const developmentFallbackBaseUrl = (() => {
-  const host = resolveDevelopmentHost();
-  return host ? `http://${host}:8040` : '';
-})();
-
-const emulatorFallbackBaseUrl =
-  !APP_RUNTIME.isDevelopment && isProbablyAndroidEmulator()
-    ? 'http://10.0.2.2:8040'
-    : '';
+export const hasMarketGelsinSupabaseApiKeyOverride = (): boolean =>
+  SUPABASE_RUNTIME_API_KEY_ENV_KEYS.some((key) => hasEnvOverride(key));
 
 function resolveDefaultSnapshot(): MarketGelsinRuntimeSnapshot {
+  const envRpcBaseUrl = rewriteLoopbackHostForEmulator(
+    getEnvString('EXPO_PUBLIC_MARKET_GELSIN_RPC_BASE_URL', '')
+  );
   const envBaseUrl = rewriteLoopbackHostForEmulator(
     getEnvString('EXPO_PUBLIC_MARKET_GELSIN_API_URL', '')
   );
-  const baseUrl =
-    envBaseUrl ||
-    rewriteLoopbackHostForEmulator(developmentFallbackBaseUrl) ||
-    rewriteLoopbackHostForEmulator(emulatorFallbackBaseUrl);
+  const envAnonKey = getMarketGelsinSupabaseApiKey();
+  const baseUrl = envRpcBaseUrl || envBaseUrl;
   const enabledByEnv = getEnvBoolean(
     'EXPO_PUBLIC_MARKET_GELSIN_ENABLED',
-    Boolean(envBaseUrl || developmentFallbackBaseUrl || emulatorFallbackBaseUrl)
+    Boolean(envRpcBaseUrl || envBaseUrl)
   );
   const timeoutMs = Math.max(
     3000,
     getEnvNumber('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS', 8000)
   );
   const hasOverride =
+    hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_RPC_BASE_URL') ||
     hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_API_URL') ||
+    hasMarketGelsinSupabaseApiKeyOverride() ||
     hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_ENABLED') ||
     hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS');
   const source: MarketGelsinRuntimeSource = hasOverride
     ? 'env_override'
-    : developmentFallbackBaseUrl
-      ? 'development_fallback'
-      : emulatorFallbackBaseUrl
-        ? 'emulator_fallback'
-      : 'fallback';
-  const isEnabled = Boolean(baseUrl) && enabledByEnv;
+    : 'fallback';
+  const requiresAnonKey = Boolean(envRpcBaseUrl || (baseUrl && /\/rest\/v1\/rpc\/?$/i.test(baseUrl)));
+  const hasAnonKey = !requiresAnonKey || Boolean(envAnonKey);
+  const isEnabled = Boolean(baseUrl) && enabledByEnv && hasAnonKey;
   const disableReason: MarketGelsinDisableReason = !baseUrl
     ? 'missing_base_url'
+    : !hasAnonKey
+      ? 'missing_anon_key'
     : !enabledByEnv
       ? 'disabled_by_env'
       : null;
@@ -168,6 +157,7 @@ function resolveDefaultSnapshot(): MarketGelsinRuntimeSnapshot {
     version: 1,
     fetchedAt: null,
     baseUrl,
+    anonKey: envAnonKey,
     timeoutMs,
     isEnabled,
     disableReason,
@@ -178,12 +168,20 @@ const defaultSnapshot = resolveDefaultSnapshot();
 let currentSnapshot: MarketGelsinRuntimeSnapshot = defaultSnapshot;
 
 export const hasMarketGelsinEnvOverride = (): boolean =>
+  hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_RPC_BASE_URL') ||
   hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_API_URL') ||
+  hasMarketGelsinSupabaseApiKeyOverride() ||
   hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_ENABLED') ||
   hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS');
 
 export const getMarketGelsinEnvOverrideState = () => ({
+  rpcBaseUrl: hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_RPC_BASE_URL'),
   apiUrl: hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_API_URL'),
+  apiKey: hasMarketGelsinSupabaseApiKeyOverride(),
+  anonKey: hasEnvOverride('EXPO_PUBLIC_SUPABASE_ANON_KEY'),
+  publishableKey:
+    hasEnvOverride('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY') ||
+    hasEnvOverride('EXPO_PUBLIC_SUPABASE_PUBLIC_KEY'),
   enabled: hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_ENABLED'),
   timeoutMs: hasEnvOverride('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS'),
 });
@@ -200,6 +198,10 @@ export const setMarketGelsinRuntimeSnapshot = (
   currentSnapshot = {
     ...nextSnapshot,
     baseUrl: rewriteLoopbackHostForEmulator(nextSnapshot.baseUrl),
+    anonKey:
+      typeof nextSnapshot.anonKey === 'string' && nextSnapshot.anonKey.trim()
+        ? nextSnapshot.anonKey.trim()
+        : null,
   };
   return currentSnapshot;
 };
@@ -226,6 +228,9 @@ export const MARKET_GELSIN_RUNTIME = Object.freeze({
   },
   get timeoutMs(): number {
     return currentSnapshot.timeoutMs;
+  },
+  get anonKey(): string | null {
+    return currentSnapshot.anonKey;
   },
   get isEnabled(): boolean {
     return currentSnapshot.isEnabled;

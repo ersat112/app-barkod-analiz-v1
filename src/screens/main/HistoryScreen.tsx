@@ -252,6 +252,15 @@ export const HistoryScreen: React.FC = () => {
                 )}
                 colors={colors}
                 topPadding={layout.headerTopPadding}
+                totalCount={items.length}
+                hasActiveFilters={hasActiveFilters}
+                searchValue={searchQuery}
+                eyebrowLabel={tt('history_archive_eyebrow', 'Tarama Arşivi')}
+                countLabel={tt('history_count_label', 'KAYIT')}
+                archiveLabel={tt('history_archive_label', 'ARŞİV')}
+                statusLabel={tt('history_status_label', 'DURUM')}
+                readyLabel={tt('ready_short', 'Hazır')}
+                filteredLabel={tt('filtered_short', 'Filtreli')}
               />
               <HistoryFilterBar
                 searchValue={searchQuery}

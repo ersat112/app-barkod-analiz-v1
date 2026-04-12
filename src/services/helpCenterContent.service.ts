@@ -2,7 +2,9 @@ export type HelpArticleKey =
   | 'appBasics'
   | 'nutriScore'
   | 'sensitivities'
-  | 'database';
+  | 'database'
+  | 'googleSignIn'
+  | 'adsAndPremium';
 
 export type HelpArticleSection = {
   key: string;
@@ -124,7 +126,77 @@ export const buildHelpArticle = (
             title: tt('help_article_database_pricing', 'Fiyat kaynakları'),
             body: tt(
               'help_article_database_pricing_body',
-              'Market fiyatları market_gelsin API katmanından alınır. Fiyat servisi bağlı değilse uygulama bunu gizlemez; fiyat ekranında ve ayarlardaki tanılama alanında açık durum mesajı gösterir.'
+              'Market fiyatları market_gelsin API katmanından alınır. Fiyatlar geçici olarak yüklenemezse uygulama bunu kısa bir bilgi mesajıyla açıkça belirtir.'
+            ),
+          },
+        ],
+      };
+    case 'googleSignIn':
+      return {
+        key: 'googleSignIn',
+        title: tt('help_article_google_title', 'Google ile Giriş'),
+        subtitle: tt(
+          'help_article_google_subtitle',
+          'Google oturumu, Firebase kimlik doğrulamasıyla güvenli şekilde tamamlanır.'
+        ),
+        sections: [
+          {
+            key: 'how',
+            title: tt('help_article_google_how', 'Nasıl çalışır?'),
+            body: tt(
+              'help_article_google_how_body',
+              'Google ile giriş akışı, cihazdaki Google kimlik doğrulamasını Firebase hesabına bağlar. Başarılı olduğunda kullanıcı profili ve izinli hesap verileri uygulamaya senkronlanır.'
+            ),
+          },
+          {
+            key: 'email',
+            title: tt('help_article_google_email', 'E-posta doğrulaması gerekir mi?'),
+            body: tt(
+              'help_article_google_email_body',
+              'Google ile girişte hesap, sağlayıcı tarafından doğrulanmış kabul edilir. E-posta ve şifre ile kayıt olan kullanıcılar için ayrıca doğrulama e-postası istenir.'
+            ),
+          },
+          {
+            key: 'errors',
+            title: tt('help_article_google_errors', 'Ne zaman başarısız olabilir?'),
+            body: tt(
+              'help_article_google_errors_body',
+              'Play Services eksikse, Google hesabı iptal edilirse veya ağ bağlantısı yoksa giriş tamamlanmayabilir. Bu durumda uygulama güvenli şekilde standart giriş ekranında kalır.'
+            ),
+          },
+        ],
+      };
+    case 'adsAndPremium':
+      return {
+        key: 'adsAndPremium',
+        title: tt('help_article_ads_title', 'Reklamlar ve Premium'),
+        subtitle: tt(
+          'help_article_ads_subtitle',
+          'Ücretsiz model reklam desteklidir; premium ise reklamsız ve daha güçlü araçlar açar.'
+        ),
+        sections: [
+          {
+            key: 'ad-types',
+            title: tt('help_article_ads_types', 'Hangi reklamlar gösterilir?'),
+            body: tt(
+              'help_article_ads_types_body',
+              'Uygulamada banner, geçiş, ödüllü reklam ve uygulama açılış reklamı yüzeyleri bulunur. Reklamlar özellikle tarama ve ücretsiz kullanım akışını desteklemek için kullanılır.'
+            ),
+          },
+          {
+            key: 'reward',
+            title: tt('help_article_ads_reward', 'Ödüllü reklam neden var?'),
+            body: tt(
+              'help_article_ads_reward_body',
+              'Günlük ücretsiz tarama hakkı dolduğunda kullanıcı isterse ödüllü reklam izleyip ek hak kazanabilir. Bu akış zorunlu değil; premium kullanıcılar reklamsız devam eder.'
+            ),
+          },
+          {
+            key: 'premium',
+            title: tt('help_article_ads_premium', 'Premium neyi değiştirir?'),
+            body: tt(
+              'help_article_ads_premium_body',
+              'Premium; reklamsız kullanım, daha geniş fiyat ve sepet araçları, gelişmiş geçmiş ve akıllı alışveriş yüzeyleri açar. Skor mantığı premium veya reklam durumuna göre değişmez.'
             ),
           },
         ],

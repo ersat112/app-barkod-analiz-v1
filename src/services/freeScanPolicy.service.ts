@@ -15,7 +15,7 @@ import { entitlementService } from './entitlement.service';
 import { monetizationPolicyService } from './monetizationPolicy.service';
 
 const SCHEMA_VERSION = 2;
-const REWARDED_EXTRA_SCANS_PER_UNLOCK = 3;
+const REWARDED_EXTRA_SCANS_PER_UNLOCK = 2;
 const REWARDED_DAILY_UNLOCK_CAP = 2;
 
 function log(...args: unknown[]) {
@@ -242,6 +242,34 @@ export const freeScanPolicyService = {
       reason: 'allowed',
       snapshot: nextSnapshot,
     };
+  },
+
+  async revertLastSuccessfulScan(): Promise<FreeScanAccessSnapshot> {
+    const [policy, entitlement, rawState] = await Promise.all([
+      monetizationPolicyService.getResolvedPolicy({ allowStale: true }),
+      entitlementService.getSnapshot(),
+      readState(),
+    ]);
+
+    let state = normalizeDailyState(rawState);
+
+    if (state.successfulScanCount > 0) {
+      state = {
+        ...state,
+        successfulScanCount: state.successfulScanCount - 1,
+      };
+
+      await writeState(state);
+    }
+
+    return buildSnapshot({
+      state,
+      isPremium: entitlement.isPremium,
+      plan: entitlement.plan,
+      paywallEnabled: policy.paywallEnabled,
+      freeScanLimitEnabled: policy.freeScanLimitEnabled,
+      freeDailyScanLimit: policy.freeDailyScanLimit,
+    });
   },
 
   async clearLocalState(): Promise<void> {

@@ -84,6 +84,7 @@ export function buildMarketGelsinSearchEndpoint(params?: {
   query?: string;
   cityCode?: string;
   category?: string;
+  categoryId?: string;
   brand?: string;
   limit?: number;
 }): string {
@@ -101,6 +102,10 @@ export function buildMarketGelsinSearchEndpoint(params?: {
     query.set('category', params.category);
   }
 
+  if (params?.categoryId) {
+    query.set('category_id', params.categoryId);
+  }
+
   if (params?.brand) {
     query.set('brand', params.brand);
   }
@@ -111,6 +116,44 @@ export function buildMarketGelsinSearchEndpoint(params?: {
 
   const suffix = query.toString();
   return `/v1/search/products${suffix ? `?${suffix}` : ''}`;
+}
+
+export function buildMarketGelsinCategoryTreeEndpoint(params?: {
+  cityCode?: string;
+  rootCategoryId?: string;
+  depthLimit?: number;
+  query?: string;
+  includeCounts?: boolean;
+  onlyActive?: boolean;
+}): string {
+  const query = new URLSearchParams();
+
+  if (params?.cityCode) {
+    query.set('city_code', params.cityCode);
+  }
+
+  if (params?.rootCategoryId) {
+    query.set('root_category_id', params.rootCategoryId);
+  }
+
+  if (typeof params?.depthLimit === 'number' && Number.isFinite(params.depthLimit)) {
+    query.set('depth_limit', String(params.depthLimit));
+  }
+
+  if (params?.query) {
+    query.set('q', params.query);
+  }
+
+  if (typeof params?.includeCounts === 'boolean') {
+    query.set('include_counts', String(params.includeCounts));
+  }
+
+  if (typeof params?.onlyActive === 'boolean') {
+    query.set('only_active', String(params.onlyActive));
+  }
+
+  const suffix = query.toString();
+  return `/v1/categories/tree${suffix ? `?${suffix}` : ''}`;
 }
 
 export function buildMarketGelsinLegacyOffersSearchEndpoint(params?: {
@@ -196,6 +239,51 @@ export function buildMarketGelsinScanEventRequest(
     appVersion: input.appVersion?.trim() || null,
     requestId: input.requestId?.trim() || null,
   };
+}
+
+const normalizeMarketIdentity = (value?: string | null): string =>
+  String(value || '')
+    .trim()
+    .toLocaleLowerCase('tr')
+    .replace(/[ıİ]/g, 'i')
+    .replace(/[şŞ]/g, 's')
+    .replace(/[ğĞ]/g, 'g')
+    .replace(/[üÜ]/g, 'u')
+    .replace(/[öÖ]/g, 'o')
+    .replace(/[çÇ]/g, 'c')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+export function getMarketOfferIdentity(offer: MarketOffer): string {
+  return (
+    normalizeMarketIdentity(offer.marketKey) ||
+    normalizeMarketIdentity(offer.marketName) ||
+    `${offer.marketName}-${offer.branchName || ''}`.trim()
+  );
+}
+
+export function countUniqueMarkets(
+  offers: MarketOffer[],
+  options?: {
+    inStockOnly?: boolean;
+  }
+): number {
+  const identities = new Set<string>();
+
+  offers.forEach((offer) => {
+    if (options?.inStockOnly && !offer.inStock) {
+      return;
+    }
+
+    const identity = getMarketOfferIdentity(offer);
+
+    if (identity) {
+      identities.add(identity);
+    }
+  });
+
+  return identities.size;
 }
 
 export function getBestInStockOffer(offers: MarketOffer[]): MarketOffer | null {

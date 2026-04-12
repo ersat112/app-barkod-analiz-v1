@@ -66,6 +66,7 @@ import {
   unloadScanBeep,
 } from '../../services/scanFeedback.service';
 import { useScanStore } from '../../store/useScanStore';
+import type { FreeScanAccessSnapshot } from '../../types/monetization';
 import type { MarketOffer, MarketProductOffersResponse } from '../../types/marketPricing';
 import { analyzeProduct, type AnalysisResult, type Product } from '../../utils/analysis';
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
@@ -170,6 +171,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const [previewOffersLoading, setPreviewOffersLoading] = useState(false);
   const [previewOffersError, setPreviewOffersError] = useState<string | null>(null);
   const [previewMarketSheetOffer, setPreviewMarketSheetOffer] = useState<MarketOffer | null>(null);
+  const [freeScanSnapshot, setFreeScanSnapshot] = useState<FreeScanAccessSnapshot | null>(null);
 
   const [isManualMode, setIsManualMode] = useState(false);
   const [manualEntryMode, setManualEntryMode] = useState<'barcode' | 'text'>('barcode');
@@ -214,7 +216,19 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       null
     : null;
   const profileCityCode = resolveTurkeyCityCode(profileCity);
+  const marketPricingLocationLabel = profileDistrict
+    ? `${profileDistrict}, ${profileCity ?? ''}`
+    : profileCity;
   const ocrAvailable = isMlKitTextRecognitionAvailable();
+
+  const refreshFreeScanSnapshot = useCallback(async () => {
+    try {
+      const snapshot = await freeScanPolicyService.getSnapshot();
+      setFreeScanSnapshot(snapshot);
+    } catch (error) {
+      console.warn('[ScannerScreen] free scan snapshot load failed:', error);
+    }
+  }, []);
   const walkthroughModeOrder = useMemo<ScannerUiMode[]>(
     () => ['food', 'beauty', 'medicine', 'text'],
     []
@@ -660,6 +674,80 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     []
   );
 
+  const handleRewardedUnlock = useCallback(
+    async (blockedBarcode?: string | null) => {
+      const rewardReady = await adService.ensureRewardedAdReady();
+
+      if (!rewardReady) {
+        Alert.alert(
+          tt('rewarded_unavailable_title', 'Reklam hazır değil'),
+          tt(
+            'rewarded_unavailable_message',
+            'Şu an ödüllü reklam açılamadı. Biraz sonra tekrar deneyebilir veya Premium’a geçebilirsin.'
+          )
+        );
+        return false;
+      }
+
+      const rewardResult = await adService.showRewardedAdForUnlock();
+
+      if (!rewardResult.shown) {
+        Alert.alert(
+          tt('rewarded_unavailable_title', 'Reklam hazır değil'),
+          tt(
+            'rewarded_unavailable_message',
+            'Şu an ödüllü reklam açılamadı. Biraz sonra tekrar deneyebilir veya Premium’a geçebilirsin.'
+          )
+        );
+        return false;
+      }
+
+      if (!rewardResult.rewarded) {
+        Alert.alert(
+          tt('rewarded_not_completed_title', 'Ödül alınamadı'),
+          tt(
+            'rewarded_not_completed_message',
+            'Reklam tamamlanmadığı için ek tarama hakkı yüklenmedi.'
+          )
+        );
+        return false;
+      }
+
+      const unlockResult = await freeScanPolicyService.grantRewardedExtraScans();
+      setFreeScanSnapshot(unlockResult.snapshot);
+
+      if (!unlockResult.granted) {
+        Alert.alert(
+          tt('scan_limit_title', 'Tarama limiti'),
+          tt(
+            'rewarded_unlock_not_needed',
+            'Ek tarama hakkı şu an yüklenemedi. Lütfen biraz sonra tekrar deneyin.'
+          )
+        );
+        return false;
+      }
+
+      if (blockedBarcode) {
+        recentScanMapRef.current[blockedBarcode] = 0;
+      }
+
+      setScanned(false);
+      setActiveLookupBarcode(null);
+      await refreshFreeScanSnapshot();
+
+      Alert.alert(
+        tt('rewarded_unlock_success_title', '2 ek tarama hazır'),
+        tt(
+          'rewarded_unlock_success_message',
+          'Ek tarama hakları yüklendi. Barkodu tekrar okutarak devam edebilirsin.'
+        )
+      );
+
+      return true;
+    },
+    [refreshFreeScanSnapshot, tt]
+  );
+
   const handleScanLimitReached = useCallback(
     (blockedBarcode: string, paywallEnabled: boolean) => {
       const openPaywall = () => {
@@ -672,7 +760,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         tt('scan_limit_title', 'Tarama limiti'),
         tt(
           'scan_limit_rewarded_message',
-          'Bugünkü 5 ücretsiz tarama hakkın bitti. Reklam izleyerek 3 ek tarama kazanabilir veya Premium’a geçebilirsin.'
+          'Bugünkü ücretsiz tarama hakkın bitti. Reklam izleyerek 2 ek tarama kazanabilir veya Premium’a geçebilirsin.'
         ),
         [
           {
@@ -691,68 +779,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               ]
             : []),
           {
-            text: tt('scan_limit_rewarded_cta', 'Reklam izle +3 hak'),
+            text: tt('scan_limit_rewarded_cta', 'Şimdi izle (+2 kazan)'),
             onPress: () => {
               void (async () => {
                 try {
-                  if (!adService.isRewardedAdReady()) {
-                    await adService.prepareRewardedAd();
-                    await new Promise((resolve) => setTimeout(resolve, 320));
-                  }
-
-                  const rewardResult = await adService.showRewardedAdForUnlock();
-
-                  if (!rewardResult.shown) {
-                    Alert.alert(
-                      tt('rewarded_unavailable_title', 'Reklam hazır değil'),
-                      tt(
-                        'rewarded_unavailable_message',
-                        'Şu an ödüllü reklam açılamadı. Biraz sonra tekrar deneyebilir veya Premium’a geçebilirsin.'
-                      )
-                    );
-                    return;
-                  }
-
-                  if (!rewardResult.rewarded) {
-                    Alert.alert(
-                      tt('rewarded_not_completed_title', 'Ödül alınamadı'),
-                      tt(
-                        'rewarded_not_completed_message',
-                        'Reklam tamamlanmadığı için ek tarama hakkı yüklenmedi.'
-                      )
-                    );
-                    return;
-                  }
-
-                  const unlockResult = await freeScanPolicyService.grantRewardedExtraScans();
-
-                  if (!unlockResult.granted) {
-                    if (unlockResult.reason === 'daily_cap_reached') {
-                      openPaywall();
-                      return;
-                    }
-
-                    Alert.alert(
-                      tt('scan_limit_title', 'Tarama limiti'),
-                      tt(
-                        'rewarded_unlock_not_needed',
-                        'Ek tarama hakkı şu an yüklenemedi. Lütfen biraz sonra tekrar deneyin.'
-                      )
-                    );
-                    return;
-                  }
-
-                  recentScanMapRef.current[blockedBarcode] = 0;
-                  setScanned(false);
-                  setActiveLookupBarcode(null);
-
-                  Alert.alert(
-                    tt('rewarded_unlock_success_title', '3 ek tarama hazır'),
-                    tt(
-                      'rewarded_unlock_success_message',
-                      'Ek tarama hakları yüklendi. Barkodu tekrar okutarak devam edebilirsin.'
-                    )
-                  );
+                  await handleRewardedUnlock(blockedBarcode);
                 } catch (error) {
                   console.error('[ScannerScreen] rewarded unlock failed:', error);
                   Alert.alert(
@@ -771,17 +802,19 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         ]
       );
     },
-    [navigation, tt]
+    [handleRewardedUnlock, navigation, tt]
   );
 
   const processBarcode = useCallback(
     async (validBarcodeData: string) => {
       setScanned(true);
       setActiveLookupBarcode(validBarcodeData);
+      let chargedFreeScan = false;
 
       try {
         try {
           const freeScanResult = await freeScanPolicyService.registerSuccessfulScan();
+          setFreeScanSnapshot(freeScanResult.snapshot);
 
           if (!freeScanResult.allowed) {
             resetTransientState();
@@ -792,6 +825,8 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
             );
             return;
           }
+
+          chargedFreeScan = freeScanResult.snapshot.limitEnabled;
         } catch (error) {
           console.error('Free scan policy failed, allowing scan:', error);
         }
@@ -827,23 +862,46 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         });
 
         try {
-          const result = await lookupProductByBarcode(validBarcodeData, {
+          let lookupResult = await lookupProductByBarcode(validBarcodeData, {
             lookupMode: scanMode,
           });
+          let resolvedLookupMode = scanMode;
 
-          if (!result.found) {
+          if (
+            !lookupResult.found &&
+            (scanMode === 'food' || scanMode === 'beauty')
+          ) {
+            const fallbackLookupMode: ProductLookupMode =
+              scanMode === 'food' ? 'beauty' : 'food';
+            const fallbackResult = await lookupProductByBarcode(validBarcodeData, {
+              lookupMode: fallbackLookupMode,
+            });
+
+            if (fallbackResult.found) {
+              lookupResult = fallbackResult;
+              resolvedLookupMode = fallbackLookupMode;
+            }
+          }
+
+          if (!lookupResult.found) {
             markNotFound(validBarcodeData);
+
+            if (chargedFreeScan) {
+              const revertedSnapshot = await freeScanPolicyService.revertLastSuccessfulScan();
+              setFreeScanSnapshot(revertedSnapshot);
+              chargedFreeScan = false;
+            }
 
             updatePreviewItem(previewId, (current) => ({
               ...current,
-              status: result.reason === 'invalid_barcode' ? 'error' : 'not_found',
+              status: lookupResult.reason === 'invalid_barcode' ? 'error' : 'not_found',
               message:
-                result.reason === 'invalid_barcode'
+                lookupResult.reason === 'invalid_barcode'
                   ? tt('invalid_barcode', 'Geçersiz barkod formatı')
                   : tt('product_not_found', 'Ürün verisi bulunamadı'),
             }));
 
-            if (result.reason !== 'invalid_barcode') {
+            if (lookupResult.reason !== 'invalid_barcode') {
               await maybeShowScanInterstitial({
                 barcode: validBarcodeData,
                 outcome: 'not_found',
@@ -853,7 +911,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
             return;
           }
 
-          const product = result.product;
+          const product = lookupResult.product;
           const analysis = analyzeProduct(product);
           setAnalysis(product, analysis);
 
@@ -882,11 +940,20 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
           updatePreviewItem(previewId, (current) => ({
             ...current,
+            lookupMode: resolvedLookupMode,
             status: 'found',
             product,
             analysis,
             message:
-              product.type === 'medicine'
+              resolvedLookupMode !== scanMode &&
+              (scanMode === 'food' || scanMode === 'beauty')
+                ? tt(
+                    'scanner_preview_cross_mode_found',
+                    product.type === 'beauty'
+                      ? 'Urun kozmetik olarak bulundu. Detay icin karta dokunun.'
+                      : 'Urun gıda olarak bulundu. Detay icin karta dokunun.'
+                  )
+                : product.type === 'medicine'
                 ? tt(
                     'scanner_preview_medicine_ready',
                     'Ilac bulundu. Prospektus ve detaylar icin karta dokunun.'
@@ -903,6 +970,12 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
           });
         } catch (lookupError) {
           console.error('[ScannerScreen] lookup failed:', lookupError);
+
+          if (chargedFreeScan) {
+            const revertedSnapshot = await freeScanPolicyService.revertLastSuccessfulScan();
+            setFreeScanSnapshot(revertedSnapshot);
+            chargedFreeScan = false;
+          }
 
           updatePreviewItem(previewId, (current) => ({
             ...current,
@@ -1094,7 +1167,10 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     () => previewOffersResponse?.offers ?? [],
     [previewOffersResponse?.offers]
   );
-  const previewBestOffer = useMemo(() => pickBestMarketOffer(previewOffers), [previewOffers]);
+  const previewBestOffer = useMemo(
+    () => pickBestMarketOffer(previewOffers, { cityCode: profileCityCode }),
+    [previewOffers, profileCityCode]
+  );
   const previewMarketSummary = useMemo(() => {
     return buildBestMarketOfferSummary({
       tt,
@@ -1102,8 +1178,16 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
       bestOffer: previewBestOffer,
       loading: previewOffersLoading,
       error: previewOffersError,
+      locationLabel: marketPricingLocationLabel,
     });
-  }, [i18n.resolvedLanguage, previewBestOffer, previewOffersError, previewOffersLoading, tt]);
+  }, [
+    i18n.resolvedLanguage,
+    marketPricingLocationLabel,
+    previewBestOffer,
+    previewOffersError,
+    previewOffersLoading,
+    tt,
+  ]);
 
   const previewMarketSheetDetails = useMemo(() => {
     if (!previewMarketSheetOffer) {
@@ -1237,6 +1321,14 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const selectedModeMeta = modeOptions.find((item) => item.key === selectedMode) ?? modeOptions[0];
 
   useEffect(() => {
+    if (!isFocused) {
+      return;
+    }
+
+    void refreshFreeScanSnapshot();
+  }, [isFocused, refreshFreeScanSnapshot]);
+
+  useEffect(() => {
     if (
       !marketRuntime.isEnabled ||
       !latestPreview?.product ||
@@ -1252,6 +1344,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     }
 
     let cancelled = false;
+    const latestPreviewProduct = latestPreview.product;
 
     const loadPreviewOffers = async () => {
       try {
@@ -1263,6 +1356,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
           districtName: profileDistrict ?? undefined,
           limit: 24,
           includeOutOfStock: true,
+          fallbackProductName: latestPreviewProduct?.name,
+          fallbackBrand: latestPreviewProduct?.brand,
+          enableNameFallback:
+            latestPreviewProduct?.type === 'food' ||
+            latestPreviewProduct?.type === 'beauty',
         });
 
         if (cancelled) {
@@ -1405,6 +1503,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                     onPress={openInfoHint}
                     disabled={isWalkthroughActive}
                     activeOpacity={0.88}
+                    accessibilityRole="button"
+                    accessibilityLabel={tt(
+                      'scanner_info_button_label',
+                      'Tarama bilgi yardimini ac'
+                    )}
                   >
                     <Ionicons
                       name="information-outline"
@@ -1418,6 +1521,18 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                     onPress={openManualEntry}
                     disabled={isWalkthroughActive}
                     activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      selectedMode === 'text'
+                        ? tt(
+                            'scanner_manual_text_button_label',
+                            'Metin girisini ac'
+                          )
+                        : tt(
+                            'scanner_manual_barcode_button_label',
+                            'Barkodu elle gir ekranini ac'
+                          )
+                    }
                   >
                     <Ionicons
                       name={selectedMode === 'text' ? 'document-text-outline' : 'keypad-outline'}
@@ -1431,6 +1546,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                     onPress={() => setTorch((prev) => !prev)}
                     disabled={isWalkthroughActive}
                     activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityLabel={tt(
+                      'scanner_flash_toggle_button_label',
+                      'Feneri ac veya kapat'
+                    )}
                   >
                     <Ionicons
                       name={torch ? 'flash' : 'flash-off'}
@@ -1488,7 +1608,77 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                 </ScrollView>
               </View>
 
-                  {showModeHint && !isWalkthroughActive ? (
+              {freeScanSnapshot?.limitEnabled ? (
+                <View style={styles.scanAllowanceCard}>
+                  <View style={styles.scanAllowanceTextWrap}>
+                    <Text style={styles.scanAllowanceEyebrow}>
+                      {tt('scan_counter_title', 'Bugünkü ücretsiz hak')}
+                    </Text>
+                    <Text style={styles.scanAllowanceTitle}>
+                      {freeScanSnapshot.hasReachedLimit
+                        ? tt(
+                            'scan_counter_exhausted_subtitle',
+                            'Bir ödüllü reklamla 2 ek tarama açabilirsin.'
+                          )
+                        : tt(
+                            'scan_counter_subtitle',
+                            '{{remaining}} / {{total}} tarama kaldı'
+                          )
+                            .replace(
+                              '{{remaining}}',
+                              String(freeScanSnapshot.remainingCount ?? 0)
+                            )
+                            .replace(
+                              '{{total}}',
+                              String(
+                                (freeScanSnapshot.dailyLimit ?? 0) +
+                                  freeScanSnapshot.rewardedExtraScanCount
+                              )
+                            )}
+                    </Text>
+                  </View>
+
+                  {freeScanSnapshot.hasReachedLimit ? (
+                    <TouchableOpacity
+                      style={[styles.scanAllowanceAction, { backgroundColor: colors.primary }]}
+                      activeOpacity={0.88}
+                      onPress={() => {
+                        void handleRewardedUnlock(activeLookupBarcode);
+                      }}
+                    >
+                      <Ionicons
+                        name="play-circle-outline"
+                        size={16}
+                        color={colors.primaryContrast}
+                      />
+                      <Text
+                        style={[
+                          styles.scanAllowanceActionText,
+                          { color: colors.primaryContrast },
+                        ]}
+                      >
+                        {tt('scan_counter_cta', 'Şimdi izle (+2 kazan)')}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : (
+                    <View
+                      style={[
+                        styles.scanAllowanceBadge,
+                        {
+                          borderColor: `${colors.primary}66`,
+                          backgroundColor: `${colors.primary}14`,
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.scanAllowanceBadgeText, { color: colors.primary }]}>
+                        {String(freeScanSnapshot.remainingCount ?? 0)}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              ) : null}
+
+              {showModeHint && !isWalkthroughActive ? (
                 <View style={styles.modeHintCard}>
                   <View style={styles.modeHintHeader}>
                     <View style={styles.modeHintTitleWrap}>
@@ -2028,6 +2218,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               maxLength={manualEntryMode === 'text' ? 2000 : 14}
               multiline={manualEntryMode === 'text'}
               textAlignVertical={manualEntryMode === 'text' ? 'top' : 'center'}
+              accessibilityLabel={
+                manualEntryMode === 'text'
+                  ? tt('manual_text_input_label', 'Analiz metni alani')
+                  : tt('manual_barcode_input_label', 'Barkod giris alani')
+              }
             />
 
             {manualError ? <Text style={styles.errorText}>{manualError}</Text> : null}
@@ -2040,6 +2235,8 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                   { borderColor: colors.border },
                 ]}
                 onPress={closeManualMode}
+                accessibilityRole="button"
+                accessibilityLabel={tt('cancel', 'İptal')}
               >
                 <Text style={[styles.cancelBtnText, { color: colors.text }]}>
                   {tt('cancel', 'İptal')}
@@ -2049,6 +2246,12 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               <TouchableOpacity
                 style={[styles.actionBtn, { backgroundColor: colors.primary }]}
                 onPress={handleManualSubmit}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  manualEntryMode === 'text'
+                    ? tt('analyze', 'Analiz Et')
+                    : tt('search', 'Sorgula')
+                }
               >
                 <Text style={styles.submitBtnText}>
                   {manualEntryMode === 'text'
@@ -2181,6 +2384,60 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 8,
     paddingVertical: 8,
+  },
+  scanAllowanceCard: {
+    marginTop: 12,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(11,14,20,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  scanAllowanceTextWrap: {
+    flex: 1,
+  },
+  scanAllowanceEyebrow: {
+    color: 'rgba(255,255,255,0.58)',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 3,
+  },
+  scanAllowanceTitle: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '800',
+  },
+  scanAllowanceBadge: {
+    minWidth: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  scanAllowanceBadgeText: {
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  scanAllowanceAction: {
+    minHeight: 40,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  scanAllowanceActionText: {
+    fontSize: 11,
+    fontWeight: '900',
   },
   modeChip: {
     minHeight: 36,

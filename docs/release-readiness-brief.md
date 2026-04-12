@@ -64,18 +64,21 @@ Bu branch BarkodAnaliz'i soft launch oncesi daha guvenli ve daha acik bir urun h
 ### 3.5. market_gelsin Runtime
 
 - Release build icin iki yoldan biri secilmeli:
-  - `EXPO_PUBLIC_MARKET_GELSIN_API_URL` env ile dogrudan verilmeli
+  - `EXPO_PUBLIC_MARKET_GELSIN_RPC_BASE_URL` ve tercihen `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` env ile dogrudan verilmeli
+  - backward-compatible olarak `EXPO_PUBLIC_SUPABASE_ANON_KEY` da kabul edilir
   - veya Firestore `runtime_config/market_gelsin_runtime` dokumani hazir olmali
 - Runtime dokumani kullanilacaksa su alanlar teyit edilmeli:
   - `baseUrl`
+  - `apiKey` veya `publishableKey`
+  - backward-compatible olarak `anonKey`
   - `enabled`
   - opsiyonel `timeoutMs`
 - Seed etmek icin:
-  - `npm run market-gelsin:seed-runtime -- --base-url https://... --enabled true`
+  - `npm run market-gelsin:seed-runtime -- --base-url https://... --api-key ... --enabled true`
   - veya `.env` hazirsa `npm run market-gelsin:seed-runtime:from-env`
 - Not:
-  - script artik loopback URL'leri (`127.0.0.1`, `localhost`, `10.0.2.2`) varsayilan olarak release runtime'a yazmaz
-  - lokal test icin bilerek yazilacaksa `--allow-loopback` eklenmeli
+  - script loopback URL'leri (`127.0.0.1`, `localhost`, `10.0.2.2`) varsayilan olarak release runtime'a yazmaz
+  - uygulama artik otomatik local fallback kullanmaz
 - Ayarlardaki `Market Fiyat Tanilama` kartinda su alanlar kontrol edilmeli:
   - `Runtime: ON`
   - `API: ON`

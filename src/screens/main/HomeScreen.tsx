@@ -20,7 +20,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useTheme } from '../../context/ThemeContext';
 import { getHistoryPage, type HistoryEntry } from '../../services/db';
 import {
-  FAMILY_ALLERGEN_DEFINITIONS,
+  getFamilyAllergenDefinitions,
   getHomeAdditiveSpotlights,
 } from '../../services/familyHealthProfile.service';
 import {
@@ -83,7 +83,7 @@ export const HomeScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { t, i18n } = useTranslation();
   const { colors, isDark } = useTheme();
-  const { user, profile } = useAuth();
+  const { user, profile, qaBypassEnabled } = useAuth();
   const familyHealthProfile = usePreferenceStore((state) => state.familyHealthProfile);
   const layout = useAppScreenLayout({
     topInsetExtra: 16,
@@ -105,6 +105,10 @@ export const HomeScreen: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [recentItems, setRecentItems] = useState<HistoryEntry[]>([]);
   const [showOnboarding, setShowOnboarding] = useState(false);
+  const familyAllergenDefinitions = useMemo(
+    () => getFamilyAllergenDefinitions(i18n.language),
+    [i18n.language]
+  );
 
   const load = useCallback(async () => {
     try {
@@ -185,6 +189,14 @@ export const HomeScreen: React.FC = () => {
   }, [familyHealthProfile, tt]);
 
   const homeAdditives = useMemo(() => getHomeAdditiveSpotlights(), []);
+  const qaDetailShortcuts = useMemo(
+    () => [
+      { barcode: '5449000000996', label: 'Coca-Cola' },
+      { barcode: '3017620422003', label: 'Nutella' },
+      { barcode: '7622210449283', label: 'Prince' },
+    ],
+    []
+  );
 
   if (loading) {
     return (
@@ -217,50 +229,147 @@ export const HomeScreen: React.FC = () => {
           />
         }
       >
-        <View style={styles.headerWrap}>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>
-            {tt('home_title_simple', 'Bugün neye dikkat etmeliyim?')}
-          </Text>
-          <Text style={[styles.headerSubtitle, { color: colors.mutedText }]}>
-            {tt(
-              'home_subtitle_focus',
-              'Alerjenler, riskli katkılar ve son taramalar tek ekranda.'
-            )}
-          </Text>
-        </View>
-
-        <TouchableOpacity
+        <View
           style={[
-            styles.familyStrip,
+            styles.homeHeroCard,
             {
-              backgroundColor: withAlpha(colors.cardElevated, isDark ? 'EE' : 'FA'),
-              borderColor: withAlpha(colors.border, 'BC'),
+              backgroundColor: isDark ? '#447B22' : '#63AE2E',
+              shadowColor: colors.shadow,
             },
           ]}
-          activeOpacity={0.9}
-          onPress={() => navigation.navigate('FamilyHealthProfile')}
         >
-          <Ionicons name="people-outline" size={18} color={colors.primary} />
-          <View style={styles.familyTextWrap}>
-            <Text style={[styles.familyTitle, { color: colors.text }]}>
-              {tt('family_health_profile', 'Aile ve Sağlık Profili')}
-            </Text>
-            <Text style={[styles.familySubtitle, { color: colors.mutedText }]}>
-              {trackedSignalCount > 0
-                ? familySummary
-                : tt(
-                    'family_home_empty',
-                    'Alerjenlerini ve hassasiyetlerini ekleyerek uyarıları kişiselleştir.'
-                  )}
-            </Text>
+          <View style={styles.homeHeroTopRow}>
+            <View style={styles.homeHeroTextWrap}>
+              <Text style={styles.homeHeroEyebrow}>
+                {tt('home_hero_eyebrow', 'Günlük Özet')}
+              </Text>
+              <Text style={styles.homeHeroTitle}>
+                {tt('home_title_simple', 'Bugün neye dikkat etmeliyim?')}
+              </Text>
+              <Text style={styles.homeHeroSubtitle}>
+                {trackedSignalCount > 0
+                  ? familySummary
+                  : tt(
+                      'family_home_empty',
+                      'Alerjenlerini ve hassasiyetlerini ekleyerek uyarıları kişiselleştir.'
+                    )}
+              </Text>
+            </View>
+
+            <View style={styles.homeHeroProfileWrap}>
+              <Text style={styles.homeHeroProfileLabel}>
+                {tt('default_user_name', 'Kullanıcı')}
+              </Text>
+              <Text style={styles.homeHeroProfileValue} numberOfLines={2}>
+                {displayName}
+              </Text>
+            </View>
           </View>
-          {displayName ? (
-            <Text style={[styles.familyMeta, { color: colors.mutedText }]} numberOfLines={1}>
-              {displayName}
-            </Text>
-          ) : null}
-          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
-        </TouchableOpacity>
+
+          <View style={styles.homeHeroStatsRow}>
+            <View style={styles.homeHeroStat}>
+              <Text style={styles.homeHeroStatLabel}>
+                {tt('home_hero_stat_signals', 'Takip')}
+              </Text>
+              <Text style={styles.homeHeroStatValue}>{trackedSignalCount}</Text>
+            </View>
+            <View style={styles.homeHeroDivider} />
+            <View style={styles.homeHeroStat}>
+              <Text style={styles.homeHeroStatLabel}>
+                {tt('recent_scans_title', 'Son 10 Tarama')}
+              </Text>
+              <Text style={styles.homeHeroStatValue}>{recentItems.length}</Text>
+            </View>
+          </View>
+
+          <View style={styles.homeHeroActionRow}>
+            <TouchableOpacity
+              activeOpacity={0.88}
+              style={styles.homeHeroAction}
+              onPress={() => navigation.navigate('FamilyHealthProfile')}
+            >
+              <Ionicons name="people-outline" size={16} color="#FFFFFF" />
+              <Text style={styles.homeHeroActionText}>
+                {tt('family_health_profile', 'Aile ve Sağlık Profili')}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.88}
+              style={styles.homeHeroAction}
+              onPress={() => navigation.navigate('History')}
+            >
+              <Ionicons name="search-outline" size={16} color="#FFFFFF" />
+              <Text style={styles.homeHeroActionText}>
+                {tt('search_history', 'Geçmişte Ara')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {qaBypassEnabled ? (
+          <View style={styles.sectionBlock}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionHeaderTextWrap}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  QA Detail Tests
+                </Text>
+                <Text style={[styles.sectionSubtitleCompact, { color: colors.mutedText }]}>
+                  Red-score product detail shortcuts
+                </Text>
+              </View>
+            </View>
+
+            <View
+              style={[
+                styles.listCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor: withAlpha(colors.border, 'D4'),
+                },
+              ]}
+            >
+              {qaDetailShortcuts.map((item, index) => (
+                <TouchableOpacity
+                  key={item.barcode}
+                  style={[
+                    styles.listRow,
+                    index < qaDetailShortcuts.length - 1 && {
+                      borderBottomWidth: 1,
+                      borderBottomColor: withAlpha(colors.border, '88'),
+                    },
+                  ]}
+                  activeOpacity={0.86}
+                  onPress={() =>
+                    navigation.navigate('Detail', {
+                      barcode: item.barcode,
+                      entrySource: 'home',
+                      lookupMode: 'food',
+                    })
+                  }
+                >
+                  <View
+                    style={[
+                      styles.listRowAccent,
+                      { backgroundColor: withAlpha(colors.danger, '18') },
+                    ]}
+                  >
+                    <Ionicons name="bug-outline" size={16} color={colors.danger} />
+                  </View>
+                  <View style={styles.listRowTextWrap}>
+                    <Text style={[styles.listRowTitle, { color: colors.text }]}>
+                      {item.label}
+                    </Text>
+                    <Text style={[styles.listRowSubtitle, { color: colors.mutedText }]}>
+                      {item.barcode}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.sectionBlock}>
           <View style={styles.sectionHeader}>
@@ -281,17 +390,17 @@ export const HomeScreen: React.FC = () => {
             style={[
               styles.listCard,
               {
-                backgroundColor: withAlpha(colors.cardElevated, 'F2'),
-                borderColor: withAlpha(colors.border, 'BC'),
+                backgroundColor: colors.card,
+                borderColor: withAlpha(colors.border, 'D4'),
               },
             ]}
           >
-            {FAMILY_ALLERGEN_DEFINITIONS.map((item, index) => (
+            {familyAllergenDefinitions.map((item, index) => (
               <TouchableOpacity
                 key={item.key}
                 style={[
                   styles.listRow,
-                  index < FAMILY_ALLERGEN_DEFINITIONS.length - 1 && {
+                  index < familyAllergenDefinitions.length - 1 && {
                     borderBottomWidth: 1,
                     borderBottomColor: withAlpha(colors.border, '88'),
                   },
@@ -345,8 +454,8 @@ export const HomeScreen: React.FC = () => {
             style={[
               styles.listCard,
               {
-                backgroundColor: withAlpha(colors.cardElevated, 'F2'),
-                borderColor: withAlpha(colors.border, 'BC'),
+                backgroundColor: colors.card,
+                borderColor: withAlpha(colors.border, 'D4'),
               },
             ]}
           >
@@ -421,8 +530,8 @@ export const HomeScreen: React.FC = () => {
             style={[
               styles.listCard,
               {
-                backgroundColor: withAlpha(colors.cardElevated, 'F2'),
-                borderColor: withAlpha(colors.border, 'BC'),
+                backgroundColor: colors.card,
+                borderColor: withAlpha(colors.border, 'D4'),
               },
             ]}
           >
@@ -527,46 +636,119 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerWrap: {
-    marginBottom: 16,
+  homeHeroCard: {
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    marginBottom: 18,
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
   },
-  headerTitle: {
-    fontSize: 28,
-    fontWeight: '900',
-    lineHeight: 34,
-  },
-  headerSubtitle: {
-    marginTop: 6,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  familyStrip: {
-    borderWidth: 1,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+  homeHeroTopRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
+    alignItems: 'flex-start',
+    gap: 12,
   },
-  familyTextWrap: {
+  homeHeroTextWrap: {
     flex: 1,
   },
-  familyTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    lineHeight: 20,
-  },
-  familySubtitle: {
-    marginTop: 2,
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  familyMeta: {
-    maxWidth: 84,
+  homeHeroEyebrow: {
+    color: 'rgba(255,255,255,0.76)',
     fontSize: 11,
-    lineHeight: 16,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  homeHeroTitle: {
+    marginTop: 6,
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '900',
+    lineHeight: 30,
+  },
+  homeHeroSubtitle: {
+    marginTop: 8,
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '600',
+  },
+  homeHeroProfileWrap: {
+    minWidth: 88,
+    alignItems: 'flex-end',
+  },
+  homeHeroProfileLabel: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  homeHeroProfileValue: {
+    marginTop: 6,
+    color: '#FFFFFF',
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '900',
     textAlign: 'right',
+  },
+  homeHeroStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.2)',
+  },
+  homeHeroStat: {
+    flex: 1,
+  },
+  homeHeroStatLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  homeHeroStatValue: {
+    marginTop: 5,
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  homeHeroDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginHorizontal: 14,
+  },
+  homeHeroActionRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+  },
+  homeHeroAction: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  homeHeroActionText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   sectionBlock: {
     marginTop: 24,
@@ -582,7 +764,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   sectionTitle: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '900',
   },
   sectionSubtitleCompact: {
@@ -604,21 +786,21 @@ const styles = StyleSheet.create({
   },
   listCard: {
     borderWidth: 1,
-    borderRadius: 20,
+    borderRadius: 18,
     overflow: 'hidden',
   },
   listRow: {
-    minHeight: 68,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    minHeight: 64,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
   listRowAccent: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
+    width: 32,
+    height: 32,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -645,9 +827,9 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   scanRow: {
-    minHeight: 72,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    minHeight: 68,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,

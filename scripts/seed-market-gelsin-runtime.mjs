@@ -18,6 +18,7 @@ function parseArgs(argv) {
     project: 'barkodanaliz-5ed4b',
     documentPath: 'runtime_config/market_gelsin_runtime',
     baseUrl: '',
+    apiKey: '',
     enabled: true,
     timeoutMs: 8000,
     version: Date.now(),
@@ -41,6 +42,13 @@ function parseArgs(argv) {
         break;
       case '--base-url':
         args.baseUrl = next;
+        index += 1;
+        break;
+      case '--anon-key':
+      case '--api-key':
+      case '--publishable-key':
+      case '--public-key':
+        args.apiKey = next;
         index += 1;
         break;
       case '--enabled':
@@ -69,7 +77,13 @@ function parseArgs(argv) {
     }
   }
 
-  const envBaseUrl = readEnvValue('EXPO_PUBLIC_MARKET_GELSIN_API_URL');
+  const envBaseUrl =
+    readEnvValue('EXPO_PUBLIC_MARKET_GELSIN_RPC_BASE_URL') ||
+    readEnvValue('EXPO_PUBLIC_MARKET_GELSIN_API_URL');
+  const envApiKey =
+    readEnvValue('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY') ||
+    readEnvValue('EXPO_PUBLIC_SUPABASE_PUBLIC_KEY') ||
+    readEnvValue('EXPO_PUBLIC_SUPABASE_ANON_KEY');
   const envEnabled = readEnvValue('EXPO_PUBLIC_MARKET_GELSIN_ENABLED');
   const envTimeoutMs = readEnvValue('EXPO_PUBLIC_MARKET_GELSIN_TIMEOUT_MS');
 
@@ -80,6 +94,10 @@ function parseArgs(argv) {
 
     if (!argv.includes('--enabled') && envEnabled) {
       args.enabled = ['1', 'true', 'yes', 'on'].includes(envEnabled.toLowerCase());
+    }
+
+    if (!args.apiKey.trim() && envApiKey) {
+      args.apiKey = envApiKey;
     }
 
     if (!argv.includes('--timeout-ms') && envTimeoutMs) {
@@ -102,6 +120,7 @@ function parseArgs(argv) {
   return {
     ...args,
     baseUrl: normalizedBaseUrl,
+    apiKey: args.apiKey.trim(),
   };
 }
 
@@ -200,6 +219,9 @@ function buildFirestoreDocumentBody(input) {
       version: { integerValue: String(Math.max(1, Math.round(input.version))) },
       enabled: { booleanValue: Boolean(input.enabled) },
       baseUrl: { stringValue: input.baseUrl },
+      apiKey: { stringValue: input.apiKey || '' },
+      publishableKey: { stringValue: input.apiKey || '' },
+      anonKey: { stringValue: input.apiKey || '' },
       timeoutMs: { integerValue: String(Math.max(3000, Math.round(input.timeoutMs))) },
       updatedAt: { stringValue: new Date().toISOString() },
     },
@@ -212,6 +234,9 @@ async function seedRuntimeDocument(input) {
     'version',
     'enabled',
     'baseUrl',
+    'apiKey',
+    'publishableKey',
+    'anonKey',
     'timeoutMs',
     'updatedAt',
   ]

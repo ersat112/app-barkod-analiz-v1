@@ -45,26 +45,8 @@ const safeText = (value: unknown): string => {
     return '';
   }
 
-  return value.trim();
+  return value.normalize('NFKC').replace(/\s+/g, ' ').trim();
 };
-
-const containsCyrillic = (value: string): boolean => /[\u0400-\u04FF]/u.test(value);
-
-const CYRILLIC_TO_LATIN_MAP: Record<string, string> = {
-  А: 'A', а: 'a', Б: 'B', б: 'b', В: 'V', в: 'v', Г: 'G', г: 'g',
-  Д: 'D', д: 'd', Е: 'E', е: 'e', Ё: 'E', ё: 'e', Ж: 'Zh', ж: 'zh',
-  З: 'Z', з: 'z', И: 'I', и: 'i', Й: 'Y', й: 'y', К: 'K', к: 'k',
-  Л: 'L', л: 'l', М: 'M', м: 'm', Н: 'N', н: 'n', О: 'O', о: 'o',
-  П: 'P', п: 'p', Р: 'R', р: 'r', С: 'S', с: 's', Т: 'T', т: 't',
-  У: 'U', у: 'u', Ф: 'F', ф: 'f', Х: 'H', х: 'h', Ц: 'Ts', ц: 'ts',
-  Ч: 'Ch', ч: 'ch', Ш: 'Sh', ш: 'sh', Щ: 'Shch', щ: 'shch',
-  Ъ: '', ъ: '', Ы: 'Y', ы: 'y', Ь: '', ь: '', Э: 'E', э: 'e',
-  Ю: 'Yu', ю: 'yu', Я: 'Ya', я: 'ya', І: 'I', і: 'i', Ї: 'Yi',
-  ї: 'yi', Є: 'Ye', є: 'ye', Ґ: 'G', ґ: 'g',
-};
-
-const transliterateCyrillic = (value: string): string =>
-  value.replace(/[\u0400-\u04FF]/gu, (character) => CYRILLIC_TO_LATIN_MAP[character] ?? '');
 
 export const sanitizeFactsText = (value: unknown, fallback = ''): string => {
   const rawText = safeText(value);
@@ -73,11 +55,7 @@ export const sanitizeFactsText = (value: unknown, fallback = ''): string => {
     return fallback;
   }
 
-  const normalized = containsCyrillic(rawText)
-    ? transliterateCyrillic(rawText)
-    : rawText;
-
-  const compact = normalized.replace(/\s+/g, ' ').trim();
+  const compact = rawText.replace(/\s+/g, ' ').trim();
   return compact || fallback;
 };
 
@@ -87,48 +65,55 @@ const getActiveLanguage = (): string => {
     .split('-')[0];
 };
 
+const SUPPORTED_FACTS_LANGUAGES = ['tr', 'en', 'de', 'fr'] as const;
+
+const getLanguagePriority = (): string[] => {
+  const activeLanguage = getActiveLanguage();
+  const ordered = [
+    activeLanguage,
+    'en',
+    'tr',
+    'de',
+    'fr',
+  ].filter(Boolean);
+
+  return [...new Set(ordered)];
+};
+
+const getLocalizedCandidates = (
+  p: Record<string, unknown>,
+  baseKeys: string[]
+): string[] => {
+  const languagePriority = getLanguagePriority();
+  const candidates: string[] = [];
+
+  for (const language of languagePriority) {
+    for (const baseKey of baseKeys) {
+      candidates.push(`${baseKey}_${language}`);
+    }
+  }
+
+  for (const baseKey of baseKeys) {
+    candidates.push(baseKey);
+  }
+
+  for (const language of SUPPORTED_FACTS_LANGUAGES) {
+    for (const baseKey of baseKeys) {
+      candidates.push(`${baseKey}_${language}`);
+    }
+  }
+
+  return [...new Set(candidates)]
+    .map((key) => sanitizeFactsText(p[key]))
+    .filter((value) => value.length > 0);
+};
+
 export const resolveLocalizedName = (
   p: Record<string, unknown>,
   fallback: string
 ): string => {
-  const language = getActiveLanguage();
-  const orderedCandidates =
-    language === 'tr'
-      ? [
-          p.product_name_tr,
-          p.generic_name_tr,
-          p.product_name_en,
-          p.generic_name_en,
-          p.product_name,
-          p.generic_name,
-        ]
-      : language === 'en'
-        ? [
-            p.product_name_en,
-            p.generic_name_en,
-            p.product_name,
-            p.generic_name,
-            p.product_name_tr,
-            p.generic_name_tr,
-          ]
-        : [
-            p.product_name_en,
-            p.generic_name_en,
-            p.product_name,
-            p.generic_name,
-            p.product_name_tr,
-            p.generic_name_tr,
-          ];
-
-  const normalizedCandidates = orderedCandidates
-    .map((value) => sanitizeFactsText(value))
-    .filter((value) => value.length > 0);
-
-  const latinPreferredCandidate = normalizedCandidates.find(
-    (value) => !containsCyrillic(value)
-  );
-
-  return latinPreferredCandidate || normalizedCandidates[0] || fallback;
+  const candidates = getLocalizedCandidates(p, ['product_name', 'generic_name']);
+  return candidates[0] || fallback;
 };
 
 export const resolveBrand = (p: Record<string, unknown>, fallback: string): string =>
@@ -143,18 +128,71 @@ export const resolveImage = (p: Record<string, unknown>): string =>
   );
 
 export const resolveIngredients = (p: Record<string, unknown>): string =>
-  String(
-    p.ingredients_text ||
-      p.ingredients_text_tr ||
-      p.ingredients_text_en ||
-      ''
-  );
+  getLocalizedCandidates(p, ['ingredients_text'])[0] || '';
+
+const humanizeFactsTag = (value: string): string => {
+  const normalized = String(value || '')
+    .trim()
+    .replace(/^[a-z]{2}:/i, '')
+    .replace(/[_-]+/g, ' ');
+
+  if (!normalized) {
+    return '';
+  }
+
+  return normalized
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+};
+
+const resolveFactsListText = (
+  directValue: unknown,
+  tagValue: unknown,
+  fallback = ''
+): string => {
+  const directText = sanitizeFactsText(directValue);
+
+  if (directText) {
+    return directText;
+  }
+
+  const tagText = safeArray(tagValue)
+    .map((item) => humanizeFactsTag(item))
+    .filter(Boolean)
+    .join(', ');
+
+  return sanitizeFactsText(tagText, fallback);
+};
 
 export const resolveCountry = (p: Record<string, unknown>): string =>
-  String(p.countries || p.countries_en || '');
+  resolveFactsListText(p.countries || p.countries_en, p.countries_tags, '');
+
+export const resolveCategories = (p: Record<string, unknown>): string =>
+  resolveFactsListText(p.categories || p.categories_en, p.categories_tags, '');
 
 export const resolveOrigin = (p: Record<string, unknown>): string =>
-  String(p.origins || p.origins_en || '');
+  resolveFactsListText(p.origins || p.origins_en, p.origins_tags, '');
+
+export const resolveManufacturingPlace = (
+  p: Record<string, unknown>,
+  fallback = ''
+): string =>
+  resolveFactsListText(
+    p.manufacturing_places,
+    p.manufacturing_places_tags,
+    fallback
+  );
+
+export const resolveBrandOwner = (
+  p: Record<string, unknown>,
+  fallback = ''
+): string =>
+  sanitizeFactsText(
+    p.brand_owner || p.brands_owner || p.owners,
+    fallback
+  );
 
 export const resolveGrade = (p: Record<string, unknown>): string =>
   String(

@@ -14,7 +14,10 @@ import {
 import { useNavigation } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
+import { sendEmailVerification } from 'firebase/auth';
 
+import { getEmailVerificationActionSettings } from '../../config/authRuntime';
+import { auth } from '../../config/firebase';
 import { useAuth } from '../../context/AuthContext';
 import { useTheme, type ThemeColors } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
@@ -139,6 +142,7 @@ export const ProfileSettingsScreen: React.FC = () => {
   const [districtPickerSearch, setDistrictPickerSearch] = useState('');
   const [districtOptions, setDistrictOptions] = useState<string[]>([]);
   const [districtOptionsLoading, setDistrictOptionsLoading] = useState(false);
+  const [verificationLoading, setVerificationLoading] = useState(false);
 
   useEffect(() => {
     let isActive = true;
@@ -276,10 +280,12 @@ export const ProfileSettingsScreen: React.FC = () => {
   }, [displayName]);
 
   const verifiedText = useMemo(() => {
-    return user?.emailVerified
+    const emailVerified = profile?.emailVerified ?? user?.emailVerified;
+
+    return emailVerified
       ? tt('email_verified', 'E-posta doğrulandı')
       : tt('email_not_verified', 'E-posta doğrulanmadı');
-  }, [tt, user?.emailVerified]);
+  }, [profile?.emailVerified, tt, user?.emailVerified]);
 
   const readonlyLocation = useMemo(() => {
     const city = profile?.city?.trim();
@@ -291,6 +297,92 @@ export const ProfileSettingsScreen: React.FC = () => {
 
     return city || district || tt('location_not_set', 'Konum bilgisi eklenmemiş');
   }, [profile?.city, profile?.district, tt]);
+
+  const handleResendVerificationEmail = useCallback(async () => {
+    if (!auth.currentUser) {
+      return;
+    }
+
+    try {
+      setVerificationLoading(true);
+      await auth.currentUser.reload();
+
+      if (auth.currentUser.emailVerified) {
+        await refreshProfile();
+        Alert.alert(
+          tt('success_title', 'Başarılı'),
+          tt(
+            'email_verification_already_completed',
+            'Bu hesabın e-postası zaten doğrulanmış görünüyor.'
+          )
+        );
+        return;
+      }
+
+      const actionSettings = getEmailVerificationActionSettings();
+
+      if (actionSettings) {
+        await sendEmailVerification(auth.currentUser, actionSettings);
+      } else {
+        await sendEmailVerification(auth.currentUser);
+      }
+
+      Alert.alert(
+        tt('success_title', 'Başarılı'),
+        tt(
+          'email_verification_resent',
+          'Doğrulama e-postasını yeniden gönderdik. Spam klasörünü de kontrol edin.'
+        )
+      );
+    } catch (error) {
+      console.error('[ProfileSettingsScreen] resend verification failed:', error);
+      Alert.alert(
+        tt('error_title', 'Hata'),
+        tt(
+          'email_verification_resend_failed',
+          'Doğrulama e-postası şu anda yeniden gönderilemedi.'
+        )
+      );
+    } finally {
+      setVerificationLoading(false);
+    }
+  }, [refreshProfile, tt]);
+
+  const handleRefreshVerificationStatus = useCallback(async () => {
+    if (!auth.currentUser) {
+      return;
+    }
+
+    try {
+      setVerificationLoading(true);
+      await auth.currentUser.reload();
+      await refreshProfile();
+
+      Alert.alert(
+        tt('success_title', 'Başarılı'),
+        auth.currentUser.emailVerified
+          ? tt(
+              'email_verification_status_confirmed',
+              'E-posta doğrulama durumu güncellendi. Hesabın doğrulanmış görünüyor.'
+            )
+          : tt(
+              'email_verification_status_pending',
+              'E-posta doğrulaması henüz tamamlanmamış görünüyor.'
+            )
+      );
+    } catch (error) {
+      console.error('[ProfileSettingsScreen] verification refresh failed:', error);
+      Alert.alert(
+        tt('error_title', 'Hata'),
+        tt(
+          'email_verification_status_refresh_failed',
+          'E-posta doğrulama durumu şu anda yenilenemedi.'
+        )
+      );
+    } finally {
+      setVerificationLoading(false);
+    }
+  }, [refreshProfile, tt]);
 
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
@@ -497,6 +589,55 @@ export const ProfileSettingsScreen: React.FC = () => {
               </Text>
             </View>
           </View>
+
+          {!(profile?.emailVerified ?? user?.emailVerified) ? (
+            <View style={styles.verificationActionsRow}>
+              <TouchableOpacity
+                style={[
+                  styles.verificationButton,
+                  {
+                    backgroundColor: withAlpha(colors.primary, '12'),
+                    borderColor: withAlpha(colors.primary, '30'),
+                  },
+                ]}
+                onPress={handleResendVerificationEmail}
+                disabled={verificationLoading}
+                activeOpacity={0.85}
+              >
+                {verificationLoading ? (
+                  <ActivityIndicator size="small" color={colors.primary} />
+                ) : (
+                  <>
+                    <Ionicons name="mail-unread-outline" size={16} color={colors.primary} />
+                    <Text style={[styles.verificationButtonText, { color: colors.primary }]}>
+                      {tt(
+                        'email_verification_resend_action',
+                        'Doğrulama e-postasını yeniden gönder'
+                      )}
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.verificationButton,
+                  {
+                    backgroundColor: withAlpha(colors.teal, '12'),
+                    borderColor: withAlpha(colors.teal, '30'),
+                  },
+                ]}
+                onPress={handleRefreshVerificationStatus}
+                disabled={verificationLoading}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="refresh-outline" size={16} color={colors.teal} />
+                <Text style={[styles.verificationButtonText, { color: colors.teal }]}>
+                  {tt('email_verification_refresh_action', 'Durumu yenile')}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
 
           {saveError ? (
             <Text style={styles.errorText}>
@@ -714,6 +855,28 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     lineHeight: 21,
+  },
+  verificationActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 16,
+  },
+  verificationButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  verificationButtonText: {
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   saveButton: {
     marginTop: 22,

@@ -15,8 +15,8 @@ import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useTheme, type ThemeColors } from '../../context/ThemeContext';
 import {
-  FAMILY_ALLERGEN_DEFINITIONS,
-  FAMILY_HEALTH_GOAL_DEFINITIONS,
+  getFamilyAllergenDefinitions,
+  getFamilyHealthGoalDefinitions,
   getHomeAdditiveSpotlights,
 } from '../../services/familyHealthProfile.service';
 import { usePreferenceStore } from '../../store/usePreferenceStore';
@@ -77,7 +77,7 @@ const SelectableChipCard: React.FC<SelectableChipCardProps> = ({
 
 export const FamilyHealthProfileScreen: React.FC = () => {
   const navigation = useNavigation<any>();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { colors, isDark } = useTheme();
   const layout = useAppScreenLayout({
     topInsetExtra: 16,
@@ -99,6 +99,14 @@ export const FamilyHealthProfileScreen: React.FC = () => {
   const toggleFamilyAllergen = usePreferenceStore((state) => state.toggleFamilyAllergen);
   const toggleWatchedAdditive = usePreferenceStore((state) => state.toggleWatchedAdditive);
   const toggleFamilyHealthGoal = usePreferenceStore((state) => state.toggleFamilyHealthGoal);
+  const familyAllergenDefinitions = useMemo(
+    () => getFamilyAllergenDefinitions(i18n.language),
+    [i18n.language]
+  );
+  const familyHealthGoalDefinitions = useMemo(
+    () => getFamilyHealthGoalDefinitions(i18n.language),
+    [i18n.language]
+  );
 
   const summaryText = useMemo(() => {
     const allergenCount = familyHealthProfile.allergens.length;
@@ -196,7 +204,7 @@ export const FamilyHealthProfileScreen: React.FC = () => {
             )}
           </Text>
           <View style={styles.optionList}>
-            {FAMILY_ALLERGEN_DEFINITIONS.map((item) => (
+            {familyAllergenDefinitions.map((item) => (
               <SelectableChipCard
                 key={item.key}
                 title={item.label}
@@ -220,7 +228,7 @@ export const FamilyHealthProfileScreen: React.FC = () => {
             )}
           </Text>
           <View style={styles.optionList}>
-            {FAMILY_HEALTH_GOAL_DEFINITIONS.map((item) => (
+            {familyHealthGoalDefinitions.map((item) => (
               <SelectableChipCard
                 key={item.key}
                 title={item.label}

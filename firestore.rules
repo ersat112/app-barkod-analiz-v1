@@ -374,6 +374,30 @@ service cloud.firestore {
         && isOptionalStringOrTimestamp(data.client_enqueued_at);
     }
 
+    function isValidShoppingListEntry(data) {
+      return data.keys().hasOnly([
+          'id',
+          'name',
+          'itemCount',
+          'createdAt',
+          'updatedAt',
+          'isPinned',
+          'ownerType',
+          'entries'
+        ])
+        && data.id is string
+        && data.name is string
+        && (data.itemCount is int || data.itemCount is float)
+        && isOptionalStringOrTimestamp(data.createdAt)
+        && isOptionalStringOrTimestamp(data.updatedAt)
+        && isOptionalBoolean(data.isPinned)
+        && (
+          data.ownerType == null
+          || (data.ownerType is string && data.ownerType == 'self')
+        )
+        && data.entries is list;
+    }
+
     match /users/{userId} {
       allow read: if isSignedIn() && request.auth.uid == userId;
 
@@ -412,6 +436,16 @@ service cloud.firestore {
           && isValidScanHistoryEntry(request.resource.data);
 
         allow delete: if false;
+      }
+
+      match /shopping_lists/{listId} {
+        allow read: if isSignedIn() && request.auth.uid == userId;
+
+        allow create, update: if isSignedIn()
+          && request.auth.uid == userId
+          && isValidShoppingListEntry(request.resource.data);
+
+        allow delete: if isSignedIn() && request.auth.uid == userId;
       }
     }
 

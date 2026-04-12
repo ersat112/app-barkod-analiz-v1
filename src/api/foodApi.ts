@@ -1,10 +1,16 @@
 import axios from 'axios';
 import type { Product } from '../utils/analysis';
 import {
+  resolveBrandOwner,
   resolveBrand,
+  resolveCategories,
+  resolveCountry,
+  resolveIngredients,
   resolveLocalizedName,
+  resolveManufacturingPlace,
+  safeArray,
   safeObject,
-  sanitizeFactsText,
+  resolveOrigin,
 } from './factsShared';
 
 const foodClient = axios.create({
@@ -25,31 +31,7 @@ const foodSearchClient = axios.create({
 });
 
 const FOOD_FIELDS =
-  'code,product_name,product_name_tr,product_name_en,generic_name,generic_name_tr,generic_name_en,brands,image_url,image_front_url,ingredients_text,ingredients_text_tr,ingredients_text_en,nutriscore_grade,nutriscore_score,ecoscore_grade,nova_group,nutrient_levels,nutriments,additives_tags,labels_tags,allergens_tags,traces_tags,ingredients_analysis_tags,countries,countries_tags,origins,origins_tags,manufacturing_places';
-
-const safeText = (value?: string | null, fallback = ''): string => {
-  if (typeof value !== 'string') return fallback;
-  const trimmed = value.trim();
-  return trimmed || fallback;
-};
-
-const resolveCountry = (product: any): string => {
-  return sanitizeFactsText(
-    product?.countries ||
-      product?.countries_tags?.[0] ||
-      product?.manufacturing_places ||
-      ''
-  );
-};
-
-const resolveOrigin = (product: any): string => {
-  return sanitizeFactsText(
-    product?.origins ||
-      product?.origins_tags?.[0] ||
-      product?.countries ||
-      ''
-  );
-};
+  'code,product_name,product_name_tr,product_name_en,product_name_de,product_name_fr,generic_name,generic_name_tr,generic_name_en,generic_name_de,generic_name_fr,brands,brand_owner,brands_owner,owners,image_url,image_front_url,ingredients_text,ingredients_text_tr,ingredients_text_en,ingredients_text_de,ingredients_text_fr,nutriscore_grade,nutriscore_score,ecoscore_grade,nova_group,nutrient_levels,nutriments,additives_tags,labels_tags,categories,categories_tags,allergens_tags,traces_tags,ingredients_analysis_tags,countries,countries_tags,origins,origins_tags,manufacturing_places,manufacturing_places_tags';
 
 const mapFoodFactsProduct = (barcode: string, rawProduct: any): Product => {
   const p = rawProduct;
@@ -64,27 +46,27 @@ const mapFoodFactsProduct = (barcode: string, rawProduct: any): Product => {
       : typeof p?.nutriments?.['nutrition-score-fr'] === 'number'
         ? p.nutriments['nutrition-score-fr']
         : undefined;
+  const safeProduct = safeObject(p);
 
   return {
     barcode,
     name: resolvedName,
-    brand: resolveBrand(safeObject(p), 'Markasız'),
-    image_url: safeText(p?.image_front_url || p?.image_url),
+    brand: resolveBrand(safeProduct, 'Markasız'),
+    image_url: String(p?.image_front_url || p?.image_url || '').trim(),
     type: 'food',
     score: resolvedScore,
-    grade: safeText(p?.nutriscore_grade || p?.ecoscore_grade || 'unknown'),
+    grade: String(p?.nutriscore_grade || p?.ecoscore_grade || 'unknown').trim(),
     nova_group:
       typeof p?.nova_group === 'number'
         ? p.nova_group
         : Number.isFinite(Number(p?.nova_group))
           ? Number(p.nova_group)
           : undefined,
-    ingredients_text:
-      safeText(p?.ingredients_text) ||
-      safeText(p?.ingredients_text_tr) ||
-      safeText(p?.ingredients_text_en),
+    ingredients_text: resolveIngredients(safeProduct),
     additives: Array.isArray(p?.additives_tags) ? p.additives_tags : [],
     labels_tags: Array.isArray(p?.labels_tags) ? p.labels_tags : [],
+    categories: resolveCategories(safeProduct),
+    categories_tags: safeArray(p?.categories_tags),
     allergens_tags: Array.isArray(p?.allergens_tags) ? p.allergens_tags : [],
     traces_tags: Array.isArray(p?.traces_tags) ? p.traces_tags : [],
     ingredients_analysis_tags: Array.isArray(p?.ingredients_analysis_tags)
@@ -93,8 +75,12 @@ const mapFoodFactsProduct = (barcode: string, rawProduct: any): Product => {
     nutriments: p?.nutriments || {},
     nutrient_levels: p?.nutrient_levels || {},
     sourceName: 'openfoodfacts',
-    country: resolveCountry(p),
-    origin: resolveOrigin(p),
+    country: resolveCountry(safeProduct),
+    countries_tags: safeArray(p?.countries_tags),
+    origin: resolveOrigin(safeProduct),
+    origins_tags: safeArray(p?.origins_tags),
+    manufacturingPlace: resolveManufacturingPlace(safeProduct),
+    brandOwner: resolveBrandOwner(safeProduct),
   };
 };
 
@@ -193,7 +179,7 @@ export const searchFoodProductsByText = async (
 
     return products
       .map((item: any) => {
-        const barcode = safeText(item?.code);
+        const barcode = String(item?.code || '').trim();
         if (!barcode) {
           return null;
         }

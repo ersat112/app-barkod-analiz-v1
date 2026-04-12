@@ -30,6 +30,7 @@ import { analyticsService } from '../../services/analytics.service';
 import { saveProductToHistory } from '../../services/db';
 import { entitlementService } from '../../services/entitlement.service';
 import {
+  getExpandedProductAlternativeSuggestions,
   getProductAlternativeSuggestions,
   type ProductAlternativeSuggestion,
 } from '../../services/productAlternatives.service';
@@ -1026,6 +1027,15 @@ const buildAlternativeSubtitle = (
 ): string => {
   const parts: string[] = [];
 
+  if (suggestion.suggestionKind === 'healthier-substitute') {
+    parts.push(
+      tt(
+        'alternative_reason_food_beverage_swap',
+        'Şekerli içecek yerine daha sağlıklı bir içecek ikamesi olabilir.'
+      )
+    );
+  }
+
   if (suggestion.scoreDelta > 0) {
     parts.push(
       applyTemplate(
@@ -1034,6 +1044,15 @@ const buildAlternativeSubtitle = (
           '+{{count}} puan daha yüksek analiz skoru sundu.'
         ),
         { count: suggestion.scoreDelta }
+      )
+    );
+  }
+
+  if (suggestion.categoryOverlapCount > 0) {
+    parts.push(
+      tt(
+        'alternative_reason_category_match',
+        'Aynı kategori içinde daha iyi bir seçenek olabilir.'
       )
     );
   }
@@ -1082,6 +1101,10 @@ const buildAlternativeBadge = (
   suggestion: ProductAlternativeSuggestion,
   index: number
 ): string => {
+  if (suggestion.suggestionKind === 'healthier-substitute') {
+    return tt('alternative_swap_badge', 'Sağlıklı ikame');
+  }
+
   if (index === 0) {
     return tt('alternative_best_badge', 'En iyi eşleşme');
   }
@@ -1321,6 +1344,9 @@ export const DetailScreen: React.FC = () => {
   const [alternativePricingByBarcode, setAlternativePricingByBarcode] = useState<
     Record<string, MarketAlternativePricingEntry>
   >({});
+  const [remoteAlternativeSuggestions, setRemoteAlternativeSuggestions] = useState<
+    ProductAlternativeSuggestion[] | null
+  >(null);
 
   const [localProduct, setLocalProduct] = useState<Product | null>(
     isCurrentBarcodeInStore ? currentProduct : prefetchedRouteProduct
@@ -1440,10 +1466,16 @@ export const DetailScreen: React.FC = () => {
   }, [extendedProduct?.sourceName, tt]);
 
   const actualOriginRaw = useMemo(() => {
-    return normalizeDisplayText(
-      extendedProduct?.origin || extendedProduct?.country || ''
-    );
-  }, [extendedProduct?.country, extendedProduct?.origin]);
+    return normalizeDisplayText(extendedProduct?.origin || '');
+  }, [extendedProduct?.origin]);
+
+  const manufacturingPlaceRaw = useMemo(() => {
+    return normalizeDisplayText(extendedProduct?.manufacturingPlace || '');
+  }, [extendedProduct?.manufacturingPlace]);
+
+  const brandOwnerRaw = useMemo(() => {
+    return normalizeDisplayText(extendedProduct?.brandOwner || '');
+  }, [extendedProduct?.brandOwner]);
 
   const hasActualOrigin = actualOriginRaw.length > 0;
 
@@ -1694,7 +1726,7 @@ export const DetailScreen: React.FC = () => {
         displayedAnalysis.signalCoverage === 'full'
           ? tt(
               'methodology_coverage_full',
-              'Üç sinyal de mevcut. Genel skor, besinsel kalite, işlenme seviyesi ve katkı riskinin birlikte yorumlanmasıyla oluştu.'
+              'Üç sinyal de mevcut. Toplam skor besinsel kalite tabanı, katkı etkisi ve daha düşük ağırlıklı işlenme sinyali birlikte okunarak oluşturuldu.'
             )
           : displayedAnalysis.signalCoverage === 'partial'
             ? applyTemplate(
@@ -1718,7 +1750,7 @@ export const DetailScreen: React.FC = () => {
           title: tt('score_methodology_section_how', 'Skor nasıl oluştu?'),
           body: tt(
             'methodology_food_how_body',
-            'Gıda skoru; resmi besin puanı, NOVA işlenme seviyesi ve içerikteki katkı sinyallerinin birlikte yorumlanmasıyla oluşur.'
+            'Gıda skoru resmi besin puanı veya ürün derecesi tabanından başlar; bunlar yoksa çözümlenen besin tablosu alanlarından yerel besinsel taban üretilir. Katkı sinyalleri bu tabanı aşağı çekebilir; NOVA işlenme seviyesi ise daha düşük ağırlıklı ikinci bir sinyal olarak toplam skora yansır.'
           ),
         },
         {
@@ -1834,7 +1866,7 @@ export const DetailScreen: React.FC = () => {
 
     return tt(
       'scientific_basis_food_summary',
-      'Gıda yorumu; zorunlu besin tablosunu tamamlayan resmi Nutri-Score alanları, NOVA işlenme seviyesi ve içerik taramasından gelen katkı sinyalleri birlikte değerlendirilerek oluşturulur.'
+      'Gıda yorumu; resmi besin puanı alanları varsa bunlar, yoksa çözümlenen besin tablosu alanları; içerik taramasından gelen katkı sinyalleri ve daha düşük ağırlıklı NOVA işlenme seviyesi birlikte değerlendirilerek oluşturulur.'
     );
   }, [displayedProduct, tt]);
 
@@ -1922,7 +1954,7 @@ export const DetailScreen: React.FC = () => {
       .join('\n');
   }, [nutritionPreferenceEvaluations, tt]);
 
-  const alternativeSuggestions = useMemo(() => {
+  const localAlternativeSuggestions = useMemo(() => {
     if (!displayedProduct || !displayedAnalysis || displayedProduct.type === 'medicine') {
       return [];
     }
@@ -1937,6 +1969,58 @@ export const DetailScreen: React.FC = () => {
       limit: 3,
       nutritionPreferences,
     });
+  }, [displayedAnalysis, displayedProduct, nutritionPreferences]);
+
+  const alternativeSuggestions = useMemo(() => {
+    return remoteAlternativeSuggestions && remoteAlternativeSuggestions.length
+      ? remoteAlternativeSuggestions
+      : localAlternativeSuggestions;
+  }, [localAlternativeSuggestions, remoteAlternativeSuggestions]);
+
+  useEffect(() => {
+    if (!displayedProduct || !displayedAnalysis || displayedProduct.type === 'medicine') {
+      setRemoteAlternativeSuggestions(null);
+      return;
+    }
+
+    if (displayedAnalysis.score >= 75) {
+      setRemoteAlternativeSuggestions(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    setRemoteAlternativeSuggestions(null);
+
+    const loadRemoteAlternativeSuggestions = async () => {
+      try {
+        const nextSuggestions = await getExpandedProductAlternativeSuggestions({
+          product: displayedProduct,
+          analysis: displayedAnalysis,
+          limit: displayedAnalysis.score < 45 ? 4 : 3,
+          nutritionPreferences,
+        });
+
+        if (cancelled) {
+          return;
+        }
+
+        if (nextSuggestions.length) {
+          setRemoteAlternativeSuggestions(nextSuggestions);
+        }
+      } catch (remoteAlternativesError) {
+        console.error(
+          '[DetailScreen] remote alternative suggestions failed:',
+          remoteAlternativesError
+        );
+      }
+    };
+
+    void loadRemoteAlternativeSuggestions();
+
+    return () => {
+      cancelled = true;
+    };
   }, [displayedAnalysis, displayedProduct, nutritionPreferences]);
 
   useEffect(() => {
@@ -1993,8 +2077,12 @@ export const DetailScreen: React.FC = () => {
         const nextResponse = await fetchMarketProductOffers(normalizedRouteBarcode, {
           cityCode: profileCityCode,
           districtName: profileDistrict ?? undefined,
-          limit: 24,
+          limit: 200,
           includeOutOfStock: true,
+          fallbackProductName: displayedProduct.name,
+          fallbackBrand: displayedProduct.brand,
+          enableNameFallback:
+            displayedProduct.type === 'food' || displayedProduct.type === 'beauty',
         });
 
         if (cancelled) {
@@ -2112,8 +2200,8 @@ export const DetailScreen: React.FC = () => {
     [marketOffersResponse?.offers]
   );
   const bestMarketOffer = useMemo(
-    () => pickBestMarketOffer(marketPricingOffers),
-    [marketPricingOffers]
+    () => pickBestMarketOffer(marketPricingOffers, { cityCode: profileCityCode }),
+    [marketPricingOffers, profileCityCode]
   );
 
   const marketPriceTableSubtitle = useMemo(() => {
@@ -2152,8 +2240,17 @@ export const DetailScreen: React.FC = () => {
       bestOffer: bestMarketOffer,
       loading: marketOffersLoading,
       error: marketOffersError,
+      locationLabel: marketPricingLocationLabel || profileCity,
     });
-  }, [bestMarketOffer, marketOffersError, marketOffersLoading, preferredLocale, tt]);
+  }, [
+    bestMarketOffer,
+    marketOffersError,
+    marketOffersLoading,
+    marketPricingLocationLabel,
+    preferredLocale,
+    profileCity,
+    tt,
+  ]);
 
   const marketOfferSheetDetails = useMemo(() => {
     if (!marketOfferSheet) {
@@ -2255,10 +2352,20 @@ export const DetailScreen: React.FC = () => {
               icon: 'flag-outline' as const,
               label: actualOriginLabel,
             },
-          ],
+            manufacturingPlaceRaw
+              ? {
+                  icon: 'business-outline' as const,
+                  label: applyTemplate(
+                    tt('manufacturing_place_label_value', 'Üretim yeri: {{value}}'),
+                    { value: manufacturingPlaceRaw }
+                  ),
+                }
+              : null,
+          ].filter(Boolean) as MetaChipItem[],
     [
       actualOriginLabel,
       displayedProduct,
+      manufacturingPlaceRaw,
       sourceLabel,
       tt,
     ]
@@ -2271,8 +2378,12 @@ export const DetailScreen: React.FC = () => {
         : null;
     }
 
+    if (brandOwnerRaw) {
+      return `${tt('brand_owner_label', 'Marka sahibi')}: ${brandOwnerRaw}`;
+    }
+
     return `GS1: ${gs1PrefixLabel}`;
-  }, [displayedProduct, gs1PrefixLabel, tt]);
+  }, [brandOwnerRaw, displayedProduct, gs1PrefixLabel, tt]);
 
   const shareProductUrl = useMemo(() => {
     return buildProductShareUrl(
@@ -2907,8 +3018,38 @@ export const DetailScreen: React.FC = () => {
           return;
         }
 
-        if (!adService.isRewardedAdReady()) {
-          await adService.prepareRewardedAd();
+        await Promise.all([
+          adService.prepareDetailRewardedInterstitial(),
+          adService.prepareInterstitial(),
+        ]);
+        await new Promise((resolve) => setTimeout(resolve, 650));
+
+        if (cancelled) {
+          return;
+        }
+
+        let shown = false;
+
+        if (adService.isDetailRewardedInterstitialReady()) {
+          shown = await adService.showPreparedDetailRewardedInterstitial();
+        }
+
+        if (!shown && adService.isInterstitialReady()) {
+          shown = await adService.showPreparedInterstitial();
+        }
+
+        if (shown) {
+          await adService.recordInterstitialShown({
+            shownAt: Date.now(),
+            successfulScanCount: 0,
+          });
+        } else {
+          await adService.trackInterstitialShowFailure('detail_interstitial_not_ready', {
+            stage: 'detail_interstitial_show_gate',
+            screen: 'Detail',
+            entrySource,
+            barcode: normalizedRouteBarcode,
+          });
         }
       } catch (error) {
         console.error('Detail rewarded preload failed:', error);
@@ -3330,10 +3471,17 @@ export const DetailScreen: React.FC = () => {
             <View style={styles.alternativeSection}>
               <Text style={[styles.alternativeSectionTitle, { color: colors.text }]}>
                 {displayedProduct.type === 'food'
-                  ? tt(
-                      'alternative_food_title',
-                      'Daha sade içerikli benzer ürünleri tercih edebilirsiniz'
+                  ? alternativeSuggestions.some(
+                      (item) => item.suggestionKind === 'healthier-substitute'
                     )
+                    ? tt(
+                        'alternative_food_replacement_title',
+                        'Bu ürün yerine daha sağlıklı içecek seçeneklerine bakın'
+                      )
+                    : tt(
+                        'alternative_food_title',
+                        'Daha sade içerikli benzer ürünleri tercih edebilirsiniz'
+                      )
                   : tt(
                       'alternative_beauty_title',
                       'Daha düşük riskli kozmetik alternatifleri değerlendirilebilir'

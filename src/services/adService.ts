@@ -24,6 +24,9 @@ let preparedInterstitialSetup = false;
 let preparedRewarded: any = null;
 let preparedRewardedLoaded = false;
 let preparedRewardedSetup = false;
+let preparedDetailRewardedInterstitial: any = null;
+let preparedDetailRewardedInterstitialLoaded = false;
+let preparedDetailRewardedInterstitialSetup = false;
 let preparedAppOpen: any = null;
 let preparedAppOpenLoaded = false;
 let preparedAppOpenSetup = false;
@@ -47,6 +50,26 @@ function clearPreparedRewarded() {
   preparedRewarded = null;
   preparedRewardedLoaded = false;
   preparedRewardedSetup = false;
+}
+
+function clearPreparedDetailRewardedInterstitial() {
+  preparedDetailRewardedInterstitial = null;
+  preparedDetailRewardedInterstitialLoaded = false;
+  preparedDetailRewardedInterstitialSetup = false;
+}
+
+async function waitForPreparedRewarded(timeoutMs = 10000): Promise<boolean> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (preparedRewarded && preparedRewardedLoaded) {
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+
+  return Boolean(preparedRewarded && preparedRewardedLoaded);
 }
 
 function clearPreparedAppOpen() {
@@ -125,7 +148,7 @@ export const adService = {
       allowStale: true,
     });
 
-    if (!policy.enabled || !policy.interstitialEnabled) {
+    if (!policy.enabled) {
       clearPreparedRewarded();
       return false;
     }
@@ -177,6 +200,93 @@ export const adService = {
     preparedRewardedSetup = true;
 
     return preparedRewardedLoaded;
+  },
+
+  async prepareDetailRewardedInterstitial(): Promise<boolean> {
+    const policy = await adRemotePolicyService.getResolvedPolicy({
+      allowStale: true,
+    });
+
+    if (!policy.enabled || !policy.interstitialEnabled) {
+      clearPreparedDetailRewardedInterstitial();
+      return false;
+    }
+
+    if (
+      preparedDetailRewardedInterstitialSetup &&
+      preparedDetailRewardedInterstitial
+    ) {
+      return preparedDetailRewardedInterstitialLoaded;
+    }
+
+    const adsModule = getAdMobModule();
+
+    if (
+      !adsModule?.RewardedInterstitialAd ||
+      !adsModule?.AdEventType ||
+      !adsModule?.RewardedAdEventType
+    ) {
+      clearPreparedDetailRewardedInterstitial();
+      return false;
+    }
+
+    const { RewardedInterstitialAd, RewardedAdEventType, AdEventType } = adsModule;
+    const detailAd = RewardedInterstitialAd.createForAdRequest(
+      AD_UNIT_ID.DETAIL_REWARDED_INTERSTITIAL,
+      GLOBAL_AD_CONFIG
+    );
+
+    detailAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
+      console.log('[DetailRewardedInterstitial] loaded');
+      preparedDetailRewardedInterstitialLoaded = true;
+    });
+
+    detailAd.addAdEventListener(AdEventType.CLOSED, () => {
+      console.log('[DetailRewardedInterstitial] closed');
+      preparedDetailRewardedInterstitialLoaded = false;
+      clearPreparedDetailRewardedInterstitial();
+    });
+
+    detailAd.addAdEventListener(AdEventType.ERROR, (error: unknown) => {
+      console.log('[DetailRewardedInterstitial] failed', error);
+      preparedDetailRewardedInterstitialLoaded = false;
+    });
+
+    detailAd.load();
+
+    preparedDetailRewardedInterstitial = detailAd;
+    preparedDetailRewardedInterstitialSetup = true;
+
+    return preparedDetailRewardedInterstitialLoaded;
+  },
+
+  isDetailRewardedInterstitialReady(): boolean {
+    return Boolean(
+      preparedDetailRewardedInterstitial &&
+        preparedDetailRewardedInterstitialLoaded
+    );
+  },
+
+  async showPreparedDetailRewardedInterstitial(): Promise<boolean> {
+    if (
+      !preparedDetailRewardedInterstitial ||
+      !preparedDetailRewardedInterstitialLoaded
+    ) {
+      return false;
+    }
+
+    await preparedDetailRewardedInterstitial.show();
+    return true;
+  },
+
+  async ensureRewardedAdReady(timeoutMs = 12000): Promise<boolean> {
+    const immediateResult = await this.prepareRewardedAd();
+
+    if (immediateResult || this.isRewardedAdReady()) {
+      return true;
+    }
+
+    return waitForPreparedRewarded(timeoutMs);
   },
 
   isRewardedAdReady(): boolean {
@@ -372,6 +482,7 @@ export const adService = {
   async reset(): Promise<void> {
     clearPreparedInterstitial();
     clearPreparedRewarded();
+    clearPreparedDetailRewardedInterstitial();
     clearPreparedAppOpen();
     appOpenShownThisLaunch = false;
     await adPolicyService.reset();

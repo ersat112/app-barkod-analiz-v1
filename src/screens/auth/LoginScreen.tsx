@@ -24,14 +24,22 @@ import * as Crypto from 'expo-crypto';
 import {
   GoogleAuthProvider,
   OAuthProvider,
+  sendEmailVerification,
+  signOut,
   signInWithCredential,
   signInWithEmailAndPassword,
+  type User as FirebaseUser,
 } from 'firebase/auth';
 
 import { APP_RUNTIME } from '../../config/appRuntime';
-import { AUTH_RUNTIME, getGoogleAuthRedirectUri } from '../../config/authRuntime';
+import {
+  AUTH_RUNTIME,
+  getEmailVerificationActionSettings,
+  getGoogleAuthRedirectUri,
+} from '../../config/authRuntime';
 import { auth } from '../../config/firebase';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { AuthLegalNotice } from '../../components/auth/AuthLegalNotice';
 import { authAnalyticsService } from '../../services/authAnalytics.service';
@@ -44,7 +52,18 @@ import { withAlpha } from '../../utils/color';
 
 WebBrowser.maybeCompleteAuthSession();
 
-const AUTH_BRAND_LOGO = require('../../../assets/favicon.png');
+const AUTH_BRAND_LOGO = require('../../../assets/favicon-transparent.png');
+
+const sendVerificationEmailToUser = async (user: FirebaseUser): Promise<void> => {
+  const actionSettings = getEmailVerificationActionSettings();
+
+  if (actionSettings) {
+    await sendEmailVerification(user, actionSettings);
+    return;
+  }
+
+  await sendEmailVerification(user);
+};
 
 const randomNonce = (length = 32): string => {
   const chars =
@@ -296,6 +315,7 @@ const GoogleAuthSection: React.FC<GoogleAuthSectionProps> = (props) => {
 export const LoginScreen: React.FC = () => {
   const { t } = useTranslation();
   const { colors, isDark } = useTheme();
+  const { enableQaBypass } = useAuth();
   const navigation = useNavigation<any>();
 
   const tt = useCallback(
@@ -311,6 +331,7 @@ export const LoginScreen: React.FC = () => {
   const [securePassword, setSecurePassword] = useState(true);
   const [loading, setLoading] = useState(false);
   const [appleLoading, setAppleLoading] = useState(false);
+  const [verificationSending, setVerificationSending] = useState(false);
 
   const [appleAvailable, setAppleAvailable] = useState(Platform.OS === 'ios');
   const isGoogleEnabled = useMemo(
@@ -368,6 +389,43 @@ export const LoginScreen: React.FC = () => {
         password
       );
 
+      await userCredential.user.reload();
+
+      if (!userCredential.user.emailVerified) {
+        let verificationSent = false;
+
+        try {
+          await sendVerificationEmailToUser(userCredential.user);
+          verificationSent = true;
+        } catch (verificationError) {
+          console.error('Verification email resend failed during login:', verificationError);
+        }
+
+        await signOut(auth);
+
+        await authAnalyticsService.trackLoginFailed({
+          method: 'password',
+          surface: 'login',
+          error: 'auth/email-not-verified',
+          errorCode: 'auth/email-not-verified',
+        });
+
+        Alert.alert(
+          tt('email_verification_required_title', 'E-postanı doğrula'),
+          verificationSent
+            ? tt(
+                'email_verification_required_resent_body',
+                'Bu hesap henüz doğrulanmadı. Doğrulama e-postasını tekrar gönderdik. Lütfen e-postanı onayladıktan sonra giriş yap.'
+              )
+            : tt(
+                'email_verification_required_body',
+                'Bu hesap henüz doğrulanmadı. Lütfen e-postanı onayladıktan sonra tekrar giriş yap.'
+              )
+        );
+
+        return;
+      }
+
       await authAnalyticsService.trackLoginSucceeded({
         method: 'password',
         surface: 'login',
@@ -405,6 +463,71 @@ export const LoginScreen: React.FC = () => {
       Alert.alert(tt('error_title', 'Hata'), message);
     } finally {
       setLoading(false);
+    }
+  }, [email, isFormValid, password, tt]);
+
+  const handleResendVerificationEmail = useCallback(async () => {
+    if (!isFormValid) {
+      Alert.alert(
+        tt('error_title', 'Hata'),
+        tt(
+          'email_verification_resend_requires_credentials',
+          'Doğrulama e-postasını yeniden göndermek için e-posta ve şifreni gir.'
+        )
+      );
+      return;
+    }
+
+    try {
+      setVerificationSending(true);
+      const userCredential = await signInWithEmailAndPassword(auth, email.trim(), password);
+
+      await userCredential.user.reload();
+
+      if (userCredential.user.emailVerified) {
+        Alert.alert(
+          tt('success_title', 'Başarılı'),
+          tt(
+            'email_verification_already_completed',
+            'Bu hesabın e-postası zaten doğrulanmış görünüyor. Giriş yapabilirsin.'
+          )
+        );
+      } else {
+        await sendVerificationEmailToUser(userCredential.user);
+        Alert.alert(
+          tt('success_title', 'Başarılı'),
+          tt(
+            'email_verification_resent',
+            'Doğrulama e-postasını yeniden gönderdik. Spam klasörünü de kontrol edin.'
+          )
+        );
+      }
+
+      await signOut(auth);
+    } catch (error: any) {
+      console.error('Resend verification email failed:', error);
+
+      let message = tt(
+        'email_verification_resend_failed',
+        'Doğrulama e-postası şu anda yeniden gönderilemedi.'
+      );
+
+      if (
+        error?.code === 'auth/invalid-credential' ||
+        error?.code === 'auth/user-not-found' ||
+        error?.code === 'auth/wrong-password'
+      ) {
+        message = tt('invalid_credentials', 'E-posta veya şifre hatalı.');
+      } else if (error?.code === 'auth/too-many-requests') {
+        message = tt(
+          'too_many_requests',
+          'Çok fazla deneme yapıldı. Lütfen daha sonra tekrar deneyin.'
+        );
+      }
+
+      Alert.alert(tt('error_title', 'Hata'), message);
+    } finally {
+      setVerificationSending(false);
     }
   }, [email, isFormValid, password, tt]);
 
@@ -484,6 +607,28 @@ export const LoginScreen: React.FC = () => {
     }
   }, [tt]);
 
+  const handleEnterQaMode = useCallback(() => {
+    Alert.alert(
+      tt('qa_mode_title', 'QA modu'),
+      tt(
+        'qa_mode_body',
+        'Bu cihazda geçici QA oturumu açılacak. Gerçek giriş yapılmadan iç ekranları kontrol edebilirsin.'
+      ),
+      [
+        {
+          text: tt('cancel', 'İptal'),
+          style: 'cancel',
+        },
+        {
+          text: tt('continue', 'Devam et'),
+          onPress: () => {
+            void enableQaBypass();
+          },
+        },
+      ]
+    );
+  }, [enableQaBypass, tt]);
+
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <AmbientBackdrop colors={colors} variant="auth" />
@@ -533,13 +678,17 @@ export const LoginScreen: React.FC = () => {
             </View>
 
             <View style={styles.hero}>
-              <View style={styles.logoWrap}>
+              <Pressable
+                style={styles.logoWrap}
+                onLongPress={handleEnterQaMode}
+                delayLongPress={700}
+              >
                 <Image
                   source={AUTH_BRAND_LOGO}
                   style={styles.logoImage}
                   resizeMode="contain"
                 />
-              </View>
+              </Pressable>
 
               <Text style={[styles.title, { color: colors.primary }]}>
                 {tt('app_name', 'ErEnesAl®')}
@@ -632,6 +781,24 @@ export const LoginScreen: React.FC = () => {
             ) : (
               <Text style={[styles.primaryButtonText, { color: colors.primaryContrast }]}>
                 {tt('login', 'Giriş Yap')}
+              </Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.secondaryTextButton}
+            onPress={handleResendVerificationEmail}
+            disabled={verificationSending}
+            activeOpacity={0.82}
+          >
+            {verificationSending ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <Text style={[styles.secondaryTextButtonText, { color: colors.primary }]}>
+                {tt(
+                  'email_verification_resend_action',
+                  'Doğrulama e-postasını yeniden gönder'
+                )}
               </Text>
             )}
           </TouchableOpacity>
@@ -775,15 +942,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoWrap: {
-    width: 104,
-    height: 104,
+    width: 220,
+    height: 120,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 18,
   },
   logoImage: {
-    width: 96,
-    height: 96,
+    width: 212,
+    height: 112,
   },
   title: {
     fontSize: 30,
@@ -854,6 +1021,17 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '900',
     letterSpacing: 0.4,
+  },
+  secondaryTextButton: {
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+  },
+  secondaryTextButtonText: {
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   dividerRow: {
     flexDirection: 'row',

@@ -9,9 +9,16 @@ import {
 } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Ionicons } from '@expo/vector-icons';
 import { useTranslation } from 'react-i18next';
-import { Image, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  Image,
+  type ImageSourcePropType,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { AdBanner } from '../components/AdBanner';
@@ -41,6 +48,7 @@ import { NutritionPreferencesScreen } from '../screens/main/NutritionPreferences
 import { MissingProductScreen } from '../screens/main/MissingProductScreen';
 import { PaywallScreen } from '../screens/main/PaywallScreen';
 import { PriceCompareScreen } from '../screens/main/PriceCompareScreen';
+import { PriceCompareBasketScreen } from '../screens/main/PriceCompareBasketScreen';
 import { FamilyHealthProfileScreen } from '../screens/main/FamilyHealthProfileScreen';
 import { RiskInsightDetailScreen } from '../screens/main/RiskInsightDetailScreen';
 import { HelpCenterScreen } from '../screens/main/HelpCenterScreen';
@@ -50,7 +58,11 @@ import type { Product } from '../utils/analysis';
 import type { FamilyAllergenKey } from '../services/familyHealthProfile.service';
 import type { HelpArticleKey } from '../services/helpCenterContent.service';
 
-const SCAN_BUTTON_ART = require('../../assets/icon-scan-transparent.png');
+const SCAN_BUTTON_ART = require('../../assets/icon-scan-modern.png');
+const HOME_TAB_ART = require('../../assets/nav-icons/home.png');
+const HISTORY_TAB_ART = require('../../assets/nav-icons/history.png');
+const PRICE_TAB_ART = require('../../assets/nav-icons/price.png');
+const SETTINGS_TAB_ART = require('../../assets/nav-icons/settings.png');
 
 export type MainTabParamList = {
   Home: undefined;
@@ -83,6 +95,7 @@ export type RootStackParamList = {
         initialQuery?: string;
       }
     | undefined;
+  PriceCompareBasket: undefined;
   FamilyHealthProfile: undefined;
   RiskInsightDetail:
     | {
@@ -163,21 +176,31 @@ const CenterScanTabButton: React.FC<{
 const TabBarItem: React.FC<{
   active: boolean;
   colors: ReturnType<typeof useTheme>['colors'];
-  iconName: keyof typeof Ionicons.glyphMap;
+  iconSource: ImageSourcePropType;
   label: string;
   onPress: () => void;
-}> = ({ active, colors, iconName, label, onPress }) => {
+}> = ({ active, colors, iconSource, label, onPress }) => {
   return (
     <TouchableOpacity
       style={styles.tabBarItem}
       onPress={onPress}
       activeOpacity={0.9}
     >
-      <Ionicons
-        name={iconName}
-        size={20}
-        color={active ? colors.primary : colors.border}
-      />
+      <View
+        style={[
+          styles.tabBarIconWrap,
+          active && { backgroundColor: `${colors.primary}16` },
+        ]}
+      >
+        <Image
+          source={iconSource}
+          resizeMode="contain"
+          style={[
+            styles.tabBarBitmapIcon,
+            { opacity: active ? 1 : 0.86 },
+          ]}
+        />
+      </View>
       <Text
         style={[
           styles.tabBarItemLabel,
@@ -258,7 +281,7 @@ const PersistentBottomNav: React.FC<{
           <TabBarItem
             active={activeSection === 'Home'}
             colors={colors}
-            iconName={activeSection === 'Home' ? 'home' : 'home-outline'}
+            iconSource={HOME_TAB_ART}
             label={tt('home', 'Ana Sayfa')}
             onPress={onOpenHome}
           />
@@ -267,7 +290,7 @@ const PersistentBottomNav: React.FC<{
           <TabBarItem
             active={activeSection === 'History'}
             colors={colors}
-            iconName={activeSection === 'History' ? 'time' : 'time-outline'}
+            iconSource={HISTORY_TAB_ART}
             label={tt('history', 'Geçmiş')}
             onPress={onOpenHistory}
           />
@@ -277,8 +300,8 @@ const PersistentBottomNav: React.FC<{
           <TabBarItem
             active={activeSection === 'PriceCompare'}
             colors={colors}
-            iconName={activeSection === 'PriceCompare' ? 'pricetags' : 'pricetags-outline'}
-            label={tt('price_compare_short_label', 'Fiyat')}
+            iconSource={PRICE_TAB_ART}
+            label={tt('price_compare_short_label', 'Price')}
             onPress={onOpenCompare}
           />
         </View>
@@ -286,10 +309,8 @@ const PersistentBottomNav: React.FC<{
           <TabBarItem
             active={activeSection === 'Settings'}
             colors={colors}
-            iconName={
-              activeSection === 'Settings' ? 'settings' : 'settings-outline'
-            }
-            label={tt('profile', 'Profil')}
+            iconSource={SETTINGS_TAB_ART}
+            label={tt('settings', 'Settings')}
             onPress={onOpenSettings}
           />
         </View>
@@ -300,6 +321,32 @@ const PersistentBottomNav: React.FC<{
         label={tt('scan_now', 'Şimdi Tara')}
         onPress={onOpenScanner}
         bottomOffset={centerButtonBottomOffset}
+      />
+    </View>
+  );
+};
+
+const PersistentAuthBanner: React.FC<{
+  routeName: string;
+}> = ({ routeName }) => {
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View
+      pointerEvents="box-none"
+      style={[
+        styles.authBannerShell,
+        {
+          backgroundColor: colors.background,
+          borderTopColor: colors.border,
+          paddingBottom: Math.max(insets.bottom, 10),
+        },
+      ]}
+    >
+      <AdBanner
+        placement={`auth_${routeName.toLowerCase()}`}
+        containerStyle={styles.authBannerContainer}
       />
     </View>
   );
@@ -338,7 +385,7 @@ const MainTabNavigator: React.FC = () => {
       <Tab.Screen
         name="Settings"
         component={SettingsScreen}
-        options={{ title: tt('profile', 'Profil') }}
+        options={{ title: tt('settings', 'Settings') }}
       />
     </Tab.Navigator>
   );
@@ -401,6 +448,11 @@ const AppStack = () => (
     <Stack.Screen
       name="PriceCompare"
       component={PriceCompareScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="PriceCompareBasket"
+      component={PriceCompareBasketScreen}
       options={{ animation: 'slide_from_right' }}
     />
     <Stack.Screen
@@ -530,7 +582,9 @@ export const AppNavigator: React.FC = () => {
           onOpenCompare={() => navigateToStackScreen('PriceCompare')}
           onOpenSettings={() => navigateToMainTab('Settings')}
         />
-      ) : null}
+      ) : (
+        <PersistentAuthBanner routeName={activeRouteName} />
+      )}
     </View>
   );
 };
@@ -558,6 +612,20 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingHorizontal: 0,
   },
+  authBannerShell: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: 1,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    zIndex: 20,
+  },
+  authBannerContainer: {
+    width: '100%',
+    paddingHorizontal: 0,
+  },
   customTabBarGrid: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -580,6 +648,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 2,
   },
+  tabBarIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabBarBitmapIcon: {
+    width: 30,
+    height: 30,
+  },
   tabBarItemLabel: {
     marginTop: 3,
     fontSize: 10,
@@ -590,7 +669,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
-    width: 90,
+    width: 118,
   },
   centerScanButtonOverlay: {
     position: 'absolute',
@@ -601,17 +680,17 @@ const styles = StyleSheet.create({
     zIndex: 3,
   },
   centerScanButton: {
-    width: 46,
-    height: 46,
+    width: 92,
+    height: 60,
     alignItems: 'center',
     justifyContent: 'center',
   },
   centerScanArtwork: {
-    width: 46,
-    height: 46,
+    width: 92,
+    height: 54,
   },
   centerScanLabel: {
-    marginTop: 3,
+    marginTop: 0,
     fontSize: 10,
     fontWeight: '700',
     textAlign: 'center',

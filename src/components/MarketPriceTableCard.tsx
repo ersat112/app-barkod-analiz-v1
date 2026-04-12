@@ -11,6 +11,11 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import { getNationalMarketDefinitions, normalizeMarketDisplayValue } from '../config/marketDisplay';
+import {
+  buildMarketMonogram,
+  resolveMarketAccent,
+  resolveMarketLogoUrl,
+} from '../config/marketBranding';
 import type { ThemeColors } from '../context/ThemeContext';
 import type { MarketOffer } from '../types/marketPricing';
 import type { Product } from '../utils/analysis';
@@ -43,16 +48,6 @@ type DisplayColumn = {
   scope: 'national' | 'local';
 };
 
-const MARKET_BRAND_ACCENTS = [
-  '#167A78',
-  '#B97719',
-  '#A855F7',
-  '#2563EB',
-  '#DC2626',
-  '#0F766E',
-  '#7C3AED',
-];
-
 const withAlpha = (hex: string, alpha: string): string => {
   if (!hex.startsWith('#')) {
     return hex;
@@ -60,29 +55,6 @@ const withAlpha = (hex: string, alpha: string): string => {
 
   const normalized = hex.length === 7 ? hex : '#0F172A';
   return `${normalized}${alpha}`;
-};
-
-const resolveMarketAccent = (marketKey?: string | null, marketName?: string | null): string => {
-  const seed = `${marketKey || ''}${marketName || ''}`;
-  const total = Array.from(seed).reduce((sum, character) => sum + character.charCodeAt(0), 0);
-  return MARKET_BRAND_ACCENTS[total % MARKET_BRAND_ACCENTS.length];
-};
-
-const buildMarketMonogram = (marketName?: string | null): string => {
-  const parts = String(marketName || '')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2);
-
-  if (!parts.length) {
-    return 'MG';
-  }
-
-  return parts
-    .map((part) => part.charAt(0))
-    .join('')
-    .toUpperCase();
 };
 
 const MarketBadge: React.FC<{
@@ -93,11 +65,12 @@ const MarketBadge: React.FC<{
 }> = ({ marketName, marketKey, logoUrl, size = 36 }) => {
   const accent = resolveMarketAccent(marketKey, marketName);
   const monogram = buildMarketMonogram(marketName);
+  const stableLogoUrl = resolveMarketLogoUrl(marketKey, marketName, logoUrl);
 
-  if (logoUrl) {
+  if (stableLogoUrl) {
     return (
       <Image
-        source={{ uri: logoUrl }}
+        source={{ uri: stableLogoUrl }}
         style={[
           styles.marketLogoImage,
           {
@@ -148,6 +121,24 @@ const pickBestOffer = (offers: MarketOffer[]): MarketOffer | null => {
   return sorted[0] ?? null;
 };
 
+const isLocationScopedOffer = (offer?: MarketOffer | null): boolean => {
+  if (!offer) {
+    return false;
+  }
+
+  const coverage = String(offer.coverageScope || '').toLocaleLowerCase('tr');
+  const pricing = String(offer.pricingScope || '').toLocaleLowerCase('tr');
+
+  return (
+    offer.priceSourceType === 'local_market_price' ||
+    coverage.includes('city') ||
+    coverage.includes('district') ||
+    pricing.includes('city') ||
+    pricing.includes('district') ||
+    typeof offer.distanceMeters === 'number'
+  );
+};
+
 export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
   title,
   subtitle,
@@ -161,12 +152,14 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
   onOfferPress,
 }) => {
   const columns = useMemo<DisplayColumn[]>(() => {
+    const shouldUseDefinitionColumns = productType !== 'beauty';
+
     if (!offers.length) {
       return getNationalMarketDefinitions(productType).map((definition) => ({
         id: `national-${definition.key}`,
         marketName: definition.name,
         marketKey: definition.key,
-        logoUrl: null,
+        logoUrl: resolveMarketLogoUrl(definition.key, definition.name, null),
         offer: null,
         scope: 'national' as const,
       }));
@@ -195,7 +188,11 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
         grouped.set(identity, {
           marketName: offer.marketName,
           marketKey: offer.marketKey,
-          logoUrl: offer.marketLogoUrl || null,
+          logoUrl: resolveMarketLogoUrl(
+            offer.marketKey,
+            offer.marketName,
+            offer.marketLogoUrl || null
+          ),
           offers: [offer],
         });
         return;
@@ -203,12 +200,63 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
 
       existing.offers.push(offer);
 
-      if (!existing.logoUrl && offer.marketLogoUrl) {
-        existing.logoUrl = offer.marketLogoUrl;
+      const candidateLogoUrl = resolveMarketLogoUrl(
+        offer.marketKey,
+        offer.marketName,
+        offer.marketLogoUrl || null
+      );
+
+      if (!existing.logoUrl && candidateLogoUrl) {
+        existing.logoUrl = candidateLogoUrl;
       }
     });
 
     const usedKeys = new Set<string>();
+    const actualColumns = Array.from(grouped.entries())
+      .map(([groupKey, group]) => ({
+        id: `actual-${groupKey}`,
+        marketName: group.marketName,
+        marketKey: group.marketKey,
+        logoUrl: resolveMarketLogoUrl(group.marketKey, group.marketName, group.logoUrl || null),
+        offer: pickBestOffer(group.offers),
+        scope: 'national' as const,
+      }))
+      .sort((left, right) => {
+        const leftDistance = left.offer?.distanceMeters;
+        const rightDistance = right.offer?.distanceMeters;
+
+        if (
+          typeof leftDistance === 'number' &&
+          typeof rightDistance === 'number' &&
+          leftDistance !== rightDistance
+        ) {
+          return leftDistance - rightDistance;
+        }
+
+        const leftPrice = left.offer?.price ?? Number.POSITIVE_INFINITY;
+        const rightPrice = right.offer?.price ?? Number.POSITIVE_INFINITY;
+
+        if (leftPrice !== rightPrice) {
+          return leftPrice - rightPrice;
+        }
+
+        return left.marketName.localeCompare(right.marketName, 'tr');
+      });
+
+    if (!shouldUseDefinitionColumns) {
+      return actualColumns.map((column) => ({
+        ...column,
+        scope: isLocationScopedOffer(column.offer) ? ('local' as const) : ('national' as const),
+      }));
+    }
+
+    if (actualColumns.length > 0) {
+      return actualColumns.map((column) => ({
+        ...column,
+        scope: isLocationScopedOffer(column.offer) ? ('local' as const) : ('national' as const),
+      }));
+    }
+
     const nationalColumns = getNationalMarketDefinitions(productType).map((definition) => {
       const candidates = [
         normalizeMarketDisplayValue(definition.key),
@@ -230,7 +278,11 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
         id: `national-${definition.key}`,
         marketName: matched?.marketName || definition.name,
         marketKey: matched?.marketKey || definition.key,
-        logoUrl: matched?.logoUrl || null,
+        logoUrl: resolveMarketLogoUrl(
+          matched?.marketKey || definition.key,
+          matched?.marketName || definition.name,
+          matched?.logoUrl || null
+        ),
         offer: matched ? pickBestOffer(matched.offers) : null,
         scope: 'national' as const,
       };
@@ -242,7 +294,7 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
         id: `local-${groupKey}`,
         marketName: group.marketName,
         marketKey: group.marketKey,
-        logoUrl: group.logoUrl || null,
+        logoUrl: resolveMarketLogoUrl(group.marketKey, group.marketName, group.logoUrl || null),
         offer: pickBestOffer(group.offers),
         scope: 'local' as const,
       }))
@@ -261,7 +313,10 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
         return left.marketName.localeCompare(right.marketName, 'tr');
       });
 
-    return [...nationalColumns, ...localColumns];
+    const filledNationalColumns = nationalColumns.filter((column) => Boolean(column.offer));
+    const emptyNationalColumns = nationalColumns.filter((column) => !column.offer);
+
+    return [...filledNationalColumns, ...localColumns, ...emptyNationalColumns];
   }, [offers, productType]);
 
   return (
@@ -282,7 +337,10 @@ export const MarketPriceTableCard: React.FC<MarketPriceTableCardProps> = ({
 
       <ScrollView
         horizontal
-        showsHorizontalScrollIndicator={false}
+        nestedScrollEnabled
+        showsHorizontalScrollIndicator={columns.length > 1}
+        scrollEnabled={columns.length > 1}
+        overScrollMode="never"
         contentContainerStyle={styles.columnsContent}
       >
         {columns.map((column) => {

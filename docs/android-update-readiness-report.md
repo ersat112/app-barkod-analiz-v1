@@ -74,7 +74,8 @@ uretilebilir.
 
 Release'te market fiyatini acmak icin iki yol artik net:
 
-1. build env ile `EXPO_PUBLIC_MARKET_GELSIN_API_URL`
+1. build env ile `EXPO_PUBLIC_MARKET_GELSIN_RPC_BASE_URL` + tercihen `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   backward-compatible olarak `EXPO_PUBLIC_SUPABASE_ANON_KEY` da calisir
 2. Firestore `runtime_config/market_gelsin_runtime`
 
 ### 3. Android release AAB fiziksel olarak uretildi

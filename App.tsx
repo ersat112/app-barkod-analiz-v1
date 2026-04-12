@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { AppState } from 'react-native';
+import { AppState, LogBox } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -32,6 +32,14 @@ const AppContent: React.FC = () => {
   const setLocationPermissionGranted = usePreferenceStore(
     (state) => state.setLocationPermissionGranted
   );
+
+  useEffect(() => {
+    if (!__DEV__) {
+      return;
+    }
+
+    LogBox.ignoreAllLogs(true);
+  }, []);
 
   useEffect(() => {
     let mounted = true;

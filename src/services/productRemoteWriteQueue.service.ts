@@ -454,7 +454,6 @@ const flushInternal = async (reason: QueueFlushReason): Promise<number> => {
         queueSize: nextQueue.length,
         error: message,
       });
-      console.warn('[RemoteWriteQueue] flush failed:', error);
       break;
     }
   }

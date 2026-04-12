@@ -4,7 +4,6 @@ import {
   Alert,
   Image,
   Linking,
-  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,13 +11,13 @@ import {
   Text,
   TouchableOpacity,
   View,
-  Switch,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import { Ionicons } from '@expo/vector-icons';
-import { signOut } from 'firebase/auth';
+import { sendEmailVerification, signOut } from 'firebase/auth';
 
+import { getEmailVerificationActionSettings } from '../../config/authRuntime';
 import { auth } from '../../config/firebase';
 import {
   LEGAL_VERSION_LABEL,
@@ -55,31 +54,30 @@ import {
 import { withAlpha } from '../../utils/color';
 
 const APP_VERSION = 'v1.0.1';
-const SETTINGS_FOOTER_FAVICON = require('../../../assets/favicon.png');
+const SETTINGS_FOOTER_FAVICON = require('../../../assets/favicon-transparent.png');
 
 type SettingsItemProps = {
   icon: keyof typeof Ionicons.glyphMap;
   label: string;
+  subtitle?: string;
   value?: string;
-  onPress?: () => void;
-  children?: React.ReactNode;
-  colors: ThemeColors;
-};
-
-type SettingsActionCardProps = {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  subtitle: string;
   badgeLabel?: string;
-  onPress: () => void;
+  onPress?: () => void;
+  danger?: boolean;
+  grouped?: 'single' | 'first' | 'middle' | 'last';
+  children?: React.ReactNode;
   colors: ThemeColors;
 };
 
 const SettingsItem: React.FC<SettingsItemProps> = ({
   icon,
   label,
+  subtitle,
   value,
+  badgeLabel,
   onPress,
+  danger = false,
+  grouped = 'single',
   children,
   colors,
 }) => (
@@ -87,9 +85,8 @@ const SettingsItem: React.FC<SettingsItemProps> = ({
     style={[
       styles.item,
       {
-        backgroundColor: withAlpha(colors.cardElevated, 'EE'),
-        borderColor: withAlpha(colors.border, 'B8'),
-        shadowColor: colors.shadow,
+        borderBottomColor: withAlpha(colors.border, '80'),
+        borderBottomWidth: grouped === 'single' || grouped === 'last' ? 0 : StyleSheet.hairlineWidth,
       },
     ]}
     onPress={onPress}
@@ -97,95 +94,74 @@ const SettingsItem: React.FC<SettingsItemProps> = ({
     activeOpacity={onPress ? 0.82 : 1}
   >
     <View style={styles.itemLeft}>
-      <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
-        <Ionicons name={icon} size={20} color={colors.primary} />
+      <View style={styles.itemGlyphWrap}>
+        <Ionicons
+          name={icon}
+          size={20}
+          color={danger ? '#D64545' : colors.text}
+        />
       </View>
-      <Text style={[styles.itemLabel, { color: colors.text }]} numberOfLines={2}>
-        {label}
-      </Text>
+      <View style={styles.itemTextWrap}>
+        <Text
+          style={[styles.itemLabel, { color: danger ? '#D64545' : colors.text }]}
+          numberOfLines={1}
+        >
+          {label}
+        </Text>
+        {subtitle ? (
+          <Text
+            style={[styles.itemSubtitle, { color: colors.mutedText }]}
+            numberOfLines={2}
+          >
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
     </View>
 
     {children ? (
       children
     ) : (
       <View style={styles.itemRight}>
+        {badgeLabel ? (
+          <View
+            style={[
+              styles.itemBadge,
+              {
+                backgroundColor: withAlpha(danger ? '#D64545' : colors.primary, '12'),
+              },
+            ]}
+          >
+            <Text
+              style={[
+                styles.itemBadgeText,
+                { color: danger ? '#D64545' : colors.primary },
+              ]}
+              numberOfLines={1}
+            >
+              {badgeLabel}
+            </Text>
+          </View>
+        ) : null}
         {!!value && (
-          <Text style={[styles.itemValue, { color: colors.text }]} numberOfLines={1}>
+          <Text
+            style={[styles.itemValue, { color: danger ? '#D64545' : colors.mutedText }]}
+            numberOfLines={1}
+          >
             {value}
           </Text>
         )}
         {onPress ? (
-          <View
-            style={[
-              styles.itemChevronWrap,
-              { backgroundColor: withAlpha(colors.primary, '10') },
-            ]}
-          >
-            <Ionicons name="chevron-forward" size={16} color={colors.primary} />
-          </View>
+          <Ionicons
+            name="chevron-forward"
+            size={18}
+            color={danger ? '#D64545' : colors.mutedText}
+          />
         ) : null}
       </View>
     )}
   </TouchableOpacity>
 );
-
-const SettingsActionCard: React.FC<SettingsActionCardProps> = ({
-  icon,
-  title,
-  subtitle,
-  badgeLabel,
-  onPress,
-  colors,
-}) => {
-  return (
-    <TouchableOpacity
-      style={[
-        styles.actionCard,
-        {
-          backgroundColor: withAlpha(colors.cardElevated, 'EE'),
-          borderColor: withAlpha(colors.border, 'B8'),
-          shadowColor: colors.shadow,
-        },
-      ]}
-      onPress={onPress}
-      activeOpacity={0.88}
-    >
-      <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
-        <Ionicons name={icon} size={20} color={colors.primary} />
-      </View>
-
-      <View style={styles.actionCardTextWrap}>
-        <Text style={[styles.actionCardTitle, { color: colors.text }]}>{title}</Text>
-        <Text style={[styles.actionCardSubtitle, { color: colors.mutedText }]}>
-          {subtitle}
-        </Text>
-      </View>
-
-      <View style={styles.actionCardRight}>
-        {badgeLabel ? (
-          <View
-            style={[
-              styles.actionCardBadge,
-              { backgroundColor: withAlpha(colors.primary, '10') },
-            ]}
-          >
-            <Text style={[styles.actionCardBadgeText, { color: colors.primary }]}>
-              {badgeLabel}
-            </Text>
-          </View>
-        ) : null}
-        <View
-          style={[
-            styles.itemChevronWrap,
-            { backgroundColor: withAlpha(colors.primary, '10') },
-          ]}
-        >
-          <Ionicons name="chevron-forward" size={16} color={colors.primary} />
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-};
 
 function formatDuration(ms: number): string {
   if (ms <= 0) {
@@ -397,7 +373,8 @@ function formatRecentMonetizationFlowLogs(
 export const SettingsScreen: React.FC = () => {
   const { t } = useTranslation();
   const navigation = useNavigation<any>();
-  const { user, profile, loading: authLoading, profileError, refreshProfile } = useAuth();
+  const { user, profile, loading: authLoading, refreshProfile, disableQaBypass } =
+    useAuth();
   const { colors, isDark, setIsDark, toggleTheme } = useTheme();
   const { locale, changeLanguage, supportedLanguages, ready: languageReady } = useLanguage();
   const notificationsEnabled = usePreferenceStore((state) => state.notificationsEnabled);
@@ -576,6 +553,21 @@ export const SettingsScreen: React.FC = () => {
     [tt]
   );
 
+  const handleOpenAboutApp = useCallback(() => {
+    Alert.alert(
+      tt('about_app', 'Uygulama Hakkında'),
+      [
+        `${tt(
+          'about_app_summary',
+          'BarkodAnaliz; gıda, kozmetik ve ilaç barkodlarını hızlıca çözümleyip skor, içerik sinyalleri ve resmi kaynak bağlantılarını tek yerde sunar.'
+        )}`,
+        '',
+        `${tt('app_version_short', 'Sürüm')}: ${APP_VERSION}`,
+        'OpenFoodFacts • OpenBeautyFacts • TITCK • E-Code',
+      ].join('\n')
+    );
+  }, [tt]);
+
   const handleLogout = useCallback(() => {
     Alert.alert(
       tt('logout_title', 'Çıkış Yap'),
@@ -589,6 +581,7 @@ export const SettingsScreen: React.FC = () => {
             try {
               setLogoutLoading(true);
               await signOut(auth);
+              await disableQaBypass();
             } catch (error) {
               console.error('Logout Error:', error);
               Alert.alert(
@@ -602,7 +595,7 @@ export const SettingsScreen: React.FC = () => {
         },
       ]
     );
-  }, [tt]);
+  }, [disableQaBypass, tt]);
 
   const handleOpenProfileSettings = useCallback(() => {
     navigation.navigate('ProfileSettings');
@@ -650,10 +643,14 @@ export const SettingsScreen: React.FC = () => {
   }, [displayName]);
 
   const verifiedText = useMemo(() => {
-    return user?.emailVerified
+    const emailVerified = profile?.emailVerified ?? user?.emailVerified;
+
+    return emailVerified
       ? tt('email_verified', 'E-posta doğrulandı')
       : tt('email_not_verified', 'E-posta doğrulanmadı');
-  }, [tt, user?.emailVerified]);
+  }, [profile?.emailVerified, tt, user?.emailVerified]);
+
+  const [verificationLoading, setVerificationLoading] = useState(false);
 
   const startupDiagnostics = operabilityDiagnostics?.bootstrap.data ?? null;
   const startupDiagnosticsError =
@@ -796,16 +793,6 @@ export const SettingsScreen: React.FC = () => {
     ? tt('premium_active', 'Premium aktif')
     : tt('premium_title', 'BarkodAnaliz Premium');
 
-  const premiumSubtitle = monetization.entitlement?.isPremium
-    ? tt(
-        'premium_active_text',
-        'Bu hesapta premium aktif. Reklamlar bastırılır; gelişmiş market optimizasyonu, geçmiş ve filtre özellikleri açılır.'
-      )
-    : tt(
-        'premium_settings_subtitle',
-        'Premium ile reklamsız kullanım, tam market kıyası, akıllı sepet optimizasyonu ve gelişmiş geçmiş özellikleri açılır.'
-      );
-
   const premiumStatusLabel = monetization.entitlement?.isPremium
     ? tt('premium_badge_active', 'Aktif')
     : tt('premium_badge_available', 'Hazır');
@@ -822,39 +809,11 @@ export const SettingsScreen: React.FC = () => {
     : tt('nutrition_preferences_summary_none', 'Tercih seçilmedi');
 
   const acceptedLegalVersion = profile?.legalAcceptance?.versionLabel ?? null;
-  const acceptedLegalAt = profile?.legalAcceptance?.acceptedAt ?? null;
   const legalVersionMatches = acceptedLegalVersion === LEGAL_VERSION_LABEL;
-  const acceptedLegalAtText = useMemo(() => {
-    if (!acceptedLegalAt) {
-      return tt('not_available_short', '-');
-    }
-
-    try {
-      return new Date(acceptedLegalAt).toLocaleString(undefined, {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return acceptedLegalAt;
-    }
-  }, [acceptedLegalAt, tt]);
 
   const legalStatusLabel = legalVersionMatches
     ? tt('legal_version_current_badge', 'Güncel')
     : tt('legal_version_update_badge', 'Güncelle');
-
-  const legalStatusSubtitle = legalVersionMatches
-    ? tt(
-        'legal_status_subtitle_current',
-        'Bu hesap güncel hukuk belge setini onaylamış görünüyor.'
-      )
-    : tt(
-        'legal_status_subtitle_outdated',
-        'Belge sürümü değişmiş olabilir. Güncel seti yeniden inceleyip onaylayın.'
-      );
 
   const handleRefreshLegalAcceptance = useCallback(() => {
     Alert.alert(
@@ -894,6 +853,92 @@ export const SettingsScreen: React.FC = () => {
     );
   }, [refreshProfile, tt]);
 
+  const handleResendVerificationEmail = useCallback(async () => {
+    if (!auth.currentUser) {
+      return;
+    }
+
+    try {
+      setVerificationLoading(true);
+      await auth.currentUser.reload();
+
+      if (auth.currentUser.emailVerified) {
+        await refreshProfile();
+        Alert.alert(
+          tt('success_title', 'Başarılı'),
+          tt(
+            'email_verification_already_completed',
+            'Bu hesabın e-postası zaten doğrulanmış görünüyor.'
+          )
+        );
+        return;
+      }
+
+      const actionSettings = getEmailVerificationActionSettings();
+
+      if (actionSettings) {
+        await sendEmailVerification(auth.currentUser, actionSettings);
+      } else {
+        await sendEmailVerification(auth.currentUser);
+      }
+
+      Alert.alert(
+        tt('success_title', 'Başarılı'),
+        tt(
+          'email_verification_resent',
+          'Doğrulama e-postasını yeniden gönderdik. Spam klasörünü de kontrol edin.'
+        )
+      );
+    } catch (error) {
+      console.error('[SettingsScreen] resend verification failed:', error);
+      Alert.alert(
+        tt('error_title', 'Hata'),
+        tt(
+          'email_verification_resend_failed',
+          'Doğrulama e-postası şu anda yeniden gönderilemedi.'
+        )
+      );
+    } finally {
+      setVerificationLoading(false);
+    }
+  }, [refreshProfile, tt]);
+
+  const handleRefreshVerificationStatus = useCallback(async () => {
+    if (!auth.currentUser) {
+      return;
+    }
+
+    try {
+      setVerificationLoading(true);
+      await auth.currentUser.reload();
+      await refreshProfile();
+
+      Alert.alert(
+        tt('success_title', 'Başarılı'),
+        auth.currentUser.emailVerified
+          ? tt(
+              'email_verification_status_confirmed',
+              'E-posta doğrulama durumu güncellendi. Hesabın doğrulanmış görünüyor.'
+            )
+          : tt(
+              'email_verification_status_pending',
+              'E-posta doğrulaması henüz tamamlanmamış görünüyor.'
+            )
+      );
+    } catch (error) {
+      console.error('[SettingsScreen] verification refresh failed:', error);
+      Alert.alert(
+        tt('error_title', 'Hata'),
+        tt(
+          'email_verification_status_refresh_failed',
+          'E-posta doğrulama durumu şu anda yenilenemedi.'
+        )
+      );
+    } finally {
+      setVerificationLoading(false);
+    }
+  }, [refreshProfile, tt]);
+
   return (
     <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <AmbientBackdrop colors={colors} variant="settings" />
@@ -921,160 +966,366 @@ export const SettingsScreen: React.FC = () => {
         >
           <View
             style={[
-              styles.settingsHero,
+              styles.accountHero,
               {
-                backgroundColor: withAlpha(colors.card, 'F2'),
-                borderColor: withAlpha(colors.border, 'B8'),
+                backgroundColor: isDark ? '#447B22' : '#63AE2E',
                 shadowColor: colors.shadow,
               },
             ]}
           >
-            <View style={styles.settingsHeroTopRow}>
-              <View style={styles.settingsHeroTextWrap}>
-                <Text style={[styles.heroEyebrow, { color: colors.primary }]}>
-                  {tt('settings', 'Ayarlar')}
-                </Text>
-                <Text style={[styles.headerTitle, { color: colors.text }]}>
-                  {tt('application_settings', 'Uygulama Ayarları')}
-                </Text>
+            <View style={styles.accountHeroTopRow}>
+              <View style={[styles.accountHeroAvatar, { backgroundColor: 'rgba(255,255,255,0.14)' }]}>
+                <Text style={styles.accountHeroAvatarText}>{avatarLetter}</Text>
               </View>
 
-              <View
-                style={[
-                  styles.headerStatusChip,
-                  {
-                    backgroundColor: withAlpha(
-                      monetization.entitlement?.isPremium ? colors.success : colors.primary,
-                      '14'
-                    ),
-                  },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.headerStatusChipText,
-                    {
-                      color: monetization.entitlement?.isPremium
-                        ? colors.success
-                        : colors.primary,
-                    },
-                  ]}
-                >
-                  {monetization.entitlement?.isPremium ? premiumStatusLabel : verifiedText}
+              <View style={styles.accountHeroTextWrap}>
+                {authLoading ? (
+                  <ActivityIndicator size="small" color="#FFFFFF" />
+                ) : (
+                  <>
+                    <Text style={styles.accountHeroName} numberOfLines={2}>
+                      {displayName}
+                    </Text>
+                    <Text style={styles.accountHeroMeta} numberOfLines={2}>
+                      {displayMeta}
+                    </Text>
+                    <Text style={styles.accountHeroSubmeta} numberOfLines={1}>
+                      {verifiedText}
+                    </Text>
+                  </>
+                )}
+              </View>
+
+              <View style={styles.accountHeroBadgeWrap}>
+                <Text style={styles.accountHeroBadgeEyebrow}>
+                  {tt('membership_label', 'Üyelik')}
+                </Text>
+                <Text style={styles.accountHeroBadgeValue} numberOfLines={1}>
+                  {premiumStatusLabel}
                 </Text>
               </View>
             </View>
 
-            <Text style={[styles.headerSubtitle, { color: colors.mutedText }]}>
-              {tt(
-                'settings_subtitle',
-                'Uygulama tercihlerinizi ve hesap bilgilerinizi yönetin.'
-              )}
-            </Text>
-
-            <View style={styles.heroMetaRow}>
-              <View
-                style={[
-                  styles.heroMetaPill,
-                  { backgroundColor: withAlpha(colors.primary, '10') },
-                ]}
-              >
-                <Ionicons name="globe-outline" size={14} color={colors.primary} />
-                <Text style={[styles.heroMetaPillText, { color: colors.primary }]}>
-                  {locale.toUpperCase()}
+            <View style={styles.accountHeroStatsRow}>
+              <View style={styles.accountHeroStat}>
+                <Text style={styles.accountHeroStatLabel}>
+                  {tt('language_label_short', 'Dil')}
                 </Text>
+                <Text style={styles.accountHeroStatValue}>{locale.toUpperCase()}</Text>
               </View>
-
-              <View
-                style={[
-                  styles.heroMetaPill,
-                  { backgroundColor: withAlpha(colors.teal, '10') },
-                ]}
-              >
-                <Ionicons name="diamond-outline" size={14} color={colors.teal} />
-                <Text style={[styles.heroMetaPillText, { color: colors.teal }]}>
-                  {premiumStatusLabel}
+              <View style={styles.accountHeroDivider} />
+              <View style={styles.accountHeroStat}>
+                <Text style={styles.accountHeroStatLabel}>
+                  {tt('app_version_short', 'Sürüm')}
                 </Text>
+                <Text style={styles.accountHeroStatValue}>{APP_VERSION}</Text>
               </View>
             </View>
           </View>
         </View>
 
+        {!(profile?.emailVerified ?? user?.emailVerified) ? (
+          <View
+            style={[
+              styles.verificationActionsRow,
+              { marginHorizontal: layout.horizontalPadding },
+            ]}
+          >
+            <TouchableOpacity
+              style={[
+                styles.verificationActionButton,
+                {
+                  backgroundColor: withAlpha(colors.primary, '12'),
+                  borderColor: withAlpha(colors.primary, '30'),
+                },
+              ]}
+              onPress={handleResendVerificationEmail}
+              disabled={verificationLoading}
+              activeOpacity={0.85}
+            >
+              {verificationLoading ? (
+                <ActivityIndicator size="small" color={colors.primary} />
+              ) : (
+                <>
+                  <Ionicons name="mail-unread-outline" size={16} color={colors.primary} />
+                  <Text style={[styles.verificationActionText, { color: colors.primary }]}>
+                    {tt(
+                      'email_verification_resend_action',
+                      'Doğrulama e-postasını yeniden gönder'
+                    )}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.verificationActionButton,
+                {
+                  backgroundColor: withAlpha(colors.teal, '12'),
+                  borderColor: withAlpha(colors.teal, '30'),
+                },
+              ]}
+              onPress={handleRefreshVerificationStatus}
+              disabled={verificationLoading}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="refresh-outline" size={16} color={colors.teal} />
+              <Text style={[styles.verificationActionText, { color: colors.teal }]}>
+                {tt('email_verification_refresh_action', 'Durumu yenile')}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
+        <Text
+          style={[
+            styles.sectionTitle,
+            { color: colors.text, marginHorizontal: layout.horizontalPadding },
+          ]}
+        >
+          {tt('my_account', 'Hesabım')}
+        </Text>
+
         <View
           style={[
-            styles.profileCard,
+            styles.menuCard,
             {
-              backgroundColor: withAlpha(colors.cardElevated, 'F3'),
-              borderColor: withAlpha(colors.border, 'B8'),
+              backgroundColor: colors.card,
+              borderColor: withAlpha(colors.border, 'D4'),
               marginHorizontal: layout.horizontalPadding,
-              shadowColor: colors.shadow,
             },
           ]}
         >
-        <View style={[styles.avatar, { backgroundColor: colors.primary }]}>
-          <Text style={styles.avatarText}>{avatarLetter}</Text>
+          <SettingsItem
+            icon="person-circle-outline"
+            label={tt('profile_information', 'Profil Bilgileri')}
+            value={displayName}
+            onPress={handleOpenProfileSettings}
+            colors={colors}
+            grouped="first"
+          />
+          <SettingsItem
+            icon="diamond-outline"
+            label={premiumTitle}
+            value={monetization.loading ? tt('loading', 'Yükleniyor') : premiumStatusLabel}
+            onPress={handleOpenPaywall}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="people-outline"
+            label={tt('family_health_profile', 'Aile ve Sağlık Profili')}
+            value={tt('family_health_profile_badge', 'Aile odaklı')}
+            onPress={handleOpenFamilyHealthProfile}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="leaf-outline"
+            label={tt('nutrition_preferences', 'Beslenme Tercihleri')}
+            value={nutritionPreferencesBadge}
+            onPress={handleOpenNutritionPreferences}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="notifications-outline"
+            label={tt('smart_notifications', 'Akıllı Bildirimler')}
+            value={
+              notificationSyncing
+                ? tt('loading', 'Yükleniyor')
+                : notificationsEnabled
+                  ? tt('smart_notifications_enabled', 'Açık')
+                  : tt('smart_notifications_disabled', 'Kapalı')
+            }
+            onPress={() => handleNotificationToggle(!notificationsEnabled)}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="language-outline"
+            label={tt('language_options', 'Dil Seçenekleri')}
+            value={languageReady ? selectedLanguageLabel : tt('loading', 'Yükleniyor')}
+            onPress={() => {
+              setLanguagePickerSearch('');
+              setLanguagePickerVisible(true);
+            }}
+            colors={colors}
+            grouped="last"
+          />
         </View>
 
-        <View style={styles.profileInfo}>
-          {authLoading ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <>
-              <Text style={[styles.userName, { color: colors.text }]} numberOfLines={1}>
-                {displayName}
-              </Text>
-              <Text style={[styles.userMeta, { color: colors.mutedText }]} numberOfLines={2}>
-                {displayMeta}
-              </Text>
-              <Text style={[styles.userMeta, { color: colors.mutedText }]} numberOfLines={1}>
-                {verifiedText}
-              </Text>
-              {profileError ? (
-                <Text style={styles.profileErrorText}>{profileError}</Text>
-              ) : null}
-            </>
-          )}
+        {monetization.error ? (
+          <Text
+            style={[
+              styles.monetizationErrorText,
+              { marginHorizontal: layout.horizontalPadding },
+            ]}
+          >
+            {monetization.error}
+          </Text>
+        ) : null}
+
+        <Text
+          style={[
+            styles.sectionTitle,
+            { color: colors.text, marginHorizontal: layout.horizontalPadding },
+          ]}
+        >
+          {tt('application_section_title', 'Uygulama')}
+        </Text>
+
+        <View
+          style={[
+            styles.menuCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: withAlpha(colors.border, 'D4'),
+              marginHorizontal: layout.horizontalPadding,
+            },
+          ]}
+        >
+          <SettingsItem
+            icon="color-palette-outline"
+            label={tt('theme_change', 'Tema Değiştir')}
+            value={isDark ? tt('dark_theme', 'Karanlık Tema') : tt('light_theme', 'Aydınlık Tema')}
+            onPress={() => {
+              if (toggleTheme) {
+                toggleTheme();
+              } else {
+                setIsDark(!isDark);
+              }
+            }}
+            colors={colors}
+            grouped="first"
+          />
+          <SettingsItem
+            icon="help-circle-outline"
+            label={tt('help_center', 'Yardım Merkezi')}
+            onPress={() => navigation.navigate('HelpCenter')}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="logo-google"
+            label={tt('google_sign_in_info', 'Google ile Giriş')}
+            subtitle={tt(
+              'google_sign_in_info_subtitle',
+              'Google oturumu, Firebase eşleşmesi ve giriş sınırları'
+            )}
+            onPress={() => navigation.navigate('HelpArticle', { articleKey: 'googleSignIn' })}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="megaphone-outline"
+            label={tt('ads_and_premium_info', 'Reklamlar ve Premium')}
+            subtitle={tt(
+              'ads_and_premium_info_subtitle',
+              'Banner, geçiş, ödüllü reklam ve premium modeli'
+            )}
+            onPress={() => navigation.navigate('HelpArticle', { articleKey: 'adsAndPremium' })}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="flask-outline"
+            label={tt('ecode_catalog', 'Katkı Kataloğu')}
+            value={tt('ecode_catalog_value', `${ALL_E_CODES.length} kayıt`)}
+            onPress={() => navigation.navigate('ECodeCatalog')}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="library-outline"
+            label={tt('methodology_sources', 'Metodoloji ve Kaynaklar')}
+            onPress={() => navigation.navigate('MethodologySources')}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="pricetags-outline"
+            label={tt('price_compare_title', 'Fiyat Karşılaştır')}
+            value={tt('price_compare_short_value', 'Market bazında')}
+            onPress={handleOpenPriceCompare}
+            colors={colors}
+            grouped="last"
+          />
         </View>
+
+        <Text
+          style={[
+            styles.sectionTitle,
+            { color: colors.text, marginHorizontal: layout.horizontalPadding, marginTop: 10 },
+          ]}
+        >
+          {tt('legal_and_trust', 'Yasal ve Güven')}
+        </Text>
+
+        <View
+          style={[
+            styles.menuCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: withAlpha(colors.border, 'D4'),
+              marginHorizontal: layout.horizontalPadding,
+            },
+          ]}
+        >
+          <SettingsItem
+            icon="document-lock-outline"
+            label={tt('legal_version_status_title', 'Belge Sürümü ve Onay')}
+            value={legalStatusLabel}
+            onPress={handleRefreshLegalAcceptance}
+            colors={colors}
+            grouped="first"
+          />
+          <SettingsItem
+            icon="document-text-outline"
+            label={tt('terms_and_conditions', 'Şartlar ve Koşullar')}
+            onPress={() => handleOpenLegalDocument('terms')}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="shield-checkmark-outline"
+            label={tt('privacy_policy', 'Gizlilik Politikası')}
+            onPress={() => handleOpenLegalDocument('privacy')}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="medkit-outline"
+            label={tt('medical_disclaimer', 'Tıbbi ve Bilgilendirme Uyarısı')}
+            onPress={() => handleOpenLegalDocument('medical')}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="diamond-outline"
+            label={tt('premium_terms', 'Premium Koşulları')}
+            onPress={() => handleOpenLegalDocument('premium')}
+            colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="compass-outline"
+            label={tt('independence_policy', 'Bağımsızlık Politikası')}
+            onPress={() => handleOpenLegalDocument('independence')}
+            colors={colors}
+            grouped="last"
+          />
         </View>
 
-      <Text
-        style={[
-          styles.sectionTitle,
-          { color: colors.text, marginHorizontal: layout.horizontalPadding },
-        ]}
-      >
-        {tt('account_and_plan', 'Hesap ve Plan')}
-      </Text>
-
-      <View style={{ marginHorizontal: layout.horizontalPadding, marginBottom: 22, gap: 12 }}>
-        <SettingsActionCard
-          icon="person-circle-outline"
-          title={tt('profile_information', 'Profil Bilgileri')}
-          subtitle={tt(
-            'settings_profile_entry_subtitle',
-            'Ad, soyad, iletişim ve konum bilgilerinizi ayrı ekranda düzenleyin.'
-          )}
-          badgeLabel={displayName}
-          onPress={handleOpenProfileSettings}
-          colors={colors}
-        />
-
-        <SettingsActionCard
-          icon="diamond-outline"
-          title={premiumTitle}
-          subtitle={premiumSubtitle}
-          badgeLabel={premiumStatusLabel}
-          onPress={handleOpenPaywall}
-          colors={colors}
-        />
-
-        {monetization.loading ? (
+        {legalAcceptanceUpdating ? (
           <View
             style={[
               styles.premiumLoadingCard,
               {
                 backgroundColor: withAlpha(colors.cardElevated, 'F1'),
                 borderColor: withAlpha(colors.border, 'B8'),
+                marginHorizontal: layout.horizontalPadding,
               },
             ]}
           >
@@ -1082,288 +1333,75 @@ export const SettingsScreen: React.FC = () => {
           </View>
         ) : null}
 
-        {monetization.error ? (
-          <Text style={styles.monetizationErrorText}>{monetization.error}</Text>
-        ) : null}
-      </View>
-
-      <Text
-        style={[
-          styles.sectionTitle,
-          { color: colors.text, marginHorizontal: layout.horizontalPadding },
-        ]}
-      >
-        {tt('application_settings', 'Uygulama Ayarları')}
-      </Text>
-
-      <SettingsItem
-        icon="moon-outline"
-        label={tt('dark_mode', 'Karanlık Mod')}
-        colors={colors}
-      >
-        <Switch
-          value={isDark}
-          onValueChange={() => {
-            if (toggleTheme) {
-              toggleTheme();
-            } else {
-              setIsDark(!isDark);
-            }
-          }}
-          trackColor={{ false: '#767577', true: colors.primary }}
-          thumbColor={Platform.OS === 'ios' ? '#FFF' : isDark ? colors.primary : '#f4f3f4'}
-        />
-      </SettingsItem>
-
-      <SettingsItem
-        icon="language-outline"
-        label={tt('language_options', 'Dil Seçenekleri')}
-        colors={colors}
-        value={languageReady ? selectedLanguageLabel : tt('loading', 'Yükleniyor')}
-        onPress={() => {
-          setLanguagePickerSearch('');
-          setLanguagePickerVisible(true);
-        }}
-      />
-
-      <SettingsActionCard
-        icon="people-outline"
-        title={tt('family_health_profile', 'Aile ve Sağlık Profili')}
-        subtitle={tt(
-          'family_health_profile_settings_subtitle',
-          'Alerjen, katkı takibi ve sağlık odaklarını ayarlayarak detay ekranındaki uyarıları kişiselleştirin.'
-        )}
-        badgeLabel={tt('family_health_profile_badge', 'Aile odaklı')}
-        onPress={handleOpenFamilyHealthProfile}
-        colors={colors}
-      />
-
-      <SettingsActionCard
-        icon="leaf-outline"
-        title={tt('nutrition_preferences', 'Beslenme Tercihleri')}
-        subtitle={tt(
-          'nutrition_preferences_subtitle',
-          'Gluten, laktoz, palmiye yağı ve vegan/vejetaryen tercihlerine göre kişisel uygunluk uyarıları alın.'
-        )}
-        badgeLabel={nutritionPreferencesBadge}
-        onPress={handleOpenNutritionPreferences}
-        colors={colors}
-      />
-
-      <SettingsItem
-        icon="notifications-outline"
-        label={tt('smart_notifications', 'Akıllı Bildirimler')}
-        colors={colors}
-      >
-        <View style={styles.itemRight}>
-          {notificationSyncing ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <Text style={[styles.itemValue, { color: colors.text }]} numberOfLines={1}>
-              {notificationsEnabled
-                ? tt('smart_notifications_enabled', 'Açık')
-                : tt('smart_notifications_disabled', 'Kapalı')}
-            </Text>
-          )}
-          <Switch
-            value={notificationsEnabled}
-            onValueChange={handleNotificationToggle}
-            trackColor={{ false: '#767577', true: colors.primary }}
-            thumbColor={Platform.OS === 'ios' ? '#FFF' : notificationsEnabled ? colors.primary : '#f4f3f4'}
-            disabled={notificationSyncing}
-          />
-        </View>
-      </SettingsItem>
-
-      <Text
-        style={[
-          styles.sectionTitle,
-          { color: colors.text, marginHorizontal: layout.horizontalPadding },
-        ]}
-      >
-        {tt('support_info', 'Destek ve Bilgi')}
-      </Text>
-
-      <SettingsItem
-        icon="help-circle-outline"
-        label={tt('help_center', 'Yardım Merkezi')}
-        colors={colors}
-        onPress={() => navigation.navigate('HelpCenter')}
-      />
-
-      <SettingsItem
-        icon="flask-outline"
-        label={tt('ecode_catalog', 'Katkı Kataloğu')}
-        colors={colors}
-        value={tt('ecode_catalog_value', `${ALL_E_CODES.length} kayıt`)}
-        onPress={() => navigation.navigate('ECodeCatalog')}
-      />
-
-      <SettingsItem
-        icon="library-outline"
-        label={tt('methodology_sources', 'Metodoloji ve Kaynaklar')}
-        colors={colors}
-        onPress={() => navigation.navigate('MethodologySources')}
-      />
-
-      <SettingsItem
-        icon="pricetags-outline"
-        label={tt('price_compare_title', 'Fiyat Karşılaştır')}
-        colors={colors}
-        value={tt('price_compare_short_value', 'Market bazında')}
-        onPress={handleOpenPriceCompare}
-      />
-
-      <Text
-        style={[
-          styles.sectionTitle,
-          { color: colors.text, marginHorizontal: layout.horizontalPadding, marginTop: 10 },
-        ]}
-      >
-        {tt('legal_and_trust', 'Yasal ve Güven')}
-      </Text>
-
-      <SettingsItem
-        icon="document-text-outline"
-        label={tt('terms_and_conditions', 'Şartlar ve Koşullar')}
-        colors={colors}
-        onPress={() => handleOpenLegalDocument('terms')}
-      />
-
-      <SettingsItem
-        icon="shield-checkmark-outline"
-        label={tt('privacy_policy', 'Gizlilik Politikası')}
-        colors={colors}
-        onPress={() => handleOpenLegalDocument('privacy')}
-      />
-
-      <SettingsItem
-        icon="medkit-outline"
-        label={tt('medical_disclaimer', 'Tıbbi ve Bilgilendirme Uyarısı')}
-        colors={colors}
-        onPress={() => handleOpenLegalDocument('medical')}
-      />
-
-      <SettingsItem
-        icon="diamond-outline"
-        label={tt('premium_terms', 'Premium Koşulları')}
-        colors={colors}
-        onPress={() => handleOpenLegalDocument('premium')}
-      />
-
-      <SettingsItem
-        icon="compass-outline"
-        label={tt('independence_policy', 'Bağımsızlık Politikası')}
-        colors={colors}
-        onPress={() => handleOpenLegalDocument('independence')}
-      />
-
-      <SettingsActionCard
-        icon="document-lock-outline"
-        title={tt('legal_version_status_title', 'Belge Sürümü ve Onay')}
-        subtitle={`${legalStatusSubtitle} ${tt('legal_version_current_label', 'Geçerli sürüm')}: ${LEGAL_VERSION_LABEL}. ${tt('legal_version_accepted_label', 'Hesap sürümü')}: ${acceptedLegalVersion ?? '-'}. ${tt('legal_version_accepted_at_label', 'Onay zamanı')}: ${acceptedLegalAtText}.`}
-        badgeLabel={legalStatusLabel}
-        onPress={handleRefreshLegalAcceptance}
-        colors={colors}
-      />
-
-      {legalAcceptanceUpdating ? (
         <View
           style={[
-            styles.premiumLoadingCard,
+            styles.menuCard,
             {
-              backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-              borderColor: withAlpha(colors.border, 'B8'),
+              backgroundColor: colors.card,
+              borderColor: withAlpha(colors.border, 'D4'),
+              marginHorizontal: layout.horizontalPadding,
             },
           ]}
         >
-          <ActivityIndicator size="small" color={colors.primary} />
-        </View>
-      ) : null}
-
-      <View
-        style={[
-          styles.aboutCard,
-          {
-            backgroundColor: withAlpha(colors.cardElevated, 'EE'),
-            borderColor: withAlpha(colors.border, 'B8'),
-            marginHorizontal: layout.horizontalPadding,
-            shadowColor: colors.shadow,
-          },
-        ]}
-      >
-        <View style={styles.aboutHeader}>
-          <View style={[styles.iconBox, { backgroundColor: `${colors.primary}15` }]}>
-            <Ionicons name="information-circle-outline" size={20} color={colors.primary} />
-          </View>
-          <View style={styles.aboutHeaderTextWrap}>
-            <Text style={[styles.aboutTitle, { color: colors.text }]}>
-              {tt('about_app', 'Uygulama Hakkında')}
-            </Text>
-            <Text style={[styles.aboutVersion, { color: colors.primary }]}>
-              {APP_VERSION}
-            </Text>
-          </View>
+          <SettingsItem
+            icon="mail-outline"
+            label={tt('contact_us', 'Bize Ulaşın')}
+            colors={colors}
+            onPress={() =>
+              handleSafeOpenUrl(
+                'mailto:destekerenesal@gmail.com',
+                tt('contact_open_error', 'E-posta uygulaması açılamadı')
+              )
+            }
+            grouped="single"
+          />
         </View>
 
-        <Text style={[styles.aboutText, { color: colors.text }]}>
-          {tt(
-            'about_app_summary',
-            'BarkodAnaliz; gıda, kozmetik ve ilaç barkodlarını hızlıca çözümleyip skor, içerik sinyalleri ve resmi kaynak bağlantılarını tek yerde sunar.'
-          )}
-        </Text>
-
-        <View style={styles.aboutBadgeRow}>
-          {['OpenFoodFacts', 'OpenBeautyFacts', 'TITCK', 'E-Code'].map((item) => (
-            <View
-              key={item}
-              style={[
-                styles.aboutBadge,
-                { backgroundColor: withAlpha(colors.primary, '10') },
-              ]}
-            >
-              <Text style={[styles.aboutBadgeText, { color: colors.primary }]}>{item}</Text>
-            </View>
-          ))}
+        <View
+          style={[
+            styles.menuCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: withAlpha(colors.border, 'D4'),
+              marginHorizontal: layout.horizontalPadding,
+            },
+          ]}
+        >
+          <SettingsItem
+            icon="information-circle-outline"
+            label={tt('about_app', 'Uygulama Hakkında')}
+            subtitle={tt(
+              'about_app_summary_short',
+              'Sürüm, veri kaynakları ve uygulama özeti.'
+            )}
+            value={APP_VERSION}
+            colors={colors}
+            onPress={handleOpenAboutApp}
+            grouped="single"
+          />
         </View>
 
-        <Text style={[styles.aboutDetailLine, { color: colors.mutedText }]}>
-          {tt(
-            'about_app_source_line',
-            'Veri kaynakları arasında OpenFoodFacts, OpenBeautyFacts ve resmi TITCK katalogları yer alır.'
-          )}
-        </Text>
-        <Text style={[styles.aboutDetailLine, { color: colors.mutedText }]}>
-          {tt(
-            'about_app_catalog_line',
-            'Yerel E-kod kataloğu ile katkı maddeleri daha okunur ve karşılaştırılabilir hale getirilir.'
-          )}
-        </Text>
-        <Text style={[styles.aboutDetailLine, { color: colors.mutedText }]}>
-          {tt(
-            'about_app_privacy_line',
-            'Tarama geçmişi cihaz içinde tutulur; izin verilen senaryolarda Firebase önbelleği ile hız kazanılır.'
-          )}
-        </Text>
-        <Text style={[styles.aboutDetailLine, { color: colors.mutedText }]}>
-          {tt(
-            'about_app_support_line',
-            'Destek ve geri bildirim için uygulama içinden bize ulaşabilir, sürüm güncellemelerini bu ekrandan takip edebilirsiniz.'
-          )}
-        </Text>
-      </View>
-
-      <SettingsItem
-        icon="mail-outline"
-        label={tt('contact_us', 'Bize Ulaşın')}
-        colors={colors}
-        onPress={() =>
-          handleSafeOpenUrl(
-            'mailto:destekerenesal@gmail.com',
-            tt('contact_open_error', 'E-posta uygulaması açılamadı')
-          )
-        }
-      />
+        <View
+          style={[
+            styles.menuCard,
+            {
+              backgroundColor: colors.card,
+              borderColor: withAlpha(colors.border, 'D4'),
+              marginHorizontal: layout.horizontalPadding,
+              marginTop: 16,
+              marginBottom: 24,
+            },
+          ]}
+        >
+          <SettingsItem
+            icon="log-out-outline"
+            label={tt('logout', 'Çıkış Yap')}
+            colors={colors}
+            onPress={handleLogout}
+            danger
+            grouped="single"
+          />
+        </View>
 
       {operabilityDiagnosticsEnabled ? (
         <>
@@ -3116,6 +3154,105 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     opacity: 0.65,
   },
+  accountHero: {
+    borderRadius: 22,
+    paddingHorizontal: 22,
+    paddingVertical: 22,
+    paddingBottom: 20,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: {
+      width: 0,
+      height: 6,
+    },
+  },
+  accountHeroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  accountHeroAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  accountHeroAvatarText: {
+    color: '#FFFFFF',
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  accountHeroTextWrap: {
+    flex: 1,
+    paddingRight: 10,
+  },
+  accountHeroName: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '900',
+    lineHeight: 24,
+  },
+  accountHeroMeta: {
+    marginTop: 4,
+    color: 'rgba(255,255,255,0.84)',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  accountHeroSubmeta: {
+    marginTop: 5,
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  accountHeroBadgeWrap: {
+    alignItems: 'flex-end',
+    minWidth: 72,
+  },
+  accountHeroBadgeEyebrow: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  accountHeroBadgeValue: {
+    marginTop: 6,
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  accountHeroStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.18)',
+  },
+  accountHeroStat: {
+    flex: 1,
+  },
+  accountHeroStatLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  accountHeroStatValue: {
+    marginTop: 5,
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  accountHeroDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    marginHorizontal: 14,
+  },
   profileCard: {
     padding: 20,
     borderRadius: 24,
@@ -3162,13 +3299,40 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
   },
+  verificationActionsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
+    marginBottom: 22,
+  },
+  verificationActionButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  verificationActionText: {
+    flexShrink: 1,
+    fontSize: 12,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: 'bold',
-    textTransform: 'uppercase',
-    opacity: 0.5,
-    letterSpacing: 1,
-    marginBottom: 12,
+    fontSize: 18,
+    fontWeight: '900',
+    marginBottom: 10,
+    marginTop: 6,
+  },
+  menuCard: {
+    borderWidth: 1,
+    borderRadius: 18,
+    marginBottom: 18,
+    overflow: 'hidden',
   },
   premiumLoadingCard: {
     minHeight: 116,
@@ -3273,7 +3437,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 16,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 14,
     shadowOpacity: 0.08,
     shadowRadius: 16,
@@ -3284,6 +3448,7 @@ const styles = StyleSheet.create({
   },
   actionCardTextWrap: {
     flex: 1,
+    minWidth: 0,
   },
   actionCardTitle: {
     fontSize: 15,
@@ -3295,8 +3460,10 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
   actionCardRight: {
+    marginLeft: 'auto',
     alignItems: 'flex-end',
     gap: 8,
+    flexShrink: 0,
   },
   actionCardBadge: {
     minHeight: 28,
@@ -3452,27 +3619,42 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   item: {
-    marginHorizontal: 25,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 17,
+  },
+  legalMetaCard: {
     borderWidth: 1,
-    marginBottom: 10,
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 6,
+    marginBottom: 18,
+  },
+  legalMetaText: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '600',
   },
   itemLeft: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flexShrink: 1,
     paddingRight: 12,
     flex: 1,
+  },
+  itemGlyphWrap: {
+    width: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+    paddingTop: 1,
+  },
+  itemTextWrap: {
+    flex: 1,
+    minWidth: 0,
   },
   iconBox: {
     width: 36,
@@ -3483,39 +3665,44 @@ const styles = StyleSheet.create({
     marginRight: 15,
   },
   itemLabel: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     flexShrink: 1,
+  },
+  itemSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
   },
   itemRight: {
     flexDirection: 'row',
     alignItems: 'center',
     marginLeft: 10,
+    gap: 8,
   },
   itemValue: {
     fontSize: 14,
-    opacity: 0.5,
-    marginRight: 8,
-    maxWidth: 110,
+    fontWeight: '700',
+    maxWidth: 138,
+    textAlign: 'right',
   },
-  itemChevronWrap: {
-    width: 28,
-    height: 28,
+  itemBadge: {
+    minHeight: 26,
     borderRadius: 999,
+    paddingHorizontal: 10,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  itemBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
   },
   aboutCard: {
     borderWidth: 1,
     borderRadius: 18,
     padding: 16,
-    marginBottom: 10,
-    shadowOpacity: 0.08,
-    shadowRadius: 14,
-    shadowOffset: {
-      width: 0,
-      height: 10,
-    },
+    marginBottom: 16,
   },
   aboutHeader: {
     flexDirection: 'row',
@@ -3711,8 +3898,8 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   footerLogo: {
-    width: 34,
-    height: 34,
+    width: 88,
+    height: 46,
     marginBottom: 10,
   },
   footerText: {

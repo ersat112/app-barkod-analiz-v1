@@ -116,10 +116,14 @@ export type MarketProductOffersResponse = {
 
 export type MarketSearchProduct = {
   id: string;
+  productId?: string | null;
   barcode?: string | null;
   productName: string;
   brand?: string | null;
   category?: string | null;
+  normalizedCategoryId?: string | null;
+  taxonomyPath?: string | null;
+  taxonomyLeaf?: string | null;
   packSize?: number | null;
   packUnit?: string | null;
   matchConfidence?: number | null;
@@ -132,8 +136,41 @@ export type MarketSearchProduct = {
   dataFreshness?: MarketDataFreshness | null;
 };
 
+export type MarketCategoryNode = {
+  normalizedCategoryId: string;
+  taxonomyLeaf: string;
+  taxonomyPath?: string | null;
+  normalizedCategory?: string | null;
+  parentCategoryId?: string | null;
+  depth: number;
+  childrenCount: number;
+  productCount?: number | null;
+  inStockProductCount?: number | null;
+  marketCount?: number | null;
+  sortOrder?: number | null;
+};
+
+export type MarketCategoryTreeResponse = {
+  fetchedAt: string;
+  requestId?: string | null;
+  partial?: boolean;
+  warnings?: string[];
+  nodes: MarketCategoryNode[];
+};
+
 export type MarketProductSearchResponse = {
   query: string;
+  categoryId?: string | null;
+  fetchedAt: string;
+  requestId?: string | null;
+  partial?: boolean;
+  warnings?: string[];
+  results: MarketSearchProduct[];
+};
+
+export type MarketCategoryProductsResponse = {
+  categoryId: string;
+  nextCursor?: number | null;
   fetchedAt: string;
   requestId?: string | null;
   partial?: boolean;

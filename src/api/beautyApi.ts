@@ -1,10 +1,16 @@
 import axios from 'axios';
 import type { Product } from '../utils/analysis';
 import {
+  resolveBrandOwner,
   resolveBrand,
+  resolveCategories,
+  resolveCountry,
+  resolveIngredients,
   resolveLocalizedName,
+  resolveManufacturingPlace,
+  resolveOrigin,
+  safeArray,
   safeObject,
-  sanitizeFactsText,
 } from './factsShared';
 
 /**
@@ -30,31 +36,7 @@ const beautySearchClient = axios.create({
 });
 
 const BEAUTY_FIELDS =
-  'code,product_name,product_name_tr,product_name_en,generic_name,generic_name_tr,generic_name_en,brands,image_url,image_front_url,ingredients_text,ingredients_text_tr,ingredients_text_en,ecoscore_grade,nutriscore_grade,score,usage,instructions,countries,countries_tags,origins,origins_tags,manufacturing_places';
-
-const safeText = (value?: string | null, fallback = ''): string => {
-  if (typeof value !== 'string') return fallback;
-  const trimmed = value.trim();
-  return trimmed || fallback;
-};
-
-const resolveCountry = (product: any): string => {
-  return sanitizeFactsText(
-    product?.countries ||
-      product?.countries_tags?.[0] ||
-      product?.manufacturing_places ||
-      ''
-  );
-};
-
-const resolveOrigin = (product: any): string => {
-  return sanitizeFactsText(
-    product?.origins ||
-      product?.origins_tags?.[0] ||
-      product?.countries ||
-      ''
-  );
-};
+  'code,product_name,product_name_tr,product_name_en,product_name_de,product_name_fr,generic_name,generic_name_tr,generic_name_en,generic_name_de,generic_name_fr,brands,brand_owner,brands_owner,owners,image_url,image_front_url,ingredients_text,ingredients_text_tr,ingredients_text_en,ingredients_text_de,ingredients_text_fr,ecoscore_grade,nutriscore_grade,score,usage,instructions,categories,categories_tags,countries,countries_tags,origins,origins_tags,manufacturing_places,manufacturing_places_tags';
 
 const mapBeautyFactsProduct = (barcode: string, rawProduct: any): Product => {
   const p = rawProduct;
@@ -62,26 +44,28 @@ const mapBeautyFactsProduct = (barcode: string, rawProduct: any): Product => {
     safeObject(p),
     'İsimsiz Kozmetik'
   );
+  const safeProduct = safeObject(p);
 
   return {
     barcode,
     name: resolvedName,
-    brand: resolveBrand(safeObject(p), 'Bilinmeyen Marka'),
-    image_url: safeText(p?.image_front_url || p?.image_url),
+    brand: resolveBrand(safeProduct, 'Bilinmeyen Marka'),
+    image_url: String(p?.image_front_url || p?.image_url || '').trim(),
     type: 'beauty',
     score: typeof p?.score === 'number' ? p.score : undefined,
-    grade: safeText(p?.ecoscore_grade || p?.nutriscore_grade || 'unknown'),
-    ingredients_text:
-      safeText(p?.ingredients_text) ||
-      safeText(p?.ingredients_text_tr) ||
-      safeText(p?.ingredients_text_en),
-    usage_instructions:
-      safeText(p?.usage) ||
-      safeText(p?.instructions) ||
-      'Kullanım talimatı belirtilmemiş.',
+    grade: String(p?.ecoscore_grade || p?.nutriscore_grade || 'unknown').trim(),
+    ingredients_text: resolveIngredients(safeProduct),
+    categories: resolveCategories(safeProduct),
+    categories_tags: safeArray(p?.categories_tags),
+    usage_instructions: String(p?.usage || p?.instructions || '').trim()
+      || 'Kullanım talimatı belirtilmemiş.',
     sourceName: 'openbeautyfacts',
-    country: resolveCountry(p),
-    origin: resolveOrigin(p),
+    country: resolveCountry(safeProduct),
+    countries_tags: safeArray(p?.countries_tags),
+    origin: resolveOrigin(safeProduct),
+    origins_tags: safeArray(p?.origins_tags),
+    manufacturingPlace: resolveManufacturingPlace(safeProduct),
+    brandOwner: resolveBrandOwner(safeProduct),
   };
 };
 
@@ -176,7 +160,7 @@ export const searchBeautyProductsByText = async (
 
     return products
       .map((item: any) => {
-        const barcode = safeText(item?.code);
+        const barcode = String(item?.code || '').trim();
         if (!barcode) {
           return null;
         }

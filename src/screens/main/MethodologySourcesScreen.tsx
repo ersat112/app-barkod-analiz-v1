@@ -192,7 +192,7 @@ export const MethodologySourcesScreen: React.FC = () => {
         title: tt('methodology_food_title', 'Gıda'),
         body: tt(
           'methodology_food_body',
-          'Gıda ürünlerinde toplam skor; zorunlu besin tablosunun yerine geçmeyen, onu tamamlayan basitleştirilmiş ön yüz besin sinyali, NOVA işlenme seviyesi ve katkı sinyallerinin birlikte okunmasıyla oluşur.'
+          'Gıda ürünlerinde toplam skor resmi besin puanı veya ürün derecesi taban alınarak oluşturulur; bunlar yoksa çözümlenen besin tablosu alanlarından yerel besinsel taban üretilir. Katkı sinyalleri skoru aşağı çekebilir; NOVA işlenme seviyesi ise daha düşük ağırlıklı ikinci bir sinyal olarak toplam skora kontrollü biçimde yansır.'
         ),
         chips: [
           tt('food_signal_nutrition_title', 'Besinsel kalite'),

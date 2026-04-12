@@ -74,6 +74,8 @@ Query:
 
 - `city_code`
 - `district`
+- `lat`
+- `lng`
 - `limit`
 - `include_out_of_stock=true|false`
 
@@ -99,14 +101,25 @@ Ornek response:
     "code": "34",
     "name": "Istanbul"
   },
+  "district": "Kadikoy",
+  "request_location": {
+    "latitude": 40.987,
+    "longitude": 29.028
+  },
   "offers": [
     {
       "market_key": "migros_sanal_market",
       "market_name": "Migros",
       "market_type": "national_chain",
+      "market_logo_url": "https://www.google.com/s2/favicons?domain_url=https%3A%2F%2Fwww.migros.com.tr&sz=128",
       "coverage_scope": "national",
       "pricing_scope": "national_reference",
       "price_source_type": "national_reference_price",
+      "branch_id": "migros_sanal_market:34",
+      "branch_name": "Migros Istanbul / Kadikoy",
+      "latitude": null,
+      "longitude": null,
+      "distance_meters": null,
       "price": 89.95,
       "currency": "TRY",
       "unit_price": 179.9,
@@ -121,7 +134,93 @@ Ornek response:
 }
 ```
 
-### 2. Fiyat Gecmisi
+### 2. Runtime Resolve
+
+`GET /v1/products/{barcode}/resolve`
+
+Query:
+
+- `city_code`
+- `district`
+- `lat`
+- `lng`
+- `limit`
+- `include_out_of_stock=true|false`
+
+Amac:
+
+- exact barkod market verisinde bulunamiyorsa barkodu once urun kimligine cozmek
+- urun kimligini isim + marka + boyut sinyali ile market tekliflerine map etmek
+
+Calisma sirası:
+
+1. once local canonical / barkod tablolarina bakilir
+2. yoksa Supabase `mg_openfacts_stage` kullanilir
+3. hala yoksa canli Open Food Facts / Open Beauty Facts fallback'i denenir
+4. son adimda market teklifleri isim bazli resolver ile eslestirilir
+
+Top-level alanlar:
+
+- `match_mode`
+  - `exact_barcode`
+  - `catalog_name_match`
+  - `identity_not_found`
+- `resolution`
+- `results`
+
+`resolution` icinde beklenen alanlar:
+
+- `source`
+- `project`
+- `product_name`
+- `brand`
+- `size_value`
+- `size_unit`
+- `category`
+- `query_tokens`
+
+`results[*]` icinde ek kalite alanlari:
+
+- `catalog_match_confidence`
+- `catalog_match_reasons`
+
+Bu endpoint BarkodAnaliz tarafinda exact barkod sonucu gelmediginde fallback olarak kullanilmalidir.
+
+Ornek:
+
+```bash
+curl -s "http://127.0.0.1:8040/v1/products/0076223000264/resolve?city_code=34&district=Kadikoy&lat=40.987&lng=29.028&limit=5"
+```
+
+Ornek response iskeleti:
+
+```json
+{
+  "barcode": "0076223000264",
+  "match_mode": "catalog_name_match",
+  "resolution": {
+    "source": "supabase_openfacts_stage",
+    "project": "off",
+    "product_name": "TOBLERONE",
+    "brand": "Mondelez",
+    "size_value": null,
+    "size_unit": null,
+    "category": null,
+    "query_tokens": ["mondelez", "toblerone"]
+  },
+  "results": [
+    {
+      "barcode": "8690000000000",
+      "normalized_product_name": "toblerone sutlu cikolata",
+      "catalog_match_confidence": 0.82,
+      "catalog_match_reasons": ["name", "brand"],
+      "offers": []
+    }
+  ]
+}
+```
+
+### 3. Fiyat Gecmisi
 
 `GET /v1/products/{barcode}/price-history`
 
@@ -135,7 +234,7 @@ Amac:
 
 - fiyat degisimini ve trendini gostermek
 
-### 3. Fiyatlanmis Alternatifler
+### 4. Fiyatlanmis Alternatifler
 
 `POST /v1/pricing/alternatives`
 
@@ -156,7 +255,11 @@ Amac:
 
 - BarkodAnaliz tarafinda secilmis alternatif barkodlarin fiyat ve bulunabilirlik ozetini tek istekte donmek
 
-### 4. Urun Arama
+Top-level sonuc anahtari:
+
+- `entries`
+
+### 5. Urun Arama
 
 `GET /v1/search/products`
 
@@ -171,6 +274,63 @@ Query:
 Amac:
 
 - barkodsuz veya eslesmesi zayif urunlerde isim bazli fiyat aramasi yapmak
+
+Top-level sonuc anahtari:
+
+- `results`
+
+Her sonuc icinde beklenen kalite alanlari:
+
+- `match_confidence`
+- `normalized_product_name`
+- `normalized_category`
+- `pack_size`
+- `pack_unit`
+
+### 6. Barkod Bazli Sepet Karsilastirma
+
+`POST /api/v1/basket/compare`
+
+Request body:
+
+```json
+{
+  "city_code": "34",
+  "district": "Kadikoy",
+  "lat": 40.987,
+  "lng": 29.028,
+  "items": [
+    {
+      "barcode": "8000500023976",
+      "quantity": 1
+    },
+    {
+      "barcode": "8690504121541",
+      "quantity": 2
+    }
+  ]
+}
+```
+
+Response ana alanlari:
+
+- `mixed_cheapest_total`
+- `best_single_market_total`
+- `nearest_market_total`
+- `market_totals`
+- `missing_items`
+
+`market_totals` satirinda beklenen alanlar:
+
+- `market_key`
+- `market_name`
+- `market_logo_url`
+- `distance_meters`
+- `branch_id`
+- `branch_name`
+- `basket_total`
+- `available_item_count`
+- `missing_item_count`
 
 ## Destek Endpointleri
 
@@ -194,9 +354,15 @@ BarkodAnaliz UI ve karar motoru icin asagidaki alanlar korunmalidir:
 - `market_key`
 - `market_name`
 - `market_type`
+- `market_logo_url`
 - `coverage_scope`
 - `pricing_scope`
 - `price_source_type`
+- `branch_id`
+- `branch_name`
+- `latitude`
+- `longitude`
+- `distance_meters`
 - `price`
 - `currency`
 - `unit_price`
@@ -243,9 +409,12 @@ Tum endpointler asagidaki ortak alanlari dondurmelidir:
 
 ```json
 {
-  "mode": "weekly_crawl",
+  "mode": "weekly_full_plus_hot_scan",
   "last_full_refresh_at": "2026-03-30T02:00:00Z",
-  "last_hot_refresh_at": "2026-04-01T08:10:00Z"
+  "last_hot_refresh_at": "2026-04-01T08:10:00Z",
+  "full_refresh_hours": 168,
+  "hot_refresh_hours": 48,
+  "history_mode": "append_only_offer_snapshots"
 }
 ```
 
@@ -281,6 +450,11 @@ Amac:
 - background retry
 - toplu sync
 
+Not:
+
+- `event_id` veya `request_id` duplicate korumasi icin kullanilabilir
+- token tanimliysa ingest uclari `Authorization: Bearer <token>` veya `X-API-Key` ister
+
 ## Firebase Mirror Durumu
 
 Bugun aktif scan/signal aynasi:
@@ -299,10 +473,24 @@ Ancak bunlar V1 cikis blokaji degildir.
 ## BarkodAnaliz Icin Uygulama Kurallari
 
 1. istemci entegrasyonu API-first yazilmali
-2. Supabase tablolarina mobil taraftan dogrudan sorgu yazilmamali
-3. `price_source_type` ayrimi UI ve ranking tarafinda korunmali
-4. Firebase pricing mirror yokmus gibi de calisabilmeli
-5. scan event flush / retry mekanizmasi `barcode/scans` endpointlerine gore hazirlanmali
+2. scan akisinda once `GET /v1/products/{barcode}/offers` cagrilmali
+3. `offers` bos donerse veya yeterli sonuc uretmezse `GET /v1/products/{barcode}/resolve` fallback'i cagrilmali
+4. `search/products` otomatik scan akisi icin degil, manuel arama / duzeltme akisi icin kullanilmali
+5. Supabase tablolarina mobil taraftan dogrudan sorgu yazilmamali
+6. `price_source_type` ayrimi UI ve ranking tarafinda korunmali
+7. `catalog_match_confidence` dusukse istemci urunu otomatik secmek yerine kullanici onayi istemeli
+8. Firebase pricing mirror yokmus gibi de calisabilmeli
+9. scan event flush / retry mekanizmasi `barcode/scans` endpointlerine gore hazirlanmali
+
+## Barkod Scan Icın Onerilen Istemci Akisi
+
+1. Barkod okut.
+2. `GET /v1/products/{barcode}/offers`
+3. Sonuc varsa fiyat kartlarini goster.
+4. Sonuc bos ise `GET /v1/products/{barcode}/resolve`
+5. `resolve.results[0].catalog_match_confidence` yeterince yuksekse urun detayina gec.
+6. Skor dusukse kullaniciya "en yakin eslesmeler" listesi goster.
+7. Her scan sonunda `POST /api/v1/barcode/scans` veya batch flush kullan.
 
 ## Kisa Ozet
 

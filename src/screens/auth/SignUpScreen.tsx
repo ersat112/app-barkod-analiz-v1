@@ -26,6 +26,7 @@ import {
   OAuthProvider,
   createUserWithEmailAndPassword,
   sendEmailVerification,
+  signOut,
   signInWithCredential,
   updateProfile,
 } from 'firebase/auth';
@@ -758,12 +759,15 @@ export const SignUpScreen: React.FC = () => {
         hasProfileSeed: true,
       });
 
+      await signOut(auth);
+      navigation.navigate('Login');
+
       Alert.alert(
-        tt('success_title', 'Başarılı'),
+        tt('welcome_verify_title', 'Hoş geldin'),
         verificationEmailSent
           ? tt(
-              'verification_email_sent_with_support_hint',
-              'Hesabınız oluşturuldu. Doğrulama e-postası gönderildi. Gelmezse spam klasörünü kontrol edin veya destekerenesal@gmail.com ile iletişime geçin.'
+              'verification_email_sent_login_required',
+              'Hoş geldin. Hesabın oluşturuldu ve doğrulama e-postası gönderildi. E-postanı onayladıktan sonra giriş yapabilirsin.'
             )
           : tt(
               'verification_email_send_failed_but_account_created',
@@ -806,6 +810,7 @@ export const SignUpScreen: React.FC = () => {
     isFormValid,
     kvkkAccepted,
     lastName,
+    navigation,
     password,
     phone,
     tt,

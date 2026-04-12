@@ -24,6 +24,14 @@ type RemoteMarketGelsinRuntimeDocument = Partial<{
   enabled: boolean;
   baseUrl: string;
   base_url: string;
+  apiKey: string;
+  api_key: string;
+  publishableKey: string;
+  publishable_key: string;
+  publicKey: string;
+  public_key: string;
+  anonKey: string;
+  anon_key: string;
   timeoutMs: number;
   timeout_ms: number;
   updatedAt: unknown;
@@ -64,6 +72,15 @@ function toBaseUrl(value: unknown): string {
     : '';
 }
 
+function toAnonKey(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim();
+  return normalized.length ? normalized : null;
+}
+
 function isConfigFresh(config: MarketGelsinRuntimeSnapshot | null): boolean {
   if (!config?.fetchedAt) {
     return false;
@@ -79,6 +96,17 @@ function normalizeRuntimeConfig(
 ): MarketGelsinRuntimeSnapshot {
   const fallback = getDefaultMarketGelsinRuntimeSnapshot();
   const baseUrl = toBaseUrl(raw?.baseUrl ?? raw?.base_url) || fallback.baseUrl;
+  const anonKey =
+    toAnonKey(
+      raw?.apiKey ??
+        raw?.api_key ??
+        raw?.publishableKey ??
+        raw?.publishable_key ??
+        raw?.publicKey ??
+        raw?.public_key ??
+        raw?.anonKey ??
+        raw?.anon_key
+    ) ?? fallback.anonKey ?? null;
   const enabled = toBoolean(raw?.enabled, Boolean(baseUrl));
   const timeoutMs = clampInteger(
     raw?.timeoutMs ?? raw?.timeout_ms,
@@ -86,17 +114,22 @@ function normalizeRuntimeConfig(
     3000,
     30000
   );
-  const isEnabled = Boolean(baseUrl) && enabled;
+  const requiresAnonKey = /\/rest\/v1\/rpc\/?$/i.test(baseUrl);
+  const hasAnonKey = !requiresAnonKey || Boolean(anonKey);
+  const isEnabled = Boolean(baseUrl) && enabled && hasAnonKey;
 
   return {
     source,
     version: clampInteger(raw?.version, fallback.version, 1, 10000),
     fetchedAt,
     baseUrl,
+    anonKey,
     timeoutMs,
     isEnabled,
     disableReason: !baseUrl
       ? 'missing_base_url'
+      : !hasAnonKey
+        ? 'missing_anon_key'
       : !enabled
         ? 'disabled_by_remote'
         : null,
@@ -126,6 +159,7 @@ async function readStoredConfig(): Promise<MarketGelsinRuntimeSnapshot | null> {
         version: config.version,
         enabled: config.isEnabled,
         baseUrl: config.baseUrl,
+        anonKey: config.anonKey ?? undefined,
         timeoutMs: config.timeoutMs,
       },
       config.source === 'remote_live' ? 'local_cache' : config.source,

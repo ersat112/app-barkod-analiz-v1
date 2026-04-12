@@ -127,6 +127,26 @@ export const HelpCenterScreen: React.FC = () => {
         onPress: () => navigation.navigate('HelpArticle', { articleKey: 'database' }),
       },
       {
+        key: 'google-signin',
+        icon: 'logo-google',
+        title: tt('help_center_google_title', 'Google ile Giriş'),
+        subtitle: tt(
+          'help_center_google_subtitle',
+          'Google oturumu, Firebase kimlik doğrulaması ve hata durumlarını görün.'
+        ),
+        onPress: () => navigation.navigate('HelpArticle', { articleKey: 'googleSignIn' }),
+      },
+      {
+        key: 'ads',
+        icon: 'megaphone-outline',
+        title: tt('help_center_ads_title', 'Reklamlar ve Premium'),
+        subtitle: tt(
+          'help_center_ads_subtitle',
+          'Banner, geçiş, ödüllü reklam ve premium modelini birlikte okuyun.'
+        ),
+        onPress: () => navigation.navigate('HelpArticle', { articleKey: 'adsAndPremium' }),
+      },
+      {
         key: 'medical',
         icon: 'medkit-outline',
         title: tt('help_center_medical_title', 'Güvenlik ve Tıbbi Sınırlar'),

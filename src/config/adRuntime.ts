@@ -1,13 +1,18 @@
 import { Platform } from 'react-native';
 
-import { APP_RUNTIME, getEnvBoolean, getEnvCsv, getEnvString } from './appRuntime';
+import { getEnvBoolean, getEnvCsv, getEnvString } from './appRuntime';
 
 export type AdRequestOptions = {
   requestNonPersonalizedAdsOnly?: boolean;
   keywords?: string[];
 };
 
-export type AdUnitKey = 'INTERSTITIAL' | 'BANNER' | 'REWARDED' | 'APP_OPEN';
+export type AdUnitKey =
+  | 'INTERSTITIAL'
+  | 'BANNER'
+  | 'REWARDED'
+  | 'APP_OPEN'
+  | 'DETAIL_REWARDED_INTERSTITIAL';
 
 const DEFAULT_KEYWORDS = [
   'health',
@@ -25,6 +30,7 @@ const TEST_IDS = Object.freeze({
   BANNER: 'ca-app-pub-3940256099942544/6300978111',
   REWARDED: 'ca-app-pub-3940256099942544/5224354917',
   APP_OPEN: 'ca-app-pub-3940256099942544/9257395921',
+  DETAIL_REWARDED_INTERSTITIAL: 'ca-app-pub-3940256099942544/5354046379',
 });
 
 const REAL_AD_UNITS = Object.freeze({
@@ -51,7 +57,7 @@ const REAL_AD_UNITS = Object.freeze({
   REWARDED: Object.freeze({
     android: getEnvString(
       'EXPO_PUBLIC_ADMOB_REWARDED_ANDROID',
-      'ca-app-pub-9503865696579023/7004190022'
+      'ca-app-pub-9503865696579023/9392429031'
     ),
     ios: getEnvString(
       'EXPO_PUBLIC_ADMOB_REWARDED_IOS',
@@ -68,6 +74,16 @@ const REAL_AD_UNITS = Object.freeze({
       TEST_IDS.APP_OPEN
     ),
   }),
+  DETAIL_REWARDED_INTERSTITIAL: Object.freeze({
+    android: getEnvString(
+      'EXPO_PUBLIC_ADMOB_DETAILSCREEN_REWARDED_INTERSTITIAL_ANDROID',
+      'ca-app-pub-9503865696579023/7004190022'
+    ),
+    ios: getEnvString(
+      'EXPO_PUBLIC_ADMOB_DETAILSCREEN_REWARDED_INTERSTITIAL_IOS',
+      TEST_IDS.DETAIL_REWARDED_INTERSTITIAL
+    ),
+  }),
 });
 
 const ADMOB_APP_IDS = Object.freeze({
@@ -79,10 +95,7 @@ const ADMOB_APP_IDS = Object.freeze({
 });
 
 const adsEnabled = getEnvBoolean('EXPO_PUBLIC_ADS_ENABLED', true);
-const useTestIds = getEnvBoolean(
-  'EXPO_PUBLIC_ADS_USE_TEST_IDS',
-  APP_RUNTIME.isDevelopment
-);
+const useTestIds = getEnvBoolean('EXPO_PUBLIC_ADS_USE_TEST_IDS', false);
 
 const requestNonPersonalizedAdsOnly = getEnvBoolean(
   'EXPO_PUBLIC_ADS_NPA_ONLY',

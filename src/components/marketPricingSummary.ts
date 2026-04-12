@@ -43,12 +43,36 @@ export const formatMarketDistance = (
   );
 };
 
-export const pickBestMarketOffer = (offers: MarketOffer[]): MarketOffer | null => {
+export const pickBestMarketOffer = (
+  offers: MarketOffer[],
+  options?: {
+    cityCode?: string | null;
+  }
+): MarketOffer | null => {
   if (!offers.length) {
     return null;
   }
 
   const sorted = [...offers].sort((left, right) => {
+    const leftLocalityScore =
+      (left.inStock ? 1000 : 0) +
+      (options?.cityCode && left.cityCode === options.cityCode ? 120 : 0) +
+      (left.priceSourceType === 'local_market_price' ? 80 : left.priceSourceType === 'national_reference_price' ? 25 : 0) +
+      (typeof left.distanceMeters === 'number' && Number.isFinite(left.distanceMeters)
+        ? Math.max(0, 60 - Math.min(60, left.distanceMeters / 250))
+        : 0);
+    const rightLocalityScore =
+      (right.inStock ? 1000 : 0) +
+      (options?.cityCode && right.cityCode === options.cityCode ? 120 : 0) +
+      (right.priceSourceType === 'local_market_price' ? 80 : right.priceSourceType === 'national_reference_price' ? 25 : 0) +
+      (typeof right.distanceMeters === 'number' && Number.isFinite(right.distanceMeters)
+        ? Math.max(0, 60 - Math.min(60, right.distanceMeters / 250))
+        : 0);
+
+    if (leftLocalityScore !== rightLocalityScore) {
+      return rightLocalityScore - leftLocalityScore;
+    }
+
     if (left.inStock !== right.inStock) {
       return left.inStock ? -1 : 1;
     }
@@ -69,6 +93,7 @@ export const buildBestMarketOfferSummary = (params: {
   bestOffer?: MarketOffer | null;
   loading?: boolean;
   error?: string | null;
+  locationLabel?: string | null;
 }): string => {
   if (params.loading) {
     return params.tt('scanner_market_prices_loading', 'Market teklifleri yükleniyor...');
@@ -79,11 +104,18 @@ export const buildBestMarketOfferSummary = (params: {
   }
 
   if (params.bestOffer) {
-    return params
-      .tt(
-        'scanner_market_prices_summary_best',
-        '{{market}} içinde en iyi canlı fiyat {{price}}'
-      )
+    const template = params.locationLabel
+      ? params.tt(
+          'scanner_market_prices_summary_best_location',
+          '{{location}} için en uygun fiyat {{market}} içinde {{price}}'
+        )
+      : params.tt(
+          'scanner_market_prices_summary_best',
+          '{{market}} içinde en iyi canlı fiyat {{price}}'
+        );
+
+    return template
+      .replace('{{location}}', params.locationLabel || '')
       .replace('{{market}}', params.bestOffer.marketName)
       .replace(
         '{{price}}',

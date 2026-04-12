@@ -9,6 +9,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
+import {
+  buildMarketMonogram,
+  resolveMarketAccent,
+  resolveMarketLogoUrl,
+} from '../config/marketBranding';
 import type { ThemeColors } from '../context/ThemeContext';
 import { withAlpha } from '../utils/color';
 
@@ -40,39 +45,6 @@ type MarketOfferSheetProps = {
   isDark?: boolean;
 };
 
-const MARKET_BRAND_ACCENTS = [
-  '#167A78',
-  '#B97719',
-  '#A855F7',
-  '#2563EB',
-  '#DC2626',
-  '#0F766E',
-  '#7C3AED',
-];
-
-const resolveMarketAccent = (marketKey?: string | null, marketName?: string | null): string => {
-  const seed = `${marketKey || ''}${marketName || ''}`;
-  const hash = Array.from(seed).reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  return MARKET_BRAND_ACCENTS[hash % MARKET_BRAND_ACCENTS.length] ?? MARKET_BRAND_ACCENTS[0];
-};
-
-const buildMarketMonogram = (marketName?: string | null): string => {
-  const parts = String(marketName || '')
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2);
-
-  if (!parts.length) {
-    return 'MG';
-  }
-
-  return parts
-    .map((part) => part.charAt(0))
-    .join('')
-    .toUpperCase();
-};
-
 const MarketBadge: React.FC<{
   marketName?: string | null;
   marketKey?: string | null;
@@ -81,11 +53,12 @@ const MarketBadge: React.FC<{
 }> = ({ marketName, marketKey, logoUrl, size = 42 }) => {
   const accent = resolveMarketAccent(marketKey, marketName);
   const monogram = buildMarketMonogram(marketName);
+  const stableLogoUrl = resolveMarketLogoUrl(marketKey, marketName, logoUrl);
 
-  if (logoUrl) {
+  if (stableLogoUrl) {
     return (
       <Image
-        source={{ uri: logoUrl }}
+        source={{ uri: stableLogoUrl }}
         style={[
           styles.marketLogoImage,
           {

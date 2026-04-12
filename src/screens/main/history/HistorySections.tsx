@@ -57,6 +57,15 @@ type HistoryHeaderProps = {
   subtitle: string;
   colors: ThemeColors;
   topPadding?: number;
+  totalCount?: number;
+  hasActiveFilters?: boolean;
+  searchValue?: string;
+  eyebrowLabel?: string;
+  countLabel?: string;
+  archiveLabel?: string;
+  statusLabel?: string;
+  readyLabel?: string;
+  filteredLabel?: string;
 };
 
 type HistoryFooterProps = {
@@ -186,11 +195,54 @@ export const HistoryListHeader: React.FC<HistoryHeaderProps> = ({
   subtitle,
   colors,
   topPadding = 60,
+  totalCount = 0,
+  hasActiveFilters = false,
+  searchValue = '',
+  eyebrowLabel = 'Tarama Arşivi',
+  countLabel = 'KAYIT',
+  archiveLabel = 'ARŞİV',
+  statusLabel = 'DURUM',
+  readyLabel = 'Hazır',
+  filteredLabel = 'Filtreli',
 }) => {
   return (
     <View style={[styles.header, { paddingTop: topPadding }]}>
-      <Text style={[styles.headerTitle, { color: colors.primary }]}>{title}</Text>
-      <Text style={[styles.headerSubtitle, { color: colors.text }]}>{subtitle}</Text>
+      <View style={styles.heroCard}>
+        <View style={styles.heroTopRow}>
+          <View style={styles.heroTextWrap}>
+            <Text style={styles.heroEyebrow}>{eyebrowLabel}</Text>
+            <Text style={styles.heroTitle}>{title}</Text>
+            <Text style={styles.heroSubtitle}>{subtitle}</Text>
+          </View>
+          <View style={styles.heroBadgeWrap}>
+            <Text style={styles.heroBadgeLabel}>{countLabel}</Text>
+            <Text style={styles.heroBadgeValue}>{totalCount}</Text>
+          </View>
+        </View>
+
+        <View style={styles.heroStatsRow}>
+          <View style={styles.heroStat}>
+              <Text style={styles.heroStatLabel}>{archiveLabel}</Text>
+            <Text style={styles.heroStatValue}>{totalCount}</Text>
+          </View>
+          <View style={styles.heroDivider} />
+          <View style={styles.heroStat}>
+              <Text style={styles.heroStatLabel}>{statusLabel}</Text>
+              <Text style={styles.heroStatValue}>
+              {hasActiveFilters ? filteredLabel : readyLabel}
+              </Text>
+            </View>
+        </View>
+
+        {searchValue.trim().length ? (
+          <View style={styles.heroSearchPill}>
+            <Ionicons name="search-outline" size={14} color="#FFFFFF" />
+            <Text style={styles.heroSearchPillText} numberOfLines={1}>
+              {searchValue.trim()}
+            </Text>
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 };
@@ -516,27 +568,123 @@ export const HistoryListFooter: React.FC<HistoryFooterProps> = ({
 
 const styles = StyleSheet.create({
   header: {
-    paddingHorizontal: 20,
-    paddingBottom: 12,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
   },
-  headerTitle: {
-    fontSize: 30,
+  heroCard: {
+    backgroundColor: '#63AE2E',
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+    shadowOpacity: 0.1,
+    shadowRadius: 14,
+    shadowOffset: {
+      width: 0,
+      height: 8,
+    },
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  heroTextWrap: {
+    flex: 1,
+  },
+  heroEyebrow: {
+    color: 'rgba(255,255,255,0.76)',
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  heroTitle: {
+    marginTop: 6,
+    color: '#FFFFFF',
+    fontSize: 24,
     fontWeight: '900',
-    letterSpacing: 0.5,
+    lineHeight: 30,
   },
-  headerSubtitle: {
+  heroSubtitle: {
     marginTop: 8,
+    color: 'rgba(255,255,255,0.82)',
     fontSize: 13,
-    lineHeight: 20,
-    opacity: 0.64,
+    lineHeight: 19,
+    fontWeight: '600',
+  },
+  heroBadgeWrap: {
+    minWidth: 72,
+    alignItems: 'flex-end',
+  },
+  heroBadgeLabel: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  heroBadgeValue: {
+    marginTop: 6,
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  heroStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 18,
+    paddingTop: 16,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.2)',
+  },
+  heroStat: {
+    flex: 1,
+  },
+  heroStatLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  heroStatValue: {
+    marginTop: 5,
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  heroDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginHorizontal: 14,
+  },
+  heroSearchPill: {
+    marginTop: 14,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    maxWidth: '100%',
+  },
+  heroSearchPillText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   filterWrap: {
     paddingHorizontal: 16,
-    paddingBottom: 6,
+    paddingBottom: 10,
   },
   searchBox: {
     borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 16,
     minHeight: 52,
     paddingHorizontal: 14,
     flexDirection: 'row',
@@ -575,30 +723,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   sectionHeader: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: 10,
   },
   sectionTitle: {
-    fontSize: 14,
+    fontSize: 18,
     fontWeight: '900',
-    textTransform: 'uppercase',
-    opacity: 0.55,
-    letterSpacing: 1,
   },
   itemCard: {
     marginHorizontal: 16,
     marginBottom: 8,
-    borderRadius: 16,
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 14,
+    padding: 15,
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
   itemImage: {
-    width: 58,
-    height: 58,
-    borderRadius: 14,
+    width: 56,
+    height: 56,
+    borderRadius: 12,
     resizeMode: 'cover',
   },
   itemDetails: {
@@ -620,9 +765,9 @@ const styles = StyleSheet.create({
   },
   itemName: {
     marginTop: 4,
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '800',
-    lineHeight: 22,
+    lineHeight: 21,
   },
   itemStatusRow: {
     flexDirection: 'row',
