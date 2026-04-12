@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Image,
   Linking,
+  Share,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -149,6 +150,48 @@ const formatLocalizedDateTime = (locale: string, value?: string | null): string 
   } catch {
     return parsed.toISOString();
   }
+};
+
+const buildShareableBasketSummary = (
+  locale: string,
+  basketName: string,
+  entries: PriceCompareCartEntry[],
+  marketColumns: BasketMatrixColumn[],
+  totals: {
+    mixedCheapestTotal: number;
+    bestSingleMarketTotal?: number | null;
+  }
+): string => {
+  const lines: string[] = [];
+  lines.push(basketName || 'Alisveris Listesi');
+  lines.push('');
+
+  entries.forEach((entry) => {
+    const quantity = Math.max(1, entry.quantity);
+    const title = toDisplayProductName(entry.product.productName);
+    const bestOffer = normalizeOffersForDisplay(entry.offersResponse.offers)[0];
+    const bestLine =
+      bestOffer != null
+        ? `${bestOffer.marketName} - ${formatLocalizedPrice(locale, bestOffer.price, bestOffer.currency)}`
+        : 'Canli fiyat yok';
+
+    lines.push(`• ${title} x${quantity}`);
+    lines.push(`  ${bestLine}`);
+  });
+
+  lines.push('');
+  lines.push(`Market sayisi: ${marketColumns.length}`);
+  lines.push(
+    `En ucuz karisik sepet: ${formatLocalizedPrice(locale, totals.mixedCheapestTotal || 0, 'TRY')}`
+  );
+
+  if (typeof totals.bestSingleMarketTotal === 'number') {
+    lines.push(
+      `Tek market toplami: ${formatLocalizedPrice(locale, totals.bestSingleMarketTotal, 'TRY')}`
+    );
+  }
+
+  return lines.join('\n');
 };
 
 const toDisplayProductName = (value?: string | null): string =>
@@ -1493,6 +1536,62 @@ export const PriceCompareBasketScreen: React.FC = () => {
     [navigation, openItemInPriceCompare]
   );
 
+  const handleShareBasket = useCallback(async () => {
+    try {
+      await Share.share({
+        title: shoppingListName.trim() || tt('price_compare_cart_title', 'Karşılaştırma Sepeti'),
+        message: buildShareableBasketSummary(
+          preferredLocale,
+          shoppingListName.trim() || tt('price_compare_cart_title', 'Karşılaştırma Sepeti'),
+          analysisEntries,
+          comparisonMarketColumns,
+          {
+            mixedCheapestTotal: basketDisplayTotals.mixedCheapestTotal,
+            bestSingleMarketTotal: basketDisplayTotals.bestSingleMarketTotal,
+          }
+        ),
+      });
+    } catch (error) {
+      console.warn('[PriceCompareBasketScreen] share basket failed:', error);
+    }
+  }, [
+    analysisEntries,
+    basketDisplayTotals.bestSingleMarketTotal,
+    basketDisplayTotals.mixedCheapestTotal,
+    comparisonMarketColumns,
+    preferredLocale,
+    shoppingListName,
+    tt,
+  ]);
+
+  const handlePrintBasket = useCallback(async () => {
+    try {
+      await Share.share({
+        title: `${shoppingListName.trim() || tt('price_compare_cart_title', 'Karşılaştırma Sepeti')} - Yazdir`,
+        message: buildShareableBasketSummary(
+          preferredLocale,
+          shoppingListName.trim() || tt('price_compare_cart_title', 'Karşılaştırma Sepeti'),
+          analysisEntries,
+          comparisonMarketColumns,
+          {
+            mixedCheapestTotal: basketDisplayTotals.mixedCheapestTotal,
+            bestSingleMarketTotal: basketDisplayTotals.bestSingleMarketTotal,
+          }
+        ),
+      });
+    } catch (error) {
+      console.warn('[PriceCompareBasketScreen] print basket failed:', error);
+    }
+  }, [
+    analysisEntries,
+    basketDisplayTotals.bestSingleMarketTotal,
+    basketDisplayTotals.mixedCheapestTotal,
+    comparisonMarketColumns,
+    preferredLocale,
+    shoppingListName,
+    tt,
+  ]);
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <AmbientBackdrop colors={colors} variant="settings" />
@@ -1892,9 +1991,63 @@ export const PriceCompareBasketScreen: React.FC = () => {
               </Text>
             ) : null}
 
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {tt('price_compare_cart_matrix_title', 'Fiyatları Karşılaştır')}
-            </Text>
+            <View style={styles.matrixSectionHeader}>
+              <View style={styles.matrixSectionTitleWrap}>
+                <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                  {tt('price_compare_cart_matrix_title', 'Fiyatları Karşılaştır')}
+                </Text>
+                <View
+                  style={[
+                    styles.matrixNewBadge,
+                    { backgroundColor: withAlpha(colors.primary, '18') },
+                  ]}
+                >
+                  <Text style={[styles.matrixNewBadgeText, { color: colors.primary }]}>
+                    {tt('price_compare_new_badge', 'Yeni!')}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.matrixHeaderActions}>
+                <TouchableOpacity
+                  activeOpacity={0.88}
+                  onPress={() => {
+                    void handleShareBasket();
+                  }}
+                  style={[
+                    styles.matrixHeaderButton,
+                    {
+                      borderColor: withAlpha(colors.primary, '44'),
+                      backgroundColor: withAlpha(colors.primary, '10'),
+                    },
+                  ]}
+                >
+                  <Ionicons name="share-social-outline" size={15} color={colors.primary} />
+                  <Text style={[styles.matrixHeaderButtonText, { color: colors.primary }]}>
+                    {tt('price_compare_share_list', 'Listeyi paylaş')}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.88}
+                  onPress={() => {
+                    void handlePrintBasket();
+                  }}
+                  style={[
+                    styles.matrixHeaderButton,
+                    {
+                      borderColor: withAlpha(colors.primary, '44'),
+                      backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'B8' : 'FC'),
+                    },
+                  ]}
+                >
+                  <Ionicons name="print-outline" size={15} color={colors.primary} />
+                  <Text style={[styles.matrixHeaderButtonText, { color: colors.primary }]}>
+                    {tt('price_compare_print_list', 'Listeyi Yazdır')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
             <View
               style={[
                 styles.matrixCard,
@@ -2266,6 +2419,36 @@ export const PriceCompareBasketScreen: React.FC = () => {
               </ScrollView>
             </View>
 
+            <View
+              style={[
+                styles.matrixNotesCard,
+                {
+                  backgroundColor: withAlpha(colors.cardElevated, 'F1'),
+                  borderColor: withAlpha(colors.border, 'BC'),
+                },
+              ]}
+            >
+              {[
+                tt(
+                  'price_compare_note_out_of_stock',
+                  'Ürün ilgili markette yoksa hücrede alternatif aksiyonu görünür.'
+                ),
+                tt(
+                  'price_compare_note_coverage',
+                  'Konum veya barkod eşleşmesi eksikse bazı market sütunları boş kalabilir.'
+                ),
+                tt(
+                  'price_compare_note_best_mix',
+                  'Toplam satırı karışık en ucuz sepet ile tek market toplamını hızlı karşılaştırman için özetlenir.'
+                ),
+              ].map((note) => (
+                <View key={note} style={styles.matrixNoteRow}>
+                  <Text style={[styles.matrixNoteBullet, { color: colors.primary }]}>•</Text>
+                  <Text style={[styles.matrixNoteText, { color: colors.mutedText }]}>{note}</Text>
+                </View>
+              ))}
+            </View>
+
             {basketDisplayTotals.missingItems.length ? (
               <>
                 <Text style={[styles.sectionTitle, { color: colors.text }]}>
@@ -2590,6 +2773,49 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     marginBottom: 12,
   },
+  matrixSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginBottom: 12,
+    flexWrap: 'wrap',
+  },
+  matrixSectionTitleWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+    flexShrink: 1,
+  },
+  matrixNewBadge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  matrixNewBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  matrixHeaderActions: {
+    flexDirection: 'row',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  matrixHeaderButton: {
+    minHeight: 38,
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  matrixHeaderButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
   subsectionTitle: {
     fontSize: 14,
     fontWeight: '800',
@@ -2670,6 +2896,29 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     overflow: 'hidden',
     marginBottom: 18,
+  },
+  matrixNotesCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    gap: 10,
+    marginBottom: 18,
+  },
+  matrixNoteRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  matrixNoteBullet: {
+    fontSize: 18,
+    lineHeight: 20,
+    fontWeight: '800',
+  },
+  matrixNoteText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '500',
   },
   matrixScrollContent: {
     paddingBottom: 6,
