@@ -1,13 +1,9 @@
-import type { ExpoConfig } from 'expo/config';
+import type { ConfigContext, ExpoConfig } from 'expo/config';
 
-import appJson from './app.json';
-
-const baseConfig = appJson.expo as ExpoConfig;
-
-export default (): ExpoConfig => ({
-  ...baseConfig,
+export default ({ config }: ConfigContext): ExpoConfig => ({
+  ...config,
   extra: {
-    ...baseConfig.extra,
+    ...config.extra,
     ...(process.env.EXPO_PUBLIC_MARKET_GELSIN_API_URL
       ? {
           EXPO_PUBLIC_MARKET_GELSIN_API_URL:

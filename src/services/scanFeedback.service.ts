@@ -1,11 +1,11 @@
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 
 const BASE64_ALPHABET =
   'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
 
 let cachedScanBeepUri: string | null = null;
-let preparedSound: Audio.Sound | null = null;
-let preparePromise: Promise<Audio.Sound | null> | null = null;
+let preparedSound: ReturnType<typeof createAudioPlayer> | null = null;
+let preparePromise: Promise<ReturnType<typeof createAudioPlayer> | null> | null = null;
 
 const encodeBase64 = (bytes: Uint8Array): string => {
   let output = '';
@@ -75,37 +75,32 @@ const buildScanBeepDataUri = (): string => {
 };
 
 const ensureAudioMode = async (): Promise<void> => {
-  await Audio.setAudioModeAsync({
-    playsInSilentModeIOS: true,
-    allowsRecordingIOS: false,
-    interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
-    interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-    shouldDuckAndroid: true,
-    playThroughEarpieceAndroid: false,
-    staysActiveInBackground: false,
+  await setAudioModeAsync({
+    playsInSilentMode: true,
+    allowsRecording: false,
+    interruptionMode: 'duckOthers',
+    shouldRouteThroughEarpiece: false,
+    shouldPlayInBackground: false,
   });
 };
 
-const createPreparedSound = async (): Promise<Audio.Sound | null> => {
+const createPreparedSound = async (): Promise<ReturnType<typeof createAudioPlayer> | null> => {
   await ensureAudioMode();
 
-  const { sound } = await Audio.Sound.createAsync(
+  const sound = createAudioPlayer(
     { uri: buildScanBeepDataUri() },
     {
-      shouldPlay: false,
-      isLooping: false,
-      volume: 0.34,
-      progressUpdateIntervalMillis: 250,
-    },
-    null,
-    false
+      updateInterval: 250,
+      keepAudioSessionActive: false,
+    }
   );
 
+  sound.volume = 0.34;
   preparedSound = sound;
   return sound;
 };
 
-const getPreparedSound = async (): Promise<Audio.Sound | null> => {
+const getPreparedSound = async (): Promise<ReturnType<typeof createAudioPlayer> | null> => {
   if (preparedSound) {
     return preparedSound;
   }
@@ -137,9 +132,11 @@ export const playScanBeep = async (): Promise<void> => {
   }
 
   try {
-    await sound.replayAsync();
+    await sound.seekTo(0);
+    sound.play();
   } catch (error) {
     console.warn('[ScanFeedback] playback failed:', error);
+    sound.remove();
     preparedSound = null;
   }
 };
@@ -150,7 +147,7 @@ export const unloadScanBeep = async (): Promise<void> => {
   }
 
   try {
-    await preparedSound.unloadAsync();
+    preparedSound.remove();
   } catch (error) {
     console.warn('[ScanFeedback] unload failed:', error);
   } finally {

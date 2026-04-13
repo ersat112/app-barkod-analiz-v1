@@ -1,6 +1,8 @@
 export type HelpArticleKey =
   | 'appBasics'
   | 'nutriScore'
+  | 'riskUpdates'
+  | 'scientificSources'
   | 'sensitivities'
   | 'database'
   | 'googleSignIn'
@@ -32,7 +34,7 @@ export const buildHelpArticle = (
         title: tt('help_article_nutri_score_title', 'Nutri-Score ve Besin Dengesi'),
         subtitle: tt(
           'help_article_nutri_score_subtitle',
-          'Nutri-Score, zorunlu besin tablosunun yerine geçmez; onu tamamlayan ön yüz etiketidir.'
+          'BarkodAnaliz gıdada resmi Nutri-Score alanlarını önceliklendirir; veri eksikse besin tablosundan yerel bir besin dengesi tabanı türetir.'
         ),
         sections: [
           {
@@ -48,7 +50,23 @@ export const buildHelpArticle = (
             title: tt('help_article_nutri_score_signals', 'Hangi sinyaller kullanılır?'),
             body: tt(
               'help_article_nutri_score_signals_body',
-              'Sınırlandırılması gereken enerji, doymuş yağ, şeker ve tuz gibi alanlarla; teşvik edilen lif, protein ve meyve-sebze-baklagil oranı birlikte değerlendirilir. BarkodAnaliz, bu resmi yaklaşımı ürünün besin dengesi ekranında daha okunur hale getirir.'
+              'Sınırlandırılması gereken enerji, doymuş yağ, şeker ve tuz gibi alanlarla; teşvik edilen lif, protein ve meyve-sebze-baklagil oranı birlikte değerlendirilir. BarkodAnaliz bu sinyalleri önce resmi kaynak skorunda arar, sonra eksikse yerel besin tablosu türetmesiyle tamamlar.'
+            ),
+          },
+          {
+            key: 'current-model',
+            title: tt('help_article_nutri_score_current_model', 'Bizde şu an nasıl çalışıyor?'),
+            body: tt(
+              'help_article_nutri_score_current_model_body',
+              'Uygulama önce Open Food Facts tarafından verilen sayısal puanı veya A-E derecesini 0-100 aralığına normalize eder. Bu veri yoksa enerji, doymuş yağ, şeker, tuz, protein, lif ve meyve-sebze sinyallerinden hibrit bir besin dengesi skoru üretir. Son aşamada katkı sinyali ve NOVA işlenme seviyesi toplam skora kontrollü biçimde eklenir.'
+            ),
+          },
+          {
+            key: 'exactness',
+            title: tt('help_article_nutri_score_exactness', 'Resmi Nutri-Score’u birebir uygulayabilir miyiz?'),
+            body: tt(
+              'help_article_nutri_score_exactness_body',
+              'Evet, ama bunu toplam ürün skorundan ayrı bir resmi alt sinyal olarak tutmak daha doğrudur. Tam birebir uygulama için içecek, yağ, peynir ve özel kategori istisnalarının da resmi puanlama formülüyle ele alınması gerekir. Şu an BarkodAnaliz yaklaşımı resmi sinyali önceliklendiren hibrit bir modeldir.'
             ),
           },
           {
@@ -57,6 +75,76 @@ export const buildHelpArticle = (
             body: tt(
               'help_article_nutri_score_limits_body',
               'Sadece içindekiler metni okutulursa resmi Nutri-Score eşdeğeri üretilemez. Gıda için hem içindekiler hem de besin değerleri tablosu okunmalıdır; aksi halde sonuç yalnızca içerik sinyali olarak değerlendirilir.'
+            ),
+          },
+        ],
+      };
+    case 'riskUpdates':
+      return {
+        key: 'riskUpdates',
+        title: tt('help_article_risk_updates_title', 'Risk Seviyesi Güncellemeleri'),
+        subtitle: tt(
+          'help_article_risk_updates_subtitle',
+          'Risk verisinin zaman içinde değişmesi normaldir; önemli olan bunun sürümlü ve kaynaklı biçimde yönetilmesidir.'
+        ),
+        sections: [
+          {
+            key: 'food-additives',
+            title: tt('help_article_risk_updates_food', 'Katkı maddelerinde bugün ne yapabiliriz?'),
+            body: tt(
+              'help_article_risk_updates_food_body',
+              'Gıda tarafında bu yapı hemen uygulanabilir; çünkü uygulamada zaten katkı kataloğu bulunuyor. Doğru yaklaşım, her katkı için güncel risk seviyesi, son gözden geçirme tarihi, kaynak kurum etiketleri ve varsa önceki risk seviyesini birlikte saklamaktır.'
+            ),
+          },
+          {
+            key: 'beauty',
+            title: tt('help_article_risk_updates_beauty', 'Kozmetikte sınırımız ne?'),
+            body: tt(
+              'help_article_risk_updates_beauty_body',
+              'Kozmetikte artık ayrı bir içerik risk kayıt defteri kullanılmaya başlandı. BarkodAnaliz; Open Beauty Facts kaydı, içerik metni ve yerel kozmetik risk sözlüğünü birlikte okuyarak ilk sürüm bir risk motoru üretir. Ancak kapsam henüz tüm INCI evrenini karşılamaz; bu yüzden sistem sürümlü olarak genişletilmelidir.'
+            ),
+          },
+          {
+            key: 'policy',
+            title: tt('help_article_risk_updates_policy', 'Nasıl yayınlamalıyız?'),
+            body: tt(
+              'help_article_risk_updates_policy_body',
+              'En güvenli yaklaşım; değişiklik özeti, tarih, etkilenen bileşen, eski seviye, yeni seviye ve kısa bilimsel gerekçeyi birlikte göstermektir. Kullanıcıya yalnız sonucu değil, değişikliğin hangi kurumsal veya bilimsel dayanakla geldiğini de açıklamak gerekir.'
+            ),
+          },
+        ],
+      };
+    case 'scientificSources':
+      return {
+        key: 'scientificSources',
+        title: tt('help_article_scientific_sources_title', 'Bilimsel Kaynaklar'),
+        subtitle: tt(
+          'help_article_scientific_sources_subtitle',
+          'Kaynak listesini göstermek doğru; ancak başka bir uygulamanın metnini kopyalamadan, kendi yorum sınırlarımızla sunmalıyız.'
+        ),
+        sections: [
+          {
+            key: 'institutions',
+            title: tt('help_article_scientific_sources_institutions', 'Hangi kurumları göstermeliyiz?'),
+            body: tt(
+              'help_article_scientific_sources_institutions_body',
+              'Gıda için WHO, IARC, EFSA, ANSES ve Open Food Facts; kozmetik için SCCS, ECHA, US EPA, AICIS ve Open Beauty Facts; ilaç için ise TITCK gibi resmi ve yarı-resmi kurumlar ayrı ayrı listelenebilir.'
+            ),
+          },
+          {
+            key: 'style',
+            title: tt('help_article_scientific_sources_style', 'Nasıl listelemeliyiz?'),
+            body: tt(
+              'help_article_scientific_sources_style_body',
+              'En doğru biçim; kurum adı, neyi desteklediği ve gerekiyorsa resmi bağlantısını göstermektir. Böylece kullanıcı veri zincirini görür, ama BarkodAnaliz kendi editoryal bağımsızlığını da korur.'
+            ),
+          },
+          {
+            key: 'copyright',
+            title: tt('help_article_scientific_sources_copyright', 'Aynen kopyalayalım mı?'),
+            body: tt(
+              'help_article_scientific_sources_copyright_body',
+              'Hayır. Bilimsel kaynak kurumlarını ve resmi bağlantıları açıkça listeleyebiliriz; fakat başka bir ürünün yardım merkezi anlatımını veya editoryal metinlerini birebir kopyalamak yerine kendi metodolojimizi ve sınırlarımızı anlatmalıyız.'
             ),
           },
         ],

@@ -67,8 +67,14 @@
           "locationWhenInUsePermission": "BarkodAnaliz, size yakın market tekliflerini ve konuma göre fiyat karşılaştırmasını gösterebilmek için konum erişimine ihtiyaç duyar."
         }
       ],
+      "expo-font",
+      "expo-audio",
+      "expo-asset",
+      "expo-localization",
       "expo-notifications",
       "expo-apple-authentication",
+      "expo-sqlite",
+      "expo-web-browser",
       "@react-native-google-signin/google-signin",
       "expo-system-ui",
       [

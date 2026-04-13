@@ -8,6 +8,13 @@
 
 export type ECodeRisk = 'Düşük' | 'Orta' | 'Yüksek';
 
+export type ECodeRiskHistoryEntry = {
+  date: string;
+  previousRisk?: ECodeRisk;
+  nextRisk: ECodeRisk;
+  note: string;
+};
+
 export interface ECodeInfo {
   code: string;
   name: string;
@@ -16,6 +23,8 @@ export interface ECodeInfo {
   description: string;
   impact: string;
   aliases?: string[];
+  sourceKeys?: string[];
+  riskHistory?: ECodeRiskHistoryEntry[];
 }
 
 export const E_CODES_DATA: Record<string, ECodeInfo> = {
@@ -28,6 +37,15 @@ export const E_CODES_DATA: Record<string, ECodeInfo> = {
     description: 'Yapay sarı gıda boyası.',
     impact: 'Astım, kurdeşen ve çocuklarda hiperaktivite ile ilişkilendirilmiştir.',
     aliases: ['Tartrazine'],
+    sourceKeys: ['efsa', 'iarc', 'who'],
+    riskHistory: [
+      {
+        date: '2026-04',
+        previousRisk: 'Orta',
+        nextRisk: 'Yüksek',
+        note: 'Hassas çocuk grupları ve davranışsal etki sinyalleri nedeniyle ihtiyat düzeyi yükseltildi.',
+      },
+    ],
   },
   E129: {
     code: 'E129',
@@ -37,6 +55,7 @@ export const E_CODES_DATA: Record<string, ECodeInfo> = {
     description: 'Yapay kırmızı boya.',
     impact: 'Bazı ülkelerde yasaklanmıştır; dikkat eksikliğine yol açabilir.',
     aliases: ['Allura Red AC'],
+    sourceKeys: ['efsa', 'who'],
   },
 
   // --- KORUYUCULAR ---
@@ -48,6 +67,15 @@ export const E_CODES_DATA: Record<string, ECodeInfo> = {
     description: 'Küf ve bakteri önleyici.',
     impact: 'DNA hasarı riski ve çocuklarda davranış bozuklukları rapor edilmiştir.',
     aliases: ['Sodium Benzoate'],
+    sourceKeys: ['efsa', 'anses', 'who'],
+    riskHistory: [
+      {
+        date: '2026-04',
+        previousRisk: 'Orta',
+        nextRisk: 'Yüksek',
+        note: 'Kümülatif maruziyet ve hassas kullanıcı profilleri için daha ihtiyatlı sınıflamaya alındı.',
+      },
+    ],
   },
   E250: {
     code: 'E250',
@@ -57,6 +85,7 @@ export const E_CODES_DATA: Record<string, ECodeInfo> = {
     description: 'İşlenmiş etlerde (sucuk, salam) kullanılır.',
     impact: 'Kanserojen nitrosaminlerin oluşumuna neden olabilir.',
     aliases: ['Sodium Nitrite'],
+    sourceKeys: ['iarc', 'efsa', 'who'],
   },
 
   // --- LEZZET ARTIRICILAR ---
@@ -68,6 +97,7 @@ export const E_CODES_DATA: Record<string, ECodeInfo> = {
     description: "Halk arasında 'Çin Tuzu' olarak bilinir.",
     impact: 'Aşırı tüketimi nörotoksisite ve metabolik sendrom riski taşır.',
     aliases: ['MSG', 'Monosodium Glutamate', 'Monosodyum Glutamat'],
+    sourceKeys: ['efsa', 'fda'],
   },
 
   // --- TATLANDIRICILAR ---
@@ -79,6 +109,7 @@ export const E_CODES_DATA: Record<string, ECodeInfo> = {
     description: 'Yapay tatlandırıcı.',
     impact: 'Tiroid fonksiyonları üzerinde olumsuz etkileri tartışılmaktadır.',
     aliases: ['Acesulfame K', 'Acesulfame Potassium'],
+    sourceKeys: ['efsa', 'fda'],
   },
   E951: {
     code: 'E951',
@@ -88,6 +119,33 @@ export const E_CODES_DATA: Record<string, ECodeInfo> = {
     description: 'Yapay şeker ikamesi.',
     impact: 'Fenilalanin içerir; nörolojik yan etkiler üzerine birçok araştırma vardır.',
     aliases: ['Aspartame'],
+    sourceKeys: ['iarc', 'efsa', 'who'],
+    riskHistory: [
+      {
+        date: '2026-04',
+        previousRisk: 'Orta',
+        nextRisk: 'Yüksek',
+        note: 'Güncel ihtiyat politikamızda tartışmalı tatlandırıcılar daha sert cezalandırılıyor.',
+      },
+    ],
+  },
+  E171: {
+    code: 'E171',
+    name: 'Titanyum Dioksit',
+    risk: 'Yüksek',
+    category: 'Renklendirici',
+    description: 'Beyaz renklendirici olarak kullanılır.',
+    impact: 'Yutma ve uzun dönem güvenlik tartışmaları nedeniyle ihtiyatlı modellerde sert cezalandırılır.',
+    aliases: ['Titanium Dioxide', 'CI 77891'],
+    sourceKeys: ['efsa', 'echa'],
+    riskHistory: [
+      {
+        date: '2026-04',
+        previousRisk: 'Orta',
+        nextRisk: 'Yüksek',
+        note: 'Yutma bağlamında belirsizlikler nedeniyle kırmızı ihtiyat sınıfına çekildi.',
+      },
+    ],
   },
 
   // --- DÜŞÜK RİSKLİLER ---
@@ -99,6 +157,7 @@ export const E_CODES_DATA: Record<string, ECodeInfo> = {
     description: 'C vitaminidir.',
     impact: 'Genellikle güvenlidir ve bağışıklığı destekler.',
     aliases: ['Ascorbic Acid', 'Vitamin C'],
+    sourceKeys: ['efsa', 'who'],
   },
   E322: {
     code: 'E322',
@@ -108,6 +167,7 @@ export const E_CODES_DATA: Record<string, ECodeInfo> = {
     description: 'Doğal bir yağ asididir.',
     impact: 'Soya veya yumurtadan elde edilir; alerjen uyarısı dışında güvenlidir.',
     aliases: ['Lesitin', 'Lecithin'],
+    sourceKeys: ['efsa'],
   },
   E440: {
     code: 'E440',
@@ -117,6 +177,7 @@ export const E_CODES_DATA: Record<string, ECodeInfo> = {
     description: 'Meyve liflerinden elde edilir.',
     impact: 'Sindirim dostu doğal bir lif kaynağıdır.',
     aliases: ['Pectin'],
+    sourceKeys: ['efsa'],
   },
 };
 
@@ -189,3 +250,15 @@ export const getECodesByCategory = (category: string): ECodeInfo[] => {
 };
 
 export const ALL_E_CODES = Object.freeze(Object.values(E_CODES_DATA));
+
+export const ADDITIVE_RISK_UPDATES = Object.freeze(
+  Object.values(E_CODES_DATA)
+    .flatMap((item) =>
+      (item.riskHistory ?? []).map((entry) => ({
+        code: item.code,
+        name: item.name,
+        ...entry,
+      }))
+    )
+    .sort((left, right) => right.date.localeCompare(left.date))
+);

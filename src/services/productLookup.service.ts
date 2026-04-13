@@ -203,14 +203,20 @@ export const lookupProductByBarcode = async (
   barcode: string,
   options?: ProductLookupOptions
 ): Promise<ProductLookupResult> => {
+  const lookupMode = options?.lookupMode ?? 'auto';
+  const isStrictModeLookup =
+    lookupMode === 'food' || lookupMode === 'beauty' || lookupMode === 'medicine';
+
   console.log('[ProductLookup] resolve started:', {
     barcode,
-    lookupMode: options?.lookupMode ?? 'auto',
+    lookupMode,
   });
 
   const repositoryResult = await resolveProductFromRepository(barcode, {
+    allowCachedNotFound: !isStrictModeLookup,
+    persistNotFoundResult: !isStrictModeLookup,
     remoteFetch:
-      options?.lookupMode === 'medicine'
+      lookupMode === 'medicine'
         ? async (normalizedBarcode) => {
             console.log('[ProductLookup] medicine lookup started:', {
               barcode: normalizedBarcode,
@@ -233,7 +239,7 @@ export const lookupProductByBarcode = async (
               reason: 'not_found',
             };
           }
-        : options?.lookupMode === 'food'
+        : lookupMode === 'food'
           ? async (normalizedBarcode) => {
               const foodProduct = await fetchFoodProduct(normalizedBarcode);
 
@@ -252,7 +258,7 @@ export const lookupProductByBarcode = async (
                 source: 'food',
               };
             }
-          : options?.lookupMode === 'beauty'
+          : lookupMode === 'beauty'
             ? async (normalizedBarcode) => {
                 const beautyProduct = await fetchBeautyProduct(normalizedBarcode);
 

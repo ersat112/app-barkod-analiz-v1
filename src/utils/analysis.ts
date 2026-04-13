@@ -1,3 +1,4 @@
+import { searchBeautyIngredientRisksInText } from '../services/beautyIngredientsData';
 import { E_CODES_DATA } from '../services/eCodesData';
 
 /**
@@ -337,6 +338,16 @@ const getRiskPenalty = (risk?: string): number => {
   return 5;
 };
 
+const getBeautyRiskPenalty = (risk?: string): number => {
+  const normalizedRisk = (risk || '').toLowerCase().trim();
+
+  if (normalizedRisk === 'yüksek') return 26;
+  if (normalizedRisk === 'orta') return 12;
+  if (normalizedRisk === 'düşük') return 4;
+
+  return 0;
+};
+
 const getRecommendation = (
   type: ProductType,
   riskLevel: 'Düşük' | 'Orta' | 'Yüksek',
@@ -473,7 +484,22 @@ export const analyzeProduct = (product: Product): AnalysisResult => {
   }
 });
 
-  const foundECodes = Array.from(foundECodesMap.values());
+  const beautyIngredientMatches =
+    product.type === 'beauty'
+      ? searchBeautyIngredientRisksInText(product.ingredients_text).map((item) => ({
+          code: item.key,
+          name: item.inciName,
+          risk: item.risk,
+          impact: item.impact,
+          category: item.category,
+          description: item.summary,
+        }))
+      : [];
+
+  const foundECodes =
+    product.type === 'beauty'
+      ? beautyIngredientMatches
+      : Array.from(foundECodesMap.values());
 
   /**
    * 3) Temel skor hesabı
@@ -494,7 +520,7 @@ export const analyzeProduct = (product: Product): AnalysisResult => {
     normalizedApiScore ??
     gradeFallbackScore ??
     derivedNutritionScore ??
-    (product.type === 'beauty' ? 70 : 60);
+    (product.type === 'beauty' ? (product.ingredients_text?.trim() ? 82 : 58) : 60);
   let healthScore = baselineScore;
 
   /**
@@ -502,19 +528,47 @@ export const analyzeProduct = (product: Product): AnalysisResult => {
    * Çok sayıda veya yüksek riskli katkı varsa skoru düşür
    */
   const additivePenalty = foundECodes.reduce((total, item) => {
-    return total + getRiskPenalty(item.risk);
+    return (
+      total +
+      (product.type === 'beauty' ? getBeautyRiskPenalty(item.risk) : getRiskPenalty(item.risk))
+    );
   }, 0);
 
-  const cappedPenalty = Math.min(additivePenalty, 35);
+  const cappedPenalty = Math.min(additivePenalty, product.type === 'beauty' ? 80 : 35);
   healthScore = clamp(healthScore - cappedPenalty);
   const additiveRiskScore =
     text || (Array.isArray(product.additives) && product.additives.length > 0)
       ? clamp(
           foundECodes.length === 0
             ? 92
-            : 100 - Math.min(additivePenalty * 2.4, 84)
+            : 100 - Math.min(additivePenalty * (product.type === 'beauty' ? 2.1 : 2.4), 84)
         )
       : null;
+
+  if (product.type === 'beauty') {
+    const hasHighRiskIngredient = foundECodes.some((item) => {
+      const normalizedRisk = String(item.risk || '').trim().toLowerCase();
+      return normalizedRisk === 'yüksek' || normalizedRisk === 'high';
+    });
+    const hasMediumRiskIngredient = foundECodes.some((item) => {
+      const normalizedRisk = String(item.risk || '').trim().toLowerCase();
+      return normalizedRisk === 'orta' || normalizedRisk === 'medium';
+    });
+    const hasLowRiskIngredient = foundECodes.some((item) => {
+      const normalizedRisk = String(item.risk || '').trim().toLowerCase();
+      return normalizedRisk === 'düşük' || normalizedRisk === 'low';
+    });
+
+    if (hasHighRiskIngredient) {
+      healthScore = Math.min(healthScore, 24);
+    } else if (hasMediumRiskIngredient) {
+      healthScore = Math.min(healthScore, 49);
+    } else if (hasLowRiskIngredient) {
+      healthScore = Math.min(healthScore, 79);
+    } else if (!product.ingredients_text?.trim()) {
+      healthScore = Math.min(healthScore, 58);
+    }
+  }
 
   const novaGroup = normalizeNovaGroup(product.nova_group);
   const processingScore = getProcessingScore(novaGroup);

@@ -4,10 +4,11 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useRoute, type RouteProp } from '@react-navigation/native';
+import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 
 import type { RootStackParamList } from '../../navigation/AppNavigator';
@@ -46,6 +47,7 @@ const DOCUMENT_ICON_MAP: Record<LegalDocumentKey, keyof typeof Ionicons.glyphMap
 };
 
 export const LegalDocumentScreen: React.FC = () => {
+  const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<RootStackParamList, 'LegalDocument'>>();
   const { documentKey } = route.params;
   const { t } = useTranslation();
@@ -327,6 +329,31 @@ export const LegalDocumentScreen: React.FC = () => {
           paddingHorizontal: layout.horizontalPadding,
         }}
       >
+        <View style={styles.headerRow}>
+          <TouchableOpacity
+            style={[
+              styles.backButton,
+              {
+                backgroundColor: withAlpha(colors.cardElevated, 'F0'),
+                borderColor: withAlpha(colors.border, 'BC'),
+              },
+            ]}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.86}
+          >
+            <Ionicons name="chevron-back" size={20} color={colors.text} />
+          </TouchableOpacity>
+
+          <View style={styles.headerTextWrap}>
+            <Text style={[styles.heroEyebrow, { color: colors.primary }]}>
+              {tt('legal_documents', 'Yasal Belgeler')}
+            </Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>
+              {documentContent.title}
+            </Text>
+          </View>
+        </View>
+
         <View
           style={[
             styles.heroCard,
@@ -387,6 +414,29 @@ export const LegalDocumentScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  backButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTextWrap: {
+    flex: 1,
+    marginLeft: 14,
+  },
+  headerTitle: {
+    marginTop: 4,
+    fontSize: 18,
+    fontWeight: '800',
+    lineHeight: 24,
   },
   heroCard: {
     borderRadius: 28,

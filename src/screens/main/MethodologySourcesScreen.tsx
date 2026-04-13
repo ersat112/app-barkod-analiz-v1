@@ -15,6 +15,9 @@ import * as WebBrowser from 'expo-web-browser';
 import { useTheme } from '../../context/ThemeContext';
 import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
+import { BEAUTY_INGREDIENT_RISK_UPDATES } from '../../services/beautyIngredientsData';
+import { ADDITIVE_RISK_UPDATES } from '../../services/eCodesData';
+import { SCIENTIFIC_SOURCE_RECORDS } from '../../services/scientificSourcesData';
 import { withAlpha } from '../../utils/color';
 
 const WHO_FOPNL_GUIDANCE_URL =
@@ -185,6 +188,17 @@ export const MethodologySourcesScreen: React.FC = () => {
     [navigation, openUrl, tt]
   );
 
+  const scientificInstitutionCards = useMemo(
+    () =>
+      SCIENTIFIC_SOURCE_RECORDS.map((item) => ({
+        key: item.key,
+        title: item.title,
+        body: item.scope,
+        url: item.url,
+      })),
+    []
+  );
+
   const categoryCards = useMemo(
     () => [
       {
@@ -206,7 +220,7 @@ export const MethodologySourcesScreen: React.FC = () => {
         title: tt('methodology_beauty_title', 'Kozmetik'),
         body: tt(
           'methodology_beauty_body',
-          'Kozmetik yorumunda ürün kaydı, içerik metni ve tespit edilen içerik sinyalleri birlikte değerlendirilir; sistem ihtiyatlı kullanıcı özeti sunar.'
+          'Kozmetik yorumunda ürün kaydı, içerik metni ve yerel içerik risk kayıt defteri birlikte değerlendirilir; sistem ihtiyatlı bir kullanıcı özeti ve Yuka benzeri risk tavanları üretir.'
         ),
         chips: [
           tt('source_tag_ingredient_scan', 'İçerik taraması'),
@@ -230,6 +244,26 @@ export const MethodologySourcesScreen: React.FC = () => {
     [tt]
   );
 
+  const riskUpdateCards = useMemo(
+    () => [
+      ...ADDITIVE_RISK_UPDATES.slice(0, 3).map((item) => ({
+        key: `additive-${item.code}-${item.date}`,
+        title: `${item.code} • ${item.name}`,
+        body: `${item.date} • ${
+          item.previousRisk ? `${item.previousRisk} → ${item.nextRisk}` : item.nextRisk
+        } • ${item.note}`,
+      })),
+      ...BEAUTY_INGREDIENT_RISK_UPDATES.slice(0, 3).map((item) => ({
+        key: `beauty-${item.ingredient}-${item.date}`,
+        title: item.ingredient,
+        body: `${item.date} • ${
+          item.previousRisk ? `${item.previousRisk} → ${item.nextRisk}` : item.nextRisk
+        } • ${item.note}`,
+      })),
+    ],
+    []
+  );
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <AmbientBackdrop colors={colors} variant="settings" />
@@ -244,6 +278,31 @@ export const MethodologySourcesScreen: React.FC = () => {
           paddingHorizontal: layout.horizontalPadding,
         }}
       >
+        <View style={styles.headerRow}>
+          <TouchableOpacity
+            style={[
+              styles.backButton,
+              {
+                backgroundColor: withAlpha(colors.cardElevated, 'F0'),
+                borderColor: withAlpha(colors.border, 'BC'),
+              },
+            ]}
+            onPress={() => navigation.goBack()}
+            activeOpacity={0.86}
+          >
+            <Ionicons name="chevron-back" size={20} color={colors.text} />
+          </TouchableOpacity>
+
+          <View style={styles.headerTextWrap}>
+            <Text style={[styles.heroEyebrow, { color: colors.primary }]}>
+              {tt('methodology_sources', 'Metodoloji ve Kaynaklar')}
+            </Text>
+            <Text style={[styles.headerTitle, { color: colors.text }]}>
+              {tt('methodology_sources_screen_title', 'Skor sistemi nasıl çalışıyor?')}
+            </Text>
+          </View>
+        </View>
+
         <View
           style={[
             styles.heroCard,
@@ -394,6 +453,80 @@ export const MethodologySourcesScreen: React.FC = () => {
           ))}
         </View>
 
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>
+          {tt('scientific_institutions_title', 'Bilimsel Kurumlar')}
+        </Text>
+
+        <View style={styles.cardList}>
+          {scientificInstitutionCards.map((item) => (
+            <TouchableOpacity
+              key={item.key}
+              style={[
+                styles.sourceCard,
+                {
+                  backgroundColor: withAlpha(colors.cardElevated, 'EE'),
+                  borderColor: withAlpha(colors.border, 'B8'),
+                  shadowColor: colors.shadow,
+                },
+              ]}
+              onPress={() => {
+                if (item.url) {
+                  void openUrl(item.url);
+                }
+              }}
+              activeOpacity={0.88}
+            >
+              <View style={styles.sourceTextWrap}>
+                <Text style={[styles.infoCardTitle, { color: colors.text }]}>
+                  {item.title}
+                </Text>
+                <Text style={[styles.infoCardBody, { color: colors.mutedText }]}>
+                  {item.body}
+                </Text>
+                {item.url ? (
+                  <Text style={[styles.sourceUrlText, { color: colors.primary }]}>
+                    {item.url}
+                  </Text>
+                ) : null}
+              </View>
+              {item.url ? (
+                <Ionicons name="open-outline" size={18} color={colors.primary} />
+              ) : null}
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {riskUpdateCards.length ? (
+          <>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              {tt('risk_update_summary_title', 'Risk Değişiklik Özeti')}
+            </Text>
+
+            <View style={styles.cardList}>
+              {riskUpdateCards.map((item) => (
+                <View
+                  key={item.key}
+                  style={[
+                    styles.infoCard,
+                    {
+                      backgroundColor: withAlpha(colors.cardElevated, 'EE'),
+                      borderColor: withAlpha(colors.border, 'B8'),
+                      shadowColor: colors.shadow,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.infoCardTitle, { color: colors.text }]}>
+                    {item.title}
+                  </Text>
+                  <Text style={[styles.infoCardBody, { color: colors.mutedText }]}>
+                    {item.body}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          </>
+        ) : null}
+
         <View
           style={[
             styles.footerCard,
@@ -421,6 +554,29 @@ export const MethodologySourcesScreen: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 18,
+  },
+  backButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTextWrap: {
+    flex: 1,
+    marginLeft: 14,
+  },
+  headerTitle: {
+    marginTop: 4,
+    fontSize: 18,
+    fontWeight: '800',
+    lineHeight: 24,
   },
   heroCard: {
     borderWidth: 1,
@@ -517,6 +673,11 @@ const styles = StyleSheet.create({
   },
   sourceTextWrap: {
     flex: 1,
+  },
+  sourceUrlText: {
+    marginTop: 8,
+    fontSize: 12,
+    fontWeight: '700',
   },
   footerCard: {
     marginTop: 24,

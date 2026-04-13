@@ -555,6 +555,59 @@ const buildSearchCategoryTree = (items: MarketCategoryNode[]): SearchCategoryTre
   return sortNodes(rootNodes);
 };
 
+const buildGroupedRootCategoryNodes = (
+  rootNodes: MarketCategoryNode[]
+): MarketCategoryNode[] => {
+  const normalizedRootMap = new Map(
+    rootNodes.map((node) => [normalizeLooseSearchValue(node.taxonomyLeaf), node] as const)
+  );
+  const groupedNodes: MarketCategoryNode[] = [];
+  const consumedIds = new Set<string>();
+
+  CATEGORY_ROOT_GROUPS.forEach((group, groupIndex) => {
+    const rootId = `${SYNTHETIC_CATEGORY_PREFIX}root:${groupIndex}:${normalizeLooseSearchValue(group.label).replace(/\s+/g, '-')}`;
+    const groupChildren = group.members
+      .map((label) => normalizedRootMap.get(normalizeLooseSearchValue(label)) ?? null)
+      .filter((node): node is MarketCategoryNode => Boolean(node));
+
+    if (!groupChildren.length) {
+      return;
+    }
+
+    groupedNodes.push({
+      normalizedCategoryId: rootId,
+      taxonomyLeaf: group.label,
+      taxonomyPath: group.label,
+      normalizedCategory: group.label,
+      parentCategoryId: null,
+      depth: 1,
+      childrenCount: groupChildren.length,
+      productCount: null,
+      inStockProductCount: null,
+      marketCount: null,
+      sortOrder: groupIndex + 1,
+    });
+
+    groupChildren.forEach((child, childIndex) => {
+      consumedIds.add(child.normalizedCategoryId);
+      groupedNodes.push({
+        ...child,
+        parentCategoryId: rootId,
+        depth: 2,
+        sortOrder: child.sortOrder ?? childIndex + 1,
+      });
+    });
+  });
+
+  rootNodes.forEach((node) => {
+    if (!consumedIds.has(node.normalizedCategoryId)) {
+      groupedNodes.push(node);
+    }
+  });
+
+  return groupedNodes;
+};
+
 const filterSeededCategoryChildren = (
   label: string,
   items: MarketCategoryNode[]
@@ -601,12 +654,32 @@ const buildSeededCategoryNodes = (
         label: member,
         nodes: groupMap.get(member) ?? [],
       }))
-      .filter((entry) => entry.nodes.length > 0)
-      .map((entry) => ({
-        label: entry.label,
-        children: filterSeededCategoryChildren(entry.label, entry.nodes),
-      }))
-      .filter((entry) => entry.children.length > 0);
+      .map((entry) => {
+        const anchorNode =
+          entry.nodes.find(
+            (node) =>
+              normalizeLooseSearchValue(node.taxonomyLeaf) ===
+                normalizeLooseSearchValue(entry.label) || !node.parentCategoryId
+          ) ?? entry.nodes[0] ?? null;
+
+        return {
+          label: entry.label,
+          anchorNode,
+          children: filterSeededCategoryChildren(entry.label, entry.nodes).filter(
+            (child) => child.normalizedCategoryId !== anchorNode?.normalizedCategoryId
+          ),
+        };
+      })
+      .filter(
+        (
+          entry
+        ): entry is {
+          label: string;
+          anchorNode: MarketCategoryNode;
+          children: MarketCategoryNode[];
+        } => entry.anchorNode != null
+      )
+      .filter((entry) => entry.children.length > 0 || entry.anchorNode.childrenCount > 0);
 
     if (!sectionEntries.length) {
       return;
@@ -627,26 +700,19 @@ const buildSeededCategoryNodes = (
     });
 
     sectionEntries.forEach((section, sectionIndex) => {
-      const sectionId = `${SYNTHETIC_CATEGORY_PREFIX}${groupIndex}:${sectionIndex}:${normalizeLooseSearchValue(section.label).replace(/\s+/g, '-')}`;
-
       seededNodes.push({
-        normalizedCategoryId: sectionId,
-        taxonomyLeaf: section.label,
-        taxonomyPath: `${rootGroup.label} > ${section.label}`,
-        normalizedCategory: section.label,
+        ...section.anchorNode,
         parentCategoryId: rootId,
         depth: 2,
-        childrenCount: section.children.length,
-        productCount: null,
-        inStockProductCount: null,
-        marketCount: null,
-        sortOrder: sectionIndex + 1,
+        childrenCount: Math.max(section.anchorNode.childrenCount, section.children.length),
+        taxonomyPath: `${rootGroup.label} > ${section.anchorNode.taxonomyLeaf}`,
+        sortOrder: section.anchorNode.sortOrder ?? sectionIndex + 1,
       });
 
       section.children.forEach((child, childIndex) => {
         seededNodes.push({
           ...child,
-          parentCategoryId: sectionId,
+          parentCategoryId: section.anchorNode.normalizedCategoryId,
           depth: 3,
           sortOrder: child.sortOrder ?? childIndex + 1,
         });
@@ -850,6 +916,90 @@ const buildOffersResponseFromSearchProduct = (
         : null,
     dataFreshness: item.dataFreshness ?? null,
     offers,
+  };
+};
+
+const mergeMarketOfferLists = (
+  primaryOffers: MarketOffer[],
+  fallbackOffers: MarketOffer[]
+): MarketOffer[] => {
+  if (!primaryOffers.length) {
+    return fallbackOffers;
+  }
+
+  if (!fallbackOffers.length) {
+    return primaryOffers;
+  }
+
+  const merged = new Map<string, MarketOffer>();
+
+  [...primaryOffers, ...fallbackOffers].forEach((offer) => {
+    const identity =
+      getMarketOfferIdentity(offer) ||
+      `${offer.marketKey || offer.marketName}-${offer.price}-${offer.cityCode || ''}-${offer.capturedAt || ''}`;
+
+    if (!merged.has(identity)) {
+      merged.set(identity, offer);
+      return;
+    }
+
+    const existing = merged.get(identity)!;
+
+    if (offer.inStock && !existing.inStock) {
+      merged.set(identity, offer);
+      return;
+    }
+
+    if (
+      offer.inStock === existing.inStock &&
+      offer.priceSourceType === 'local_market_price' &&
+      existing.priceSourceType !== 'local_market_price'
+    ) {
+      merged.set(identity, offer);
+    }
+  });
+
+  return Array.from(merged.values());
+};
+
+const mergeMarketOfferResponses = (
+  responses: (MarketProductOffersResponse | null | undefined)[]
+): MarketProductOffersResponse | null => {
+  const fulfilledResponses = responses.filter(
+    (response): response is MarketProductOffersResponse => Boolean(response)
+  );
+
+  if (!fulfilledResponses.length) {
+    return null;
+  }
+
+  const firstResponse = fulfilledResponses[0];
+
+  return {
+    ...firstResponse,
+    productId:
+      fulfilledResponses.find((response) => response.productId)?.productId ??
+      firstResponse.productId ??
+      null,
+    product:
+      fulfilledResponses.find((response) => response.product != null)?.product ??
+      firstResponse.product ??
+      null,
+    warnings: Array.from(
+      new Set(fulfilledResponses.flatMap((response) => response.warnings ?? []))
+    ),
+    dataFreshness:
+      fulfilledResponses.find((response) => response.dataFreshness != null)?.dataFreshness ??
+      firstResponse.dataFreshness ??
+      null,
+    city:
+      fulfilledResponses.find((response) => response.city?.code || response.city?.name)?.city ??
+      firstResponse.city ??
+      null,
+    offers: fulfilledResponses.reduce<MarketOffer[]>(
+      (accumulator, response) => mergeMarketOfferLists(accumulator, response.offers),
+      []
+    ),
   };
 };
 
@@ -1190,6 +1340,7 @@ const SearchCategoryTreeSection: React.FC<{
   onToggle: (key: string) => void;
   onSelect: (categoryId: string | null) => void;
   colors: ThemeColors;
+  isDark: boolean;
   tt: TranslateFn;
 }> = ({
   nodes,
@@ -1202,6 +1353,7 @@ const SearchCategoryTreeSection: React.FC<{
   onToggle,
   onSelect,
   colors,
+  isDark,
   tt,
 }) => {
   const renderNode = (node: SearchCategoryTreeNode): React.ReactNode => {
@@ -1226,7 +1378,7 @@ const SearchCategoryTreeSection: React.FC<{
             styles.categoryTreeRow,
             {
               paddingLeft: 16 + depthOffset,
-              backgroundColor: withAlpha(isSelected ? colors.primary : colors.cardElevated, isSelected ? '08' : '00'),
+              backgroundColor: 'transparent',
               borderBottomColor: withAlpha(colors.border, '80'),
             },
           ]}
@@ -1234,10 +1386,7 @@ const SearchCategoryTreeSection: React.FC<{
           <View style={styles.categoryTreeMain}>
             <View style={styles.categoryTreeTitleRow}>
               <Text
-                style={[
-                  styles.categoryTreeTitle,
-                  { color: isSelected ? colors.primary : colors.text },
-                ]}
+                style={[styles.categoryTreeTitle, { color: colors.text }]}
                 numberOfLines={2}
               >
                 {`${node.label}${countLabel}`}
@@ -1245,36 +1394,44 @@ const SearchCategoryTreeSection: React.FC<{
             </View>
           </View>
 
-          <TouchableOpacity
-            activeOpacity={0.82}
-            onPress={() => {
-              if (hasChildren) {
-                onToggle(node.key);
-              } else {
-                onSelect(node.categoryId);
-              }
-            }}
-            style={styles.categoryTreeToggleButton}
-          >
-            {isLoading ? (
-              <ActivityIndicator
-                size="small"
-                color={isSelected ? colors.primary : colors.mutedText}
-              />
-            ) : (
-              <Ionicons
-                name={
-                  hasChildren
-                    ? isExpanded
-                      ? 'chevron-down-outline'
-                      : 'chevron-forward-outline'
-                    : 'chevron-forward-outline'
+          <View style={styles.categoryTreeRowRight}>
+            {isSelected ? (
+              <Text
+                style={[styles.categoryTreeRowValue, { color: colors.mutedText }]}
+                numberOfLines={1}
+              >
+                {tt('price_compare_category_selected_short', 'Seçili')}
+              </Text>
+            ) : null}
+
+            <TouchableOpacity
+              activeOpacity={0.82}
+              onPress={() => {
+                if (hasChildren) {
+                  onToggle(node.key);
+                } else {
+                  onSelect(node.categoryId);
                 }
-                size={20}
-                color={isSelected ? colors.primary : colors.mutedText}
-              />
-            )}
-          </TouchableOpacity>
+              }}
+              style={styles.categoryTreeToggleButton}
+            >
+              {isLoading ? (
+                <ActivityIndicator size="small" color={colors.mutedText} />
+              ) : (
+                <Ionicons
+                  name={
+                    hasChildren
+                      ? isExpanded
+                        ? 'chevron-down-outline'
+                        : 'chevron-forward-outline'
+                      : 'chevron-forward-outline'
+                  }
+                  size={20}
+                  color={colors.mutedText}
+                />
+              )}
+            </TouchableOpacity>
+          </View>
         </TouchableOpacity>
 
         {hasChildren && isExpanded ? (
@@ -1291,8 +1448,8 @@ const SearchCategoryTreeSection: React.FC<{
       style={[
         styles.categoryTreeCard,
         {
-          backgroundColor: withAlpha(colors.cardElevated, 'F9'),
-          borderColor: withAlpha(colors.border, '88'),
+          backgroundColor: isDark ? withAlpha(colors.cardElevated, 'F9') : '#FFFFFF',
+          borderColor: withAlpha(colors.border, isDark ? '88' : '7A'),
           shadowColor: colors.shadow,
         },
       ]}
@@ -1306,13 +1463,8 @@ const SearchCategoryTreeSection: React.FC<{
         ]}
       >
         <View style={styles.categoryTreeHeaderLead}>
-          <View
-            style={[
-              styles.categoryTreeHeaderIconWrap,
-              { backgroundColor: withAlpha(colors.primary, '10') },
-            ]}
-          >
-            <Ionicons name="reorder-three-outline" size={18} color={colors.primary} />
+          <View style={styles.categoryTreeHeaderIconWrap}>
+            <Ionicons name="reorder-three-outline" size={18} color={colors.text} />
           </View>
           <Text style={[styles.categoryTreeHeaderTitle, { color: colors.text }]}>
             {tt('price_compare_category_tree_title', 'Kategoriler')}
@@ -1341,10 +1493,7 @@ const SearchCategoryTreeSection: React.FC<{
               styles.categoryTreeRow,
               styles.categoryTreeRowAll,
               {
-                backgroundColor: withAlpha(
-                  selectedCategoryId ? colors.cardElevated : colors.primary,
-                  selectedCategoryId ? '00' : '08'
-                ),
+                backgroundColor: 'transparent',
                 borderBottomColor: withAlpha(colors.border, '80'),
               },
             ]}
@@ -1352,21 +1501,28 @@ const SearchCategoryTreeSection: React.FC<{
             <View style={styles.categoryTreeMain}>
               <View style={styles.categoryTreeTitleRow}>
                 <Text
-                  style={[
-                    styles.categoryTreeTitle,
-                    { color: selectedCategoryId ? colors.text : colors.primary },
-                  ]}
+                  style={[styles.categoryTreeTitle, { color: colors.text }]}
                   numberOfLines={2}
                 >
                   {tt('price_compare_category_all', 'Tümü')}
                 </Text>
               </View>
             </View>
-            <Ionicons
-              name="chevron-forward-outline"
-              size={18}
-              color={selectedCategoryId ? colors.mutedText : colors.primary}
-            />
+            <View style={styles.categoryTreeRowRight}>
+              {!selectedCategoryId ? (
+                <Text
+                  style={[styles.categoryTreeRowValue, { color: colors.mutedText }]}
+                  numberOfLines={1}
+                >
+                  {tt('price_compare_category_selected_short', 'Seçili')}
+                </Text>
+              ) : null}
+              <Ionicons
+                name="chevron-forward-outline"
+                size={18}
+                color={colors.mutedText}
+              />
+            </View>
           </TouchableOpacity>
 
           <View style={styles.categoryTreeList}>{nodes.map((node) => renderNode(node))}</View>
@@ -2092,6 +2248,66 @@ export const PriceCompareScreen: React.FC = () => {
     [cityCode, marketRuntime.isEnabled, tt]
   );
 
+  const fetchComprehensiveOffersForProduct = useCallback(
+    async (product: MarketSearchProduct): Promise<MarketProductOffersResponse | null> => {
+      const immediateResponse = buildOffersResponseFromSearchProduct(product);
+
+      if (!hasComparableBarcode(product) && !hasComparableProductId(product)) {
+        return immediateResponse;
+      }
+
+      const fetchOffersForScope = (
+        scope: 'district' | 'city' | 'global'
+      ): Promise<MarketProductOffersResponse | null> => {
+        const districtName = scope === 'district' ? effectiveDistrict ?? undefined : undefined;
+        const scopedCityCode = scope === 'global' ? undefined : cityCode ?? undefined;
+        const sharedParams = {
+          cityCode: scopedCityCode,
+          districtName,
+          includeOutOfStock: true,
+          limit: 200,
+          fallbackProductName: product.productName,
+          fallbackBrand: product.brand ?? undefined,
+          enableNameFallback: true,
+        };
+
+        if (hasComparableBarcode(product)) {
+          return resolveWithin(
+            fetchMarketProductOffers(product.barcode!, sharedParams),
+            REMOTE_OFFERS_TIMEOUT_MS
+          ).catch(() => null);
+        }
+
+        if (hasComparableProductId(product)) {
+          return resolveWithin(
+            fetchMarketProductOffersById(product.productId!, sharedParams),
+            REMOTE_OFFERS_TIMEOUT_MS
+          ).catch(() => null);
+        }
+
+        return Promise.resolve<MarketProductOffersResponse | null>(null);
+      };
+
+      const [districtScopedResponse, cityWideResponse, globalResponse] = await Promise.all([
+        fetchOffersForScope('district'),
+        effectiveDistrict
+          ? fetchOffersForScope('city')
+          : Promise.resolve<MarketProductOffersResponse | null>(null),
+        cityCode || effectiveDistrict
+          ? fetchOffersForScope('global')
+          : Promise.resolve<MarketProductOffersResponse | null>(null),
+      ]);
+
+      return mergeMarketOfferResponses([
+        districtScopedResponse,
+        cityWideResponse,
+        globalResponse,
+        immediateResponse,
+      ]);
+    },
+    [cityCode, effectiveDistrict]
+  );
+
   const loadOffers = useCallback(
     async (product: MarketSearchProduct) => {
       setSelectedProduct(product);
@@ -2101,33 +2317,7 @@ export const PriceCompareScreen: React.FC = () => {
       void loadPriceHistory(product);
 
       try {
-        const response = hasComparableBarcode(product)
-          ? await resolveWithin(
-              fetchMarketProductOffers(product.barcode!, {
-                cityCode: cityCode ?? undefined,
-                districtName: effectiveDistrict ?? undefined,
-                includeOutOfStock: true,
-                limit: 200,
-                fallbackProductName: product.productName,
-                fallbackBrand: product.brand,
-                enableNameFallback: true,
-              }),
-              REMOTE_OFFERS_TIMEOUT_MS
-            )
-          : hasComparableProductId(product)
-            ? await resolveWithin(
-                fetchMarketProductOffersById(product.productId!, {
-                  cityCode: cityCode ?? undefined,
-                  districtName: effectiveDistrict ?? undefined,
-                  includeOutOfStock: true,
-                  limit: 200,
-                  fallbackProductName: product.productName,
-                  fallbackBrand: product.brand,
-                  enableNameFallback: true,
-                }),
-                REMOTE_OFFERS_TIMEOUT_MS
-              )
-            : buildOffersResponseFromSearchProduct(product);
+        const response = await fetchComprehensiveOffersForProduct(product);
 
         if (!response) {
           throw new Error('market_product_offers_not_available');
@@ -2147,7 +2337,7 @@ export const PriceCompareScreen: React.FC = () => {
         setOffersLoading(false);
       }
     },
-    [cityCode, effectiveDistrict, loadPriceHistory, tt]
+    [fetchComprehensiveOffersForProduct, loadPriceHistory, tt]
   );
 
   const loadCategoryBrowsePage = useCallback(
@@ -2609,7 +2799,9 @@ export const PriceCompareScreen: React.FC = () => {
       );
 
       const resolvedNodes =
-        response.nodes.length > 0 ? response.nodes : await loadSeededRootCategories();
+        response.nodes.length > 0
+          ? buildGroupedRootCategoryNodes(response.nodes)
+          : await loadSeededRootCategories();
 
       setCategoryNodes(resolvedNodes);
       setExpandedCategoryKeys([]);
@@ -2922,11 +3114,6 @@ export const PriceCompareScreen: React.FC = () => {
       const identity = getProductIdentity(resolvedProduct);
       const immediateOffersResponse = buildOffersResponseFromSearchProduct(resolvedProduct);
 
-      if (immediateOffersResponse) {
-        addOrIncrementEntry(resolvedProduct, immediateOffersResponse);
-        return;
-      }
-
       if (!resolvedProduct.barcode && !resolvedProduct.productId) {
         setSelectedProduct(resolvedProduct);
         setOffersResponse(null);
@@ -2942,33 +3129,11 @@ export const PriceCompareScreen: React.FC = () => {
       setQuickAddLoadingId(identity);
 
       try {
-        const response = resolvedProduct.barcode
-          ? await resolveWithin(
-              fetchMarketProductOffers(resolvedProduct.barcode, {
-                cityCode: cityCode ?? undefined,
-                districtName: effectiveDistrict ?? undefined,
-                includeOutOfStock: true,
-                limit: 200,
-                fallbackProductName: resolvedProduct.productName,
-                fallbackBrand: resolvedProduct.brand,
-                enableNameFallback: true,
-              }),
-              REMOTE_OFFERS_TIMEOUT_MS
-            )
-          : await resolveWithin(
-              fetchMarketProductOffersById(resolvedProduct.productId!, {
-                cityCode: cityCode ?? undefined,
-                districtName: effectiveDistrict ?? undefined,
-                includeOutOfStock: true,
-                limit: 200,
-                fallbackProductName: resolvedProduct.productName,
-                fallbackBrand: resolvedProduct.brand,
-                enableNameFallback: true,
-              }),
-              REMOTE_OFFERS_TIMEOUT_MS
-            );
+        const response =
+          (await fetchComprehensiveOffersForProduct(resolvedProduct)) ??
+          immediateOffersResponse;
 
-        if (!response.offers.length) {
+        if (!response?.offers.length) {
           setOffersError(
             tt(
               'price_compare_selected_no_live_offers',
@@ -2991,7 +3156,7 @@ export const PriceCompareScreen: React.FC = () => {
         setQuickAddLoadingId((current) => (current === identity ? null : current));
       }
     },
-    [addOrIncrementEntry, cityCode, effectiveDistrict, resolveComparableProduct, tt]
+    [addOrIncrementEntry, fetchComprehensiveOffersForProduct, resolveComparableProduct, tt]
   );
 
   const handleToggleFavoriteFromResult = useCallback(
@@ -3712,6 +3877,7 @@ export const PriceCompareScreen: React.FC = () => {
             expandedKeys={expandedCategoryKeys}
             loadingKeys={categoryLoadingKeys}
             collapsed={categoryTreeCollapsed}
+            isDark={isDark}
             onToggleCollapsed={() => {
               setCategoryTreeCollapsed((current) => !current);
             }}
@@ -4708,16 +4874,16 @@ const styles = StyleSheet.create({
   },
   categoryTreeCard: {
     borderWidth: 1,
-    borderRadius: 18,
-    marginBottom: 18,
+    borderRadius: 16,
+    marginBottom: 14,
     overflow: 'hidden',
   },
   categoryTreeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 17,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   categoryTreeHeaderLead: {
@@ -4725,32 +4891,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flex: 1,
     minWidth: 0,
-    paddingRight: 12,
+    paddingRight: 10,
   },
   categoryTreeHeaderIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 20,
+    height: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14,
+    marginRight: 10,
   },
   categoryTreeHeaderRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginLeft: 10,
+    gap: 6,
+    marginLeft: 8,
   },
   categoryTreeHeaderTitle: {
     flex: 1,
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '700',
   },
   categoryTreeHeaderSubtitle: {
-    maxWidth: 138,
-    fontSize: 14,
-    lineHeight: 20,
+    maxWidth: 120,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: '700',
     textAlign: 'right',
   },
@@ -4762,21 +4927,27 @@ const styles = StyleSheet.create({
     gap: 0,
   },
   categoryTreeToggleButton: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  categoryTreeRow: {
-    minHeight: 58,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    paddingLeft: 16,
-    paddingRight: 10,
-    paddingVertical: 12,
+  categoryTreeRowRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    marginLeft: 8,
+    gap: 6,
+  },
+  categoryTreeRow: {
+    minHeight: 44,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingLeft: 14,
+    paddingRight: 8,
+    paddingVertical: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
   },
   categoryTreeRowAll: {
     marginBottom: 0,
@@ -4791,9 +4962,16 @@ const styles = StyleSheet.create({
   },
   categoryTreeTitle: {
     flex: 1,
-    fontSize: 16,
-    lineHeight: 22,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: '700',
+  },
+  categoryTreeRowValue: {
+    maxWidth: 74,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '700',
+    textAlign: 'right',
   },
   categoryTreePath: {
     fontSize: 10,

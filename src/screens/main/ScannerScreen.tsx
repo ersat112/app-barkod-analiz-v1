@@ -72,7 +72,7 @@ import { analyzeProduct, type AnalysisResult, type Product } from '../../utils/a
 import { barcodeDecoder } from '../../utils/barcodeDecoder';
 
 type ScanPreviewStatus = 'loading' | 'found' | 'not_found' | 'error';
-type ScannerUiMode = 'food' | 'beauty' | 'medicine' | 'text';
+type ScannerUiMode = 'food' | 'medicine' | 'text';
 
 type ScanPreviewItem = {
   id: string;
@@ -102,7 +102,6 @@ const PREVIEW_QUEUE_LIMIT = 6;
 const FALLBACK_IMAGE = 'https://via.placeholder.com/240?text=No+Image';
 const MODE_ICON_MAP: Record<ScannerUiMode, keyof typeof Ionicons.glyphMap> = {
   food: 'nutrition-outline',
-  beauty: 'sparkles-outline',
   medicine: 'medkit-outline',
   text: 'document-text-outline',
 };
@@ -196,18 +195,10 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const recentScanMapRef = useRef<Record<string, number>>({});
   const dismissedModeHintsRef = useRef<Record<ScannerUiMode, boolean>>({
     food: false,
-    beauty: false,
     medicine: false,
     text: false,
   });
-  const scanMode: ProductLookupMode =
-    selectedMode === 'medicine'
-      ? 'medicine'
-      : selectedMode === 'beauty'
-        ? 'beauty'
-        : selectedMode === 'food'
-          ? 'food'
-          : 'auto';
+  const scanMode: ProductLookupMode = selectedMode === 'medicine' ? 'medicine' : 'auto';
   const isTextMode = selectedMode === 'text';
   const profileCity = resolveCanonicalCity(profile?.city);
   const profileDistrict = profileCity
@@ -230,7 +221,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     }
   }, []);
   const walkthroughModeOrder = useMemo<ScannerUiMode[]>(
-    () => ['food', 'beauty', 'medicine', 'text'],
+    () => ['food', 'medicine', 'text'],
     []
   );
   const isWalkthroughActive = walkthroughState === 'active';
@@ -862,26 +853,9 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
         });
 
         try {
-          let lookupResult = await lookupProductByBarcode(validBarcodeData, {
+          const lookupResult = await lookupProductByBarcode(validBarcodeData, {
             lookupMode: scanMode,
           });
-          let resolvedLookupMode = scanMode;
-
-          if (
-            !lookupResult.found &&
-            (scanMode === 'food' || scanMode === 'beauty')
-          ) {
-            const fallbackLookupMode: ProductLookupMode =
-              scanMode === 'food' ? 'beauty' : 'food';
-            const fallbackResult = await lookupProductByBarcode(validBarcodeData, {
-              lookupMode: fallbackLookupMode,
-            });
-
-            if (fallbackResult.found) {
-              lookupResult = fallbackResult;
-              resolvedLookupMode = fallbackLookupMode;
-            }
-          }
 
           if (!lookupResult.found) {
             markNotFound(validBarcodeData);
@@ -898,7 +872,17 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               message:
                 lookupResult.reason === 'invalid_barcode'
                   ? tt('invalid_barcode', 'Geçersiz barkod formatı')
-                  : tt('product_not_found', 'Ürün verisi bulunamadı'),
+                  : scanMode === 'medicine'
+                        ? tt(
+                            'scanner_medicine_not_found',
+                            'İlaç olarak bulunamadı. Gıda veya kozmetik ürünü ise ilgili sekmeyi seçip tekrar deneyin.'
+                          )
+                        : scanMode === 'auto'
+                          ? tt(
+                              'scanner_consumer_not_found',
+                              'Gıda veya kozmetik olarak bulunamadı. İlaç barkodu ise İlaç sekmesini, içerik metni ise Metin modunu deneyin.'
+                            )
+                        : tt('product_not_found', 'Ürün verisi bulunamadı'),
             }));
 
             if (lookupResult.reason !== 'invalid_barcode') {
@@ -940,20 +924,12 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
           updatePreviewItem(previewId, (current) => ({
             ...current,
-            lookupMode: resolvedLookupMode,
+            lookupMode: scanMode,
             status: 'found',
             product,
             analysis,
             message:
-              resolvedLookupMode !== scanMode &&
-              (scanMode === 'food' || scanMode === 'beauty')
-                ? tt(
-                    'scanner_preview_cross_mode_found',
-                    product.type === 'beauty'
-                      ? 'Urun kozmetik olarak bulundu. Detay icin karta dokunun.'
-                      : 'Urun gıda olarak bulundu. Detay icin karta dokunun.'
-                  )
-                : product.type === 'medicine'
+              product.type === 'medicine'
                 ? tt(
                     'scanner_preview_medicine_ready',
                     'Ilac bulundu. Prospektus ve detaylar icin karta dokunun.'
@@ -1263,30 +1239,16 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   }[] = [
     {
       key: 'food',
-      label: tt('food_label', 'Gıda'),
-      hintTitle: tt('scanner_mode_food_title', 'Gıda modunda tarama'),
+      label: tt('scanner_mode_consumer_label', 'Gıda & Kozmetik'),
+      hintTitle: tt('scanner_mode_consumer_title', 'Gıda ve kozmetik barkodlarını tara'),
       hintBody: tt(
-        'scanner_mode_food_body',
-        'Paketli gıdanın barkodunu kare içine hizala. Skor, alerjen ve katkı sinyalleri gelir.'
+        'scanner_mode_consumer_body',
+        'Paketli gıda ve kozmetik barkodlarını bu sekmede okut. Uygulama uygun veri kaynağını otomatik seçer.'
       ),
-      frameTitle: tt('scanner_frame_food_title', 'Barkodu kareye hizalayın'),
+      frameTitle: tt('scanner_frame_consumer_title', 'Barkodu kareye hizalayın'),
       frameSubtitle: tt(
-        'scanner_frame_food_subtitle',
-        'Skor, alerjen ve katkı sinyalleri hızlıca okunur.'
-      ),
-    },
-    {
-      key: 'beauty',
-      label: tt('beauty_label', 'Kozmetik'),
-      hintTitle: tt('scanner_mode_beauty_title', 'Kozmetik modunda tarama'),
-      hintBody: tt(
-        'scanner_mode_beauty_body',
-        'Kozmetik barkodunu okut. İçerik sinyali ve uygun marketlerde fiyat kıyası gösterilir.'
-      ),
-      frameTitle: tt('scanner_frame_beauty_title', 'Kozmetik barkodunu hizalayın'),
-      frameSubtitle: tt(
-        'scanner_frame_beauty_subtitle',
-        'İçerik riski ve market fiyatları birlikte hazırlanır.'
+        'scanner_frame_consumer_subtitle',
+        'Gıda için skor ve içerik, kozmetik için içerik riski ve fiyat sinyalleri hazırlanır.'
       ),
     },
     {
@@ -2165,7 +2127,10 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               <Text style={[styles.manualTitle, { color: colors.text }]}>
                 {manualEntryMode === 'text'
                   ? tt('manual_text_title', 'Analiz edilecek metni girin')
-                  : tt('manual_entry_title', 'Barkodu Elle Girin')}
+                  : tt(
+                      'manual_entry_title_with_mode',
+                      `${selectedModeMeta.label} barkodunu girin`
+                    )}
               </Text>
 
               <TouchableOpacity onPress={closeManualMode}>
@@ -2180,8 +2145,8 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                     'Gıda için içindekiler ve besin değerleri tablosunu birlikte yapıştırın. Sadece içerik metni girilirse sonuç sınırlı olabilir.'
                   )
                 : tt(
-                    'manual_barcode_help',
-                    '8, 12 veya 13 haneli barkod numarasını girin.'
+                    'manual_barcode_help_with_mode',
+                    `Şu an ${selectedModeMeta.label} sekmesindesiniz. Gıda barkodu için Gıda, kozmetik barkodu için Kozmetik, ilaç barkodu için İlaç sekmesini seçin.`
                   )}
             </Text>
 

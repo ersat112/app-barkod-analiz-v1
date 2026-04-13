@@ -55,6 +55,10 @@ import {
   type NutritionPreferenceKey,
 } from '../../services/nutritionPreferences.service';
 import { buildFamilyHealthAlerts } from '../../services/familyHealthProfile.service';
+import {
+  findBeautyIngredientByName,
+  getScientificSourceTitlesForKeys,
+} from '../../services/beautyIngredientsData';
 import { searchECodesInText } from '../../services/eCodesData';
 import {
   resolveCanonicalCity,
@@ -894,6 +898,54 @@ const buildCosmeticIngredientInsights = (params: {
   const unique = Array.from(new Set(parsed)).slice(0, 24);
 
   const ranked = unique.map((ingredient, index) => {
+    const matchedBeautyIngredient = findBeautyIngredientByName(ingredient);
+
+    if (matchedBeautyIngredient) {
+      const riskLabel = translateRiskLevel(tt, matchedBeautyIngredient.risk);
+      const sourceTitles = getScientificSourceTitlesForKeys(matchedBeautyIngredient.sourceKeys);
+      const latestRiskHistory = [...(matchedBeautyIngredient.riskHistory ?? [])].sort((a, b) =>
+        b.date.localeCompare(a.date)
+      )[0];
+      const detailParts = [matchedBeautyIngredient.impact];
+
+      if (sourceTitles.length) {
+        detailParts.push(
+          tt('beauty_ingredient_sources_label', 'Kaynaklar: {{sources}}').replace(
+            '{{sources}}',
+            sourceTitles.join(', ')
+          )
+        );
+      }
+
+      if (latestRiskHistory) {
+        detailParts.push(
+          tt('beauty_ingredient_last_update_label', 'Son güncelleme: {{update}}').replace(
+            '{{update}}',
+            latestRiskHistory.previousRisk
+              ? `${latestRiskHistory.date} • ${latestRiskHistory.previousRisk} -> ${latestRiskHistory.nextRisk} • ${latestRiskHistory.note}`
+              : `${latestRiskHistory.date} • ${latestRiskHistory.nextRisk} • ${latestRiskHistory.note}`
+          )
+        );
+      }
+
+      return {
+        order:
+          matchedBeautyIngredient.risk === 'Yüksek'
+            ? 0
+            : matchedBeautyIngredient.risk === 'Orta'
+              ? 1
+              : 2,
+        item: {
+          key: `${ingredient}-${index}`,
+          title: ingredient,
+          riskLabel,
+          accentColor: getCosmeticRiskColor(riskLabel),
+          summary: `${matchedBeautyIngredient.category} • ${matchedBeautyIngredient.summary}`,
+          detail: detailParts.join('\n\n'),
+        } satisfies CosmeticIngredientInsightItem,
+      };
+    }
+
     const matches = searchECodesInText(ingredient);
     const matched = matches[0];
 

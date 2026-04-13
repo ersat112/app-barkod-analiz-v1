@@ -107,6 +107,26 @@ export const HelpCenterScreen: React.FC = () => {
         onPress: () => navigation.navigate('HelpArticle', { articleKey: 'nutriScore' }),
       },
       {
+        key: 'risk-updates',
+        icon: 'git-compare-outline',
+        title: tt('help_center_risk_updates_title', 'Risk Güncellemeleri'),
+        subtitle: tt(
+          'help_center_risk_updates_subtitle',
+          'Katkı ve kozmetik risk seviyeleri zamanla nasıl değişir, bizim tarafta nasıl yönetilmelidir?'
+        ),
+        onPress: () => navigation.navigate('HelpArticle', { articleKey: 'riskUpdates' }),
+      },
+      {
+        key: 'scientific-sources',
+        icon: 'library-outline',
+        title: tt('help_center_scientific_sources_title', 'Bilimsel Kaynaklar'),
+        subtitle: tt(
+          'help_center_scientific_sources_subtitle',
+          'Kaynak kurumları, resmi veri zinciri ve editoryal sınırlarımızı görün.'
+        ),
+        onPress: () => navigation.navigate('HelpArticle', { articleKey: 'scientificSources' }),
+      },
+      {
         key: 'sensitivities',
         icon: 'warning-outline',
         title: tt('help_center_sensitivities_title', 'Hassas Maddeler ve Aile Profili'),

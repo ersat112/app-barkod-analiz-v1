@@ -36,6 +36,8 @@ type RemoteCandidate = {
 export type ProductRepositoryServiceResolveOptions = {
   now?: number;
   remoteFetch?: (barcode: string) => Promise<ProductRepositoryRemoteFetchResult>;
+  allowCachedNotFound?: boolean;
+  persistNotFoundResult?: boolean;
 };
 
 const inFlightRequests = new Map<string, Promise<ProductRepositoryResolveResult>>();
@@ -457,19 +459,23 @@ export const resolveProductFromRepository = async (
       const localHit = getLocalProductCacheHit(normalizedBarcode, now);
 
       if (localHit) {
-        const result = mapLocalHit(
-          localHit,
-          createLookupMeta({
-            lookupId,
-            startedAt,
-            normalizedBarcode,
-            remoteMode,
-            cacheTier: 'local',
-            resolvedSource: 'local_cache' as never,
-          })
-        );
-        trackResolvedLookup(result);
-        return result;
+        if (localHit.kind === 'not_found' && options?.allowCachedNotFound === false) {
+          // Strict mode lookups should not get stuck on an older cross-mode miss.
+        } else {
+          const result = mapLocalHit(
+            localHit,
+            createLookupMeta({
+              lookupId,
+              startedAt,
+              normalizedBarcode,
+              remoteMode,
+              cacheTier: 'local',
+              resolvedSource: 'local_cache' as never,
+            })
+          );
+          trackResolvedLookup(result);
+          return result;
+        }
       }
     }
 
@@ -477,20 +483,24 @@ export const resolveProductFromRepository = async (
       const remoteHit = await getRemoteCachedProduct(normalizedBarcode, now);
 
       if (remoteHit) {
-        backfillLocalCacheFromRemoteHit(remoteHit, now);
-        const result = mapRemoteHit(
-          remoteHit,
-          createLookupMeta({
-            lookupId,
-            startedAt,
-            normalizedBarcode,
-            remoteMode,
-            cacheTier: 'remote',
-            resolvedSource: 'shared_cache' as never,
-          })
-        );
-        trackResolvedLookup(result);
-        return result;
+        if (remoteHit.kind === 'not_found' && options?.allowCachedNotFound === false) {
+          // Ignore shared not-found cache when the user explicitly chose a mode.
+        } else {
+          backfillLocalCacheFromRemoteHit(remoteHit, now);
+          const result = mapRemoteHit(
+            remoteHit,
+            createLookupMeta({
+              lookupId,
+              startedAt,
+              normalizedBarcode,
+              remoteMode,
+              cacheTier: 'remote',
+              resolvedSource: 'shared_cache' as never,
+            })
+          );
+          trackResolvedLookup(result);
+          return result;
+        }
       }
     }
 
@@ -554,17 +564,19 @@ export const resolveProductFromRepository = async (
       return foundResult;
     }
 
-    setLocalProductCacheNotFound({
-      barcode: normalizedBarcode,
-      ttlMs: CACHE_POLICY.localNotFoundTtlMs,
-      now,
-    });
+    if (options?.persistNotFoundResult !== false) {
+      setLocalProductCacheNotFound({
+        barcode: normalizedBarcode,
+        ttlMs: CACHE_POLICY.localNotFoundTtlMs,
+        now,
+      });
 
-    void setRemoteCachedProductNotFound({
-      barcode: normalizedBarcode,
-      ttlMs: CACHE_POLICY.sharedNotFoundTtlMs,
-      now,
-    });
+      void setRemoteCachedProductNotFound({
+        barcode: normalizedBarcode,
+        ttlMs: CACHE_POLICY.sharedNotFoundTtlMs,
+        now,
+      });
+    }
 
     const notFoundResult: ProductRepositoryResolveResult = {
       found: false,

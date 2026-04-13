@@ -440,6 +440,22 @@ const mergeOfferResponses = (
   };
 };
 
+const countDistinctOfferMarkets = (offers: MarketOffer[]): number => {
+  const identities = new Set<string>();
+
+  offers.forEach((offer) => {
+    const identity =
+      getMarketOfferIdentity(offer) ||
+      getNormalizedMarketIdentity(offer.marketKey, offer.marketName);
+
+    if (identity) {
+      identities.add(identity);
+    }
+  });
+
+  return identities.size;
+};
+
 const buildEntryComparisonOffers = (
   entry: PriceCompareCartEntry,
   compareOffers: MarketOffer[] | null | undefined,
@@ -453,10 +469,24 @@ const buildEntryComparisonOffers = (
     mergeComparisonOffers(compareOffers ?? [], entry.offersResponse.offers),
     seededOffers
   );
-
-  return normalizeOffersForDisplay(mergedOffers, {
+  const cityScopedOffers = normalizeOffersForDisplay(mergedOffers, {
     cityCode,
   });
+  const unscopedOffers = normalizeOffersForDisplay(mergedOffers);
+  const expectedMarketCount = Math.max(
+    entry.product.inStockMarketCount || 0,
+    entry.product.marketCount || 0,
+    countDistinctOfferMarkets(mergedOffers)
+  );
+
+  if (
+    unscopedOffers.length > cityScopedOffers.length &&
+    (expectedMarketCount > cityScopedOffers.length || cityScopedOffers.length <= 1)
+  ) {
+    return unscopedOffers;
+  }
+
+  return cityScopedOffers;
 };
 
 const normalizeComparableText = (value?: string | null): string =>
@@ -778,12 +808,12 @@ export const PriceCompareBasketScreen: React.FC = () => {
       const hydratedResponses = await Promise.allSettled(
         candidates.map(async (entry) => {
           const fetchOffersForEntry = (
-            scope: 'district' | 'city'
+            scope: 'district' | 'city' | 'global'
           ): Promise<MarketProductOffersResponse | null> => {
-            const districtName =
-              scope === 'district' ? effectiveDistrict ?? undefined : undefined;
+            const districtName = scope === 'district' ? effectiveDistrict ?? undefined : undefined;
+            const scopedCityCode = scope === 'global' ? undefined : cityCode ?? undefined;
             const sharedParams = {
-              cityCode: cityCode ?? undefined,
+              cityCode: scopedCityCode,
               districtName,
               includeOutOfStock: true,
               limit: 200,
@@ -809,13 +839,19 @@ export const PriceCompareBasketScreen: React.FC = () => {
             return Promise.resolve<MarketProductOffersResponse | null>(null);
           };
 
-          const [districtScopedResponse, cityWideResponse] = await Promise.all([
+          const [districtScopedResponse, cityWideResponse, globalResponse] = await Promise.all([
             fetchOffersForEntry('district'),
-            effectiveDistrict ? fetchOffersForEntry('city') : Promise.resolve<MarketProductOffersResponse | null>(null),
+            effectiveDistrict
+              ? fetchOffersForEntry('city')
+              : Promise.resolve<MarketProductOffersResponse | null>(null),
+            cityCode || effectiveDistrict
+              ? fetchOffersForEntry('global')
+              : Promise.resolve<MarketProductOffersResponse | null>(null),
           ]);
           const response = mergeOfferResponses([
             districtScopedResponse,
             cityWideResponse,
+            globalResponse,
             entry.offersResponse,
           ]);
 
