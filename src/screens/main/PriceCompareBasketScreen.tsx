@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   Image,
   Linking,
@@ -13,7 +14,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
@@ -25,6 +26,8 @@ import {
   getBestInStockOffer,
   getMarketOfferIdentity,
 } from '../../services/marketPricingContract.service';
+import { adService } from '../../services/adService';
+import { entitlementService } from '../../services/entitlement.service';
 import {
   fetchMarketBasketCompare,
   fetchMarketProductOffers,
@@ -98,6 +101,11 @@ type BasketMatrixRow = {
 };
 
 const REMOTE_BASKET_TIMEOUT_MS = 6500;
+const PRICE_COMPARE_CART_INTERSTITIAL_STORAGE_KEY =
+  '@price_compare/basket-interstitial-open-count-v1';
+const PRICE_COMPARE_CART_INTERSTITIAL_CADENCE = 3;
+const PRICE_COMPARE_CART_INTERSTITIAL_MIN_ITEMS = 2;
+const PRICE_COMPARE_CART_INTERSTITIAL_WAIT_MS = 4000;
 
 const resolveWithin = <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
   new Promise<T>((resolve, reject) => {
@@ -115,6 +123,22 @@ const resolveWithin = <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> =
         reject(error);
       });
   });
+
+const waitForPreparedInterstitial = async (timeoutMs: number): Promise<boolean> => {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (adService.isInterstitialReady()) {
+      return true;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 250);
+    });
+  }
+
+  return adService.isInterstitialReady();
+};
 
 const getProductIdentity = (product: PriceCompareCartEntry['product']): string =>
   product.productId || product.id || product.barcode || `${product.productName}-${product.brand || ''}`;
@@ -615,6 +639,7 @@ export const PriceCompareBasketScreen: React.FC = () => {
     Record<string, EntryResolutionStatus>
   >({});
   const hydratedOfferRequestKeysRef = useRef<Set<string>>(new Set());
+  const basketInterstitialActiveRef = useRef(false);
 
   const canonicalProfileCity = resolveCanonicalCity(profile?.city);
   const canonicalProfileDistrict = resolveCanonicalDistrict(profile?.city, profile?.district);
@@ -627,6 +652,9 @@ export const PriceCompareBasketScreen: React.FC = () => {
   const effectiveDistrict = canonicalProfileDistrict || canonicalDetectedDistrict;
   const cityCode = resolveTurkeyCityCode(effectiveCity);
   const citySlug = resolveTurkeyCitySlug(effectiveCity);
+  const basketInterstitialScopeKey = `${PRICE_COMPARE_CART_INTERSTITIAL_STORAGE_KEY}:${
+    currentUserId ?? 'anonymous'
+  }`;
   const pricedEntries = useMemo(
     () => entries.filter((entry) => hasLiveOfferForEntry(entry, cityCode)),
     [cityCode, entries]
@@ -709,6 +737,75 @@ export const PriceCompareBasketScreen: React.FC = () => {
     detectedLocationResolved,
     locationPermissionGranted,
   ]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const maybeShowBasketInterstitial = async () => {
+        if (
+          basketInterstitialActiveRef.current ||
+          entries.length < PRICE_COMPARE_CART_INTERSTITIAL_MIN_ITEMS
+        ) {
+          return;
+        }
+
+        try {
+          const [policy, entitlement] = await Promise.all([
+            adService.getCurrentPolicy(),
+            entitlementService.getSnapshot(),
+          ]);
+
+          if (
+            !isActive ||
+            !policy.enabled ||
+            !policy.interstitialEnabled ||
+            entitlement.adsSuppressed
+          ) {
+            return;
+          }
+
+          const rawCount = await AsyncStorage.getItem(basketInterstitialScopeKey);
+          const previousCount = Number.parseInt(rawCount || '0', 10);
+          const nextCount = Number.isFinite(previousCount) ? previousCount + 1 : 1;
+
+          await AsyncStorage.setItem(basketInterstitialScopeKey, String(nextCount));
+
+          if (nextCount % PRICE_COMPARE_CART_INTERSTITIAL_CADENCE !== 0) {
+            void adService.prepareInterstitial();
+            return;
+          }
+
+          basketInterstitialActiveRef.current = true;
+
+          const ready =
+            (await adService.prepareInterstitial()) ||
+            (await waitForPreparedInterstitial(PRICE_COMPARE_CART_INTERSTITIAL_WAIT_MS));
+
+          if (!isActive || !ready) {
+            return;
+          }
+
+          await adService.showPreparedInterstitial();
+          await adService.recordInterstitialShown({ shownAt: Date.now() });
+        } catch (error) {
+          await adService.trackInterstitialShowFailure(error, {
+            surface: 'price_compare_basket',
+            cadence: PRICE_COMPARE_CART_INTERSTITIAL_CADENCE,
+            entryCount: entries.length,
+          });
+        } finally {
+          basketInterstitialActiveRef.current = false;
+        }
+      };
+
+      void maybeShowBasketInterstitial();
+
+      return () => {
+        isActive = false;
+      };
+    }, [basketInterstitialScopeKey, entries.length])
+  );
 
   useEffect(() => {
     const comparableItems = analysisEntries.filter((entry) => Boolean(entry.product.barcode));

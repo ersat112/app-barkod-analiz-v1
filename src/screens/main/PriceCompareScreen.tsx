@@ -23,6 +23,7 @@ import { MarketOfferSheet } from '../../components/MarketOfferSheet';
 import { MarketPriceTableCard } from '../../components/MarketPriceTableCard';
 import { ProductSummaryCard } from '../../components/ProductSummaryCard';
 import { ScreenOnboardingOverlay } from '../../components/ScreenOnboardingOverlay';
+import { AdBanner } from '../../components/AdBanner';
 import {
   buildMarketMonogram,
   resolveMarketAccent,
@@ -88,6 +89,7 @@ import {
   hasSeenScreenOnboarding,
   markScreenOnboardingSeen,
 } from '../../services/screenOnboarding.service';
+import { adService } from '../../services/adService';
 import { usePriceCompareBasketStore } from '../../store/usePriceCompareBasketStore';
 import type { Product } from '../../utils/analysis';
 
@@ -3549,6 +3551,7 @@ export const PriceCompareScreen: React.FC = () => {
   }, [marketSheetState]);
 
   const handleOpenBasketScreen = useCallback(() => {
+    void adService.prepareInterstitial();
     navigation.navigate('PriceCompareBasket');
   }, [navigation]);
 
@@ -4055,6 +4058,11 @@ export const PriceCompareScreen: React.FC = () => {
                     ) : null}
                   </View>
                 ) : null}
+                <AdBanner
+                  visible={results.length > 0 && !searchLoading}
+                  placement="price_compare_results"
+                  containerStyle={styles.resultsAdBanner}
+                />
               </>
             ) : (
               <NoticeCard
@@ -4866,6 +4874,10 @@ const styles = StyleSheet.create({
   },
   resultsPaginationSpinner: {
     marginLeft: 4,
+  },
+  resultsAdBanner: {
+    marginTop: 14,
+    marginBottom: 2,
   },
   resultsTableWrap: {
     borderWidth: 1,
