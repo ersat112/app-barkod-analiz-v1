@@ -46,6 +46,37 @@ export function buildMarketGelsinOffersEndpoint(
   return `/v1/products/${encodeURIComponent(barcode)}/offers${suffix ? `?${suffix}` : ''}`;
 }
 
+export function buildMarketGelsinOffersByProductIdEndpoint(
+  productId: string,
+  params?: {
+    cityCode?: string;
+    districtName?: string;
+    limit?: number;
+    includeOutOfStock?: boolean;
+  }
+): string {
+  const query = new URLSearchParams();
+
+  if (params?.cityCode) {
+    query.set('city_code', params.cityCode);
+  }
+
+  if (params?.districtName) {
+    query.set('district', params.districtName);
+  }
+
+  if (typeof params?.limit === 'number' && Number.isFinite(params.limit)) {
+    query.set('limit', String(params.limit));
+  }
+
+  if (typeof params?.includeOutOfStock === 'boolean') {
+    query.set('include_out_of_stock', String(params.includeOutOfStock));
+  }
+
+  const suffix = query.toString();
+  return `/v1/product-ids/${encodeURIComponent(productId)}/offers${suffix ? `?${suffix}` : ''}`;
+}
+
 export function buildMarketGelsinHistoryEndpoint(
   barcode: string,
   params?: {

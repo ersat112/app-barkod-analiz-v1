@@ -40,6 +40,7 @@ import {
   buildMarketGelsinHistoryEndpoint,
   buildMarketGelsinIntegrationsStatusEndpoint,
   buildMarketGelsinLegacyOffersSearchEndpoint,
+  buildMarketGelsinOffersByProductIdEndpoint,
   buildMarketGelsinOffersEndpoint,
   buildMarketGelsinProgramCoverageEndpoint,
   buildMarketGelsinScanEventEndpoint,
@@ -59,6 +60,7 @@ type MarketPricingRuntimeContext = {
   rpc: {
     health: string;
     offers: string;
+    offersById: string;
     resolve: string;
     priceHistory: string;
     searchProducts: string;
@@ -68,10 +70,20 @@ type MarketPricingRuntimeContext = {
   };
 };
 
+const isTransientMarketGelsinError = (error: unknown): boolean => {
+  if (!axios.isAxiosError(error)) {
+    return false;
+  }
+
+  const status = error.response?.status;
+  return status === 502 || status === 503 || status === 504 || error.code === 'ECONNABORTED';
+};
+
 const RPC_SUFFIX_REGEX = /\/rest\/v1\/rpc\/?$/i;
 const DEFAULT_RPC_NAMES = Object.freeze({
   health: 'mg_rpc_health',
   offers: 'mg_rpc_product_offers',
+  offersById: 'mg_rpc_product_offers_by_id',
   resolve: 'mg_rpc_product_resolve',
   priceHistory: 'mg_rpc_product_price_history',
   searchProducts: 'mg_rpc_search_products',
@@ -123,6 +135,7 @@ const getSupabaseAnonKey = (): string =>
 const getRpcName = (
   envKey:
     | 'EXPO_PUBLIC_MARKET_GELSIN_RPC_PRODUCT_OFFERS'
+    | 'EXPO_PUBLIC_MARKET_GELSIN_RPC_PRODUCT_OFFERS_BY_ID'
     | 'EXPO_PUBLIC_MARKET_GELSIN_RPC_PRODUCT_RESOLVE'
     | 'EXPO_PUBLIC_MARKET_GELSIN_RPC_PRODUCT_PRICE_HISTORY'
     | 'EXPO_PUBLIC_MARKET_GELSIN_RPC_SEARCH_PRODUCTS'
@@ -137,6 +150,10 @@ const getRpcConfig = () => ({
   offers: getRpcName(
     'EXPO_PUBLIC_MARKET_GELSIN_RPC_PRODUCT_OFFERS',
     DEFAULT_RPC_NAMES.offers
+  ),
+  offersById: getRpcName(
+    'EXPO_PUBLIC_MARKET_GELSIN_RPC_PRODUCT_OFFERS_BY_ID',
+    DEFAULT_RPC_NAMES.offersById
   ),
   resolve: getRpcName(
     'EXPO_PUBLIC_MARKET_GELSIN_RPC_PRODUCT_RESOLVE',
@@ -598,6 +615,88 @@ const parseHistoryPoint = (value: unknown): MarketPriceHistoryPoint => {
   };
 };
 
+const parseOffersResponseProduct = (
+  value: unknown
+): NonNullable<MarketProductOffersResponse['product']> | null => {
+  const payload = toObject(value);
+  const productId = toText(payload.product_id ?? payload.productId, '') || null;
+  const barcode = toText(payload.barcode, '') || null;
+  const productName =
+    toText(
+      payload.product_name ??
+        payload.productName ??
+        payload.normalized_product_name ??
+        payload.normalizedProductName ??
+        payload.display_name ??
+        payload.displayName,
+      ''
+    ) || null;
+  const brand = toText(payload.brand ?? payload.brand_name ?? payload.brandName, '') || null;
+  const imageUrl = toText(payload.image_url ?? payload.imageUrl, '') || null;
+
+  if (!productId && !barcode && !productName && !brand && !imageUrl) {
+    return null;
+  }
+
+  return {
+    productId,
+    barcode,
+    productName,
+    brand,
+    imageUrl,
+  };
+};
+
+const buildParsedOffersResponse = (
+  payload: Record<string, unknown>,
+  options: {
+    fallbackBarcode: string;
+    fallbackProductId?: string | null;
+    fallbackCityCode?: string;
+    fallbackCityName?: string;
+    fallbackWarnings?: string[];
+  }
+): MarketProductOffersResponse => {
+  const city = toObject(payload.city);
+  const productPayload =
+    parseOffersResponseProduct(payload.product ?? payload.item ?? payload.result) ?? null;
+  const cityCode = toText(
+    city.code ?? city.city_code,
+    options.fallbackCityCode || ''
+  );
+  const cityName = toText(
+    city.name ?? city.city_name,
+    options.fallbackCityName || ''
+  );
+  const directOffers = Array.isArray(payload.offers)
+    ? payload.offers.map((item) => parseOffer(item, cityCode, cityName))
+    : [];
+  const warnings = Array.from(
+    new Set([...(toStringArray(payload.warnings) ?? []), ...(options.fallbackWarnings ?? [])])
+  );
+
+  return {
+    barcode:
+      toText(
+        payload.barcode ?? productPayload?.barcode,
+        options.fallbackBarcode
+      ) || options.fallbackBarcode,
+    productId:
+      toText(
+        payload.product_id ?? payload.productId ?? productPayload?.productId,
+        options.fallbackProductId || ''
+      ) || options.fallbackProductId || null,
+    product: productPayload,
+    fetchedAt: toText(payload.fetched_at ?? payload.fetchedAt, new Date().toISOString()),
+    requestId: toText(payload.request_id ?? payload.requestId, '') || null,
+    partial: toBoolean(payload.partial, false),
+    warnings,
+    city: cityCode || cityName ? { code: cityCode, name: cityName } : null,
+    dataFreshness: parseFreshness(payload.data_freshness ?? payload.dataFreshness),
+    offers: directOffers,
+  };
+};
+
 const parseSearchProduct = (value: unknown): MarketSearchProduct => {
   const payload = toObject(value);
   const productId =
@@ -960,16 +1059,14 @@ export async function fetchMarketProductOffers(
           buildMarketGelsinOffersEndpoint(barcode, params)
         );
   const payload = toObject(response.data);
-  const city = toObject(payload.city);
-  const cityCode = toText(city.code ?? city.city_code, params?.cityCode || '');
-  const cityName = toText(city.name ?? city.city_name, '');
-  const directOffers = Array.isArray(payload.offers)
-    ? payload.offers.map((item) => parseOffer(item, cityCode, cityName))
-    : [];
+  const baseResponse = buildParsedOffersResponse(payload, {
+    fallbackBarcode: barcode,
+    fallbackCityCode: params?.cityCode,
+  });
   const shouldTryNameFallback =
     Boolean(params?.enableNameFallback) &&
     Boolean(params?.fallbackProductName) &&
-    countUniqueMarkets(directOffers) < 3;
+    countUniqueMarkets(baseResponse.offers) < 3;
   const fallbackOffers = shouldTryNameFallback
     ? await fetchSearchFallbackOffers({
         productName: params?.fallbackProductName,
@@ -977,25 +1074,73 @@ export async function fetchMarketProductOffers(
         cityCode: params?.cityCode,
       })
     : [];
-  const offers = mergeOffersForDisplay(
-    [...directOffers, ...fallbackOffers],
-    params?.cityCode ?? null
-  );
-  const warnings = toStringArray(payload.warnings);
+  return {
+    ...baseResponse,
+    warnings: fallbackOffers.length
+      ? Array.from(new Set([...(baseResponse.warnings ?? []), 'name_match_fallback_used']))
+      : baseResponse.warnings,
+    offers: mergeOffersForDisplay(
+      [...baseResponse.offers, ...fallbackOffers],
+      params?.cityCode ?? null
+    ),
+  };
+}
 
-  if (fallbackOffers.length) {
-    warnings.push('name_match_fallback_used');
+export async function fetchMarketProductOffersById(
+  productId: string,
+  params?: {
+    cityCode?: string;
+    districtName?: string;
+    limit?: number;
+    includeOutOfStock?: boolean;
+    fallbackProductName?: string | null;
+    fallbackBrand?: string | null;
+    enableNameFallback?: boolean;
   }
+): Promise<MarketProductOffersResponse> {
+  const runtime = await ensureRuntimeReady();
+  const response =
+    runtime.transport === 'supabase_rpc'
+      ? await runtime.client.post(`/${runtime.rpc.offersById}`, {
+          p_product_id: productId,
+          p_city_code: params?.cityCode ?? null,
+          p_district: params?.districtName ?? null,
+          p_lat: null,
+          p_lng: null,
+          p_limit: params?.limit ?? 12,
+          p_include_out_of_stock: params?.includeOutOfStock ?? false,
+        })
+      : await runtime.client.get(
+          buildMarketGelsinOffersByProductIdEndpoint(productId, params)
+        );
+  const payload = toObject(response.data);
+  const baseResponse = buildParsedOffersResponse(payload, {
+    fallbackBarcode: productId,
+    fallbackProductId: productId,
+    fallbackCityCode: params?.cityCode,
+  });
+  const shouldTryNameFallback =
+    Boolean(params?.enableNameFallback) &&
+    Boolean(params?.fallbackProductName) &&
+    countUniqueMarkets(baseResponse.offers) < 3;
+  const fallbackOffers = shouldTryNameFallback
+    ? await fetchSearchFallbackOffers({
+        productName: params?.fallbackProductName,
+        brand: params?.fallbackBrand,
+        cityCode: params?.cityCode,
+      })
+    : [];
 
   return {
-    barcode: toText(payload.barcode, barcode),
-    fetchedAt: toText(payload.fetched_at ?? payload.fetchedAt, new Date().toISOString()),
-    requestId: toText(payload.request_id ?? payload.requestId, '') || null,
-    partial: toBoolean(payload.partial, false),
-    warnings,
-    city: cityCode || cityName ? { code: cityCode, name: cityName } : null,
-    dataFreshness: parseFreshness(payload.data_freshness ?? payload.dataFreshness),
-    offers,
+    ...baseResponse,
+    productId: baseResponse.productId ?? productId,
+    warnings: fallbackOffers.length
+      ? Array.from(new Set([...(baseResponse.warnings ?? []), 'name_match_fallback_used']))
+      : baseResponse.warnings,
+    offers: mergeOffersForDisplay(
+      [...baseResponse.offers, ...fallbackOffers],
+      params?.cityCode ?? null
+    ),
   };
 }
 
@@ -1059,26 +1204,39 @@ export async function fetchMarketCategoryTree(params?: {
   onlyActive?: boolean;
 }): Promise<MarketCategoryTreeResponse> {
   const runtime = await ensureRuntimeReady();
-  const response =
+  const executeRequest = (includeCounts: boolean) =>
     runtime.transport === 'supabase_rpc'
-      ? await runtime.client.post(`/${runtime.rpc.listCategories}`, {
+      ? runtime.client.post(`/${runtime.rpc.listCategories}`, {
           p_city_code: params?.cityCode ?? null,
           p_root_category_id: params?.rootCategoryId ?? null,
           p_depth_limit: params?.depthLimit ?? 1,
           p_q: params?.query ?? null,
-          p_include_counts: params?.includeCounts ?? true,
+          p_include_counts: includeCounts,
           p_only_active: params?.onlyActive ?? true,
         })
-      : await runtime.client.get(
+      : runtime.client.get(
           buildMarketGelsinCategoryTreeEndpoint({
             cityCode: params?.cityCode,
             rootCategoryId: params?.rootCategoryId ?? undefined,
             depthLimit: params?.depthLimit,
             query: params?.query,
-            includeCounts: params?.includeCounts,
+            includeCounts,
             onlyActive: params?.onlyActive,
           })
         );
+
+  const requestedCounts = params?.includeCounts ?? true;
+  let response;
+
+  try {
+    response = await executeRequest(requestedCounts);
+  } catch (error) {
+    if (!requestedCounts || !isTransientMarketGelsinError(error)) {
+      throw error;
+    }
+
+    response = await executeRequest(false);
+  }
   const payload = toObject(response.data);
   const rawNodes = Array.isArray(response.data)
     ? response.data

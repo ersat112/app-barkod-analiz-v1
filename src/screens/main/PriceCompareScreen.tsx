@@ -35,6 +35,14 @@ import { useAppScreenLayout } from '../../components/layout/useAppScreenLayout';
 import { useMarketGelsinRuntime } from '../../hooks/useMarketGelsinRuntime';
 import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import {
+  addFavoriteBarcode,
+  getAllFavoriteBarcodes,
+  getLatestHistoryEntriesForBarcodes,
+  isFavoriteBarcode,
+  removeFavoriteBarcode,
+  type HistoryEntry,
+} from '../../services/db';
+import {
   getBestInStockOffer,
   getMarketOfferIdentity,
 } from '../../services/marketPricingContract.service';
@@ -43,6 +51,7 @@ import {
   fetchMarketCategoryProducts,
   fetchMarketCategoryTree,
   fetchMarketProductOffers,
+  fetchMarketProductOffersById,
   fetchMarketPriceHistory,
   fetchMarketProductSearch,
 } from '../../services/marketPricing.service';
@@ -69,6 +78,12 @@ import type {
 import { usePreferenceStore } from '../../store/usePreferenceStore';
 import { withAlpha } from '../../utils/color';
 import { searchLocalPriceCompareProducts } from '../../services/priceCompareSearch.service';
+import {
+  getPriceCompareFavoriteKey,
+  listPriceCompareFavorites,
+  mergePriceCompareFavorites,
+  togglePriceCompareFavorite,
+} from '../../services/priceCompareFavorites.service';
 import {
   hasSeenScreenOnboarding,
   markScreenOnboardingSeen,
@@ -106,6 +121,7 @@ const CATEGORY_ROOT_KEY = '__root__';
 const SYNTHETIC_CATEGORY_PREFIX = '__synthetic_category__:';
 const RESULT_GRID_COLUMNS = 4;
 const RESULT_GRID_GAP = 8;
+const RESULT_GRID_HORIZONTAL_PADDING = 6;
 const SEARCH_RESULTS_PAGE_SIZE = 12;
 const SEARCH_RESULTS_FETCH_LIMIT = 48;
 const CATEGORY_ROOT_SPECS = Object.freeze([
@@ -302,6 +318,30 @@ const buildSearchVariants = (query: string): string[] => {
   ).slice(0, 6);
 };
 
+const mapHistoryEntryToSearchProduct = (entry: HistoryEntry): MarketSearchProduct => ({
+  id: entry.barcode || `history-${entry.id}`,
+  productId: null,
+  barcode: entry.barcode,
+  productName: entry.name || entry.barcode,
+  brand: entry.brand || null,
+  category:
+    entry.categories ||
+    (entry.type === 'food' ? 'Gıda' : entry.type === 'beauty' ? 'Kozmetik' : 'İlaç'),
+  normalizedCategoryId: null,
+  taxonomyPath: entry.categories || null,
+  taxonomyLeaf: entry.categories || null,
+  packSize: null,
+  packUnit: null,
+  matchConfidence: null,
+  imageUrl: entry.image_url || null,
+  marketLogoUrl: null,
+  bestOffer: null,
+  seedOffers: [],
+  marketCount: 0,
+  inStockMarketCount: 0,
+  dataFreshness: null,
+});
+
 const resolveReferenceProductForMarketProduct = async (
   product: MarketSearchProduct
 ): Promise<Product | null> => {
@@ -353,6 +393,9 @@ const getProductIdentity = (item: MarketSearchProduct): string =>
 
 const hasComparableBarcode = (item: MarketSearchProduct): boolean =>
   Boolean(item.barcode && item.barcode.trim().length > 0);
+
+const hasComparableProductId = (item: MarketSearchProduct): boolean =>
+  Boolean(item.productId && item.productId.trim().length > 0);
 
 const dedupeSearchProducts = (items: MarketSearchProduct[]): MarketSearchProduct[] => {
   const map = new Map<string, MarketSearchProduct>();
@@ -455,8 +498,7 @@ const buildSearchCategoryTree = (items: MarketCategoryNode[]): SearchCategoryTre
 
   items.forEach((item) => {
     const exactCount = item.productCount ?? item.marketCount ?? item.inStockProductCount ?? null;
-    const displayCount =
-      item.childrenCount > 0 && (exactCount == null || exactCount <= 0) ? null : exactCount;
+    const displayCount = item.childrenCount > 0 ? null : exactCount;
 
     nodeMap.set(item.normalizedCategoryId, {
       key: item.normalizedCategoryId,
@@ -615,24 +657,6 @@ const buildSeededCategoryNodes = (
   return seededNodes;
 };
 
-const findFirstBrowsableCategoryNode = (
-  nodes: SearchCategoryTreeNode[]
-): SearchCategoryTreeNode | null => {
-  for (const node of nodes) {
-    if (!isSyntheticCategoryId(node.categoryId)) {
-      return node;
-    }
-
-    const nested = findFirstBrowsableCategoryNode(node.children);
-
-    if (nested) {
-      return nested;
-    }
-  }
-
-  return null;
-};
-
 const buildResultDerivedCategoryTree = (
   items: MarketSearchProduct[]
 ): SearchCategoryTreeNode[] => {
@@ -694,6 +718,23 @@ const buildCategoryBrowseQueries = (label?: string | null): string[] => {
       )
     )
   );
+};
+
+const searchLocalCategoryBrowseProducts = (
+  label: string,
+  limit: number
+): MarketSearchProduct[] => {
+  const queries = buildCategoryBrowseQueries(label).slice(0, 4);
+
+  if (!queries.length) {
+    return [];
+  }
+
+  const merged = dedupeSearchProducts(
+    queries.flatMap((query) => searchLocalPriceCompareProducts(query, limit))
+  );
+
+  return merged.slice(0, limit);
 };
 
 const annotateBrowseResult = (
@@ -788,6 +829,14 @@ const buildOffersResponseFromSearchProduct = (
 
   return {
     barcode: item.barcode || item.id,
+    productId: item.productId ?? null,
+    product: {
+      productId: item.productId ?? null,
+      barcode: item.barcode ?? null,
+      productName: item.productName,
+      brand: item.brand ?? null,
+      imageUrl: item.imageUrl ?? null,
+    },
     fetchedAt: new Date().toISOString(),
     requestId: null,
     partial: false,
@@ -803,6 +852,11 @@ const buildOffersResponseFromSearchProduct = (
     offers,
   };
 };
+
+const canQuickAddSearchProduct = (item: MarketSearchProduct): boolean =>
+  Boolean(buildOffersResponseFromSearchProduct(item)?.offers.length) ||
+  hasComparableBarcode(item) ||
+  hasComparableProductId(item);
 
 const isLocationScopedOffer = (offer: MarketOffer): boolean => {
   const coverage = String(offer.coverageScope || '').toLocaleLowerCase('tr');
@@ -1155,8 +1209,8 @@ const SearchCategoryTreeSection: React.FC<{
     const hasChildren = node.childrenCount > 0 || node.children.length > 0;
     const isSelected = selectedCategoryId === node.categoryId;
     const isLoading = loadingKeys.includes(node.key);
-    const isChild = node.depth > 1;
     const countLabel = typeof node.count === 'number' ? ` (${node.count})` : '';
+    const depthOffset = Math.max(0, node.depth - 1) * 18;
 
     return (
       <View key={node.key} style={styles.categoryTreeNodeWrap}>
@@ -1171,12 +1225,9 @@ const SearchCategoryTreeSection: React.FC<{
           style={[
             styles.categoryTreeRow,
             {
-              marginLeft: isChild ? 18 : 0,
-              backgroundColor: withAlpha(
-                isSelected ? colors.primary : colors.cardElevated,
-                isSelected ? '10' : '00'
-              ),
-              borderColor: withAlpha(isSelected ? colors.primary : colors.border, '66'),
+              paddingLeft: 16 + depthOffset,
+              backgroundColor: withAlpha(isSelected ? colors.primary : colors.cardElevated, isSelected ? '08' : '00'),
+              borderBottomColor: withAlpha(colors.border, '80'),
             },
           ]}
         >
@@ -1227,12 +1278,7 @@ const SearchCategoryTreeSection: React.FC<{
         </TouchableOpacity>
 
         {hasChildren && isExpanded ? (
-          <View
-            style={[
-              styles.categoryTreeChildren,
-              { borderLeftColor: withAlpha(isSelected ? colors.primary : colors.border, '88') },
-            ]}
-          >
+          <View style={styles.categoryTreeChildren}>
             {node.children.map((child) => renderNode(child))}
           </View>
         ) : null}
@@ -1259,28 +1305,29 @@ const SearchCategoryTreeSection: React.FC<{
           { borderBottomColor: withAlpha(colors.border, '66') },
         ]}
       >
-        <Ionicons name="reorder-three-outline" size={20} color={colors.primary} />
-        <View style={styles.categoryTreeHeaderText}>
+        <View style={styles.categoryTreeHeaderLead}>
+          <View
+            style={[
+              styles.categoryTreeHeaderIconWrap,
+              { backgroundColor: withAlpha(colors.primary, '10') },
+            ]}
+          >
+            <Ionicons name="reorder-three-outline" size={18} color={colors.primary} />
+          </View>
           <Text style={[styles.categoryTreeHeaderTitle, { color: colors.text }]}>
             {tt('price_compare_category_tree_title', 'Kategoriler')}
           </Text>
-          <Text style={[styles.categoryTreeHeaderSubtitle, { color: colors.mutedText }]}>
-            {selectedCategoryId
-              ? tt('price_compare_category_tree_selected', 'Seçili: {{label}}').replace(
-                  '{{label}}',
-                  selectedCategoryLabel || tt('price_compare_category_all', 'Tümü')
-                )
-              : tt(
-                  'price_compare_category_tree_hint',
-                  'Reyonu aç, kategori seç, ürünleri aşağıda gör.'
-                )}
-          </Text>
         </View>
-        <Ionicons
-          name={collapsed ? 'chevron-down-outline' : 'chevron-up-outline'}
-          size={18}
-          color={colors.mutedText}
-        />
+        <View style={styles.categoryTreeHeaderRight}>
+          <Text style={[styles.categoryTreeHeaderSubtitle, { color: colors.mutedText }]} numberOfLines={1}>
+            {selectedCategoryLabel || tt('price_compare_category_all', 'Tümü')}
+          </Text>
+          <Ionicons
+            name={collapsed ? 'chevron-down-outline' : 'chevron-up-outline'}
+            size={18}
+            color={colors.mutedText}
+          />
+        </View>
       </TouchableOpacity>
 
       {collapsed ? null : (
@@ -1296,9 +1343,9 @@ const SearchCategoryTreeSection: React.FC<{
               {
                 backgroundColor: withAlpha(
                   selectedCategoryId ? colors.cardElevated : colors.primary,
-                  selectedCategoryId ? '00' : '10'
+                  selectedCategoryId ? '00' : '08'
                 ),
-                borderColor: withAlpha(selectedCategoryId ? colors.border : colors.primary, '66'),
+                borderBottomColor: withAlpha(colors.border, '80'),
               },
             ]}
           >
@@ -1332,9 +1379,11 @@ const SearchCategoryTreeSection: React.FC<{
 const SearchResultCard: React.FC<{
   item: MarketSearchProduct;
   selected: boolean;
+  isFavorite: boolean;
   onOpenPricing: () => void;
   onOpenScore: () => void;
   onQuickAdd: () => void;
+  onToggleFavorite: () => void;
   quickAddDisabled: boolean;
   quickAddLoading: boolean;
   cardWidth: number;
@@ -1344,9 +1393,11 @@ const SearchResultCard: React.FC<{
 }> = ({
   item,
   selected,
+  isFavorite,
   onOpenPricing,
   onOpenScore,
   onQuickAdd,
+  onToggleFavorite,
   quickAddDisabled,
   quickAddLoading,
   cardWidth,
@@ -1463,7 +1514,10 @@ const SearchResultCard: React.FC<{
       >
         <TouchableOpacity
           activeOpacity={0.85}
-          onPress={onQuickAdd}
+          onPress={(event) => {
+            event.stopPropagation();
+            onQuickAdd();
+          }}
           disabled={quickAddDisabled || quickAddLoading}
           style={[
             styles.resultGridAddButton,
@@ -1480,17 +1534,29 @@ const SearchResultCard: React.FC<{
           )}
         </TouchableOpacity>
 
-        <View
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={(event) => {
+            event.stopPropagation();
+            onToggleFavorite();
+          }}
           style={[
             styles.resultGridWishButton,
             {
-              backgroundColor: withAlpha(colors.cardElevated, 'F6'),
-              borderColor: withAlpha(colors.border, '80'),
+              backgroundColor: withAlpha(
+                isFavorite ? colors.primary : colors.cardElevated,
+                isFavorite ? '16' : 'F6'
+              ),
+              borderColor: withAlpha(isFavorite ? colors.primary : colors.border, '80'),
             },
           ]}
         >
-          <Ionicons name="heart-outline" size={13} color={withAlpha(colors.mutedText, 'CC')} />
-        </View>
+          <Ionicons
+            name={isFavorite ? 'heart' : 'heart-outline'}
+            size={13}
+            color={isFavorite ? colors.primary : withAlpha(colors.mutedText, 'CC')}
+          />
+        </TouchableOpacity>
 
         <View style={styles.resultGridImageInner}>
           {thumbnailUri ? (
@@ -1746,12 +1812,14 @@ export const PriceCompareScreen: React.FC = () => {
     [t]
   );
   const resultCardWidth = useMemo(() => {
-    const usableWidth = Math.max(
-      viewportWidth - 76 - RESULT_GRID_GAP * (RESULT_GRID_COLUMNS - 1),
-      160
-    );
-    return Math.floor(usableWidth / RESULT_GRID_COLUMNS);
-  }, [viewportWidth]);
+    const gridInnerWidth =
+      viewportWidth -
+      layout.horizontalPadding * 2 -
+      RESULT_GRID_HORIZONTAL_PADDING * 2 -
+      RESULT_GRID_GAP * (RESULT_GRID_COLUMNS - 1);
+
+    return Math.max(72, Math.floor(gridInnerWidth / RESULT_GRID_COLUMNS));
+  }, [layout.horizontalPadding, viewportWidth]);
   const preferredLocale = i18n.language || 'tr-TR';
   const [detectedLocation, setDetectedLocation] = useState<CurrentLocationContext | null>(null);
   const [detectedLocationLoading, setDetectedLocationLoading] = useState(false);
@@ -1791,6 +1859,10 @@ export const PriceCompareScreen: React.FC = () => {
   const [resultsPaginationLoading, setResultsPaginationLoading] = useState(false);
   const [resultsBrowseCategoryId, setResultsBrowseCategoryId] = useState<string | null>(null);
   const [autocompleteResults, setAutocompleteResults] = useState<MarketSearchProduct[]>([]);
+  const [favoriteKeys, setFavoriteKeys] = useState<string[]>([]);
+  const [favoriteProductsByKey, setFavoriteProductsByKey] = useState<
+    Record<string, MarketSearchProduct>
+  >({});
   const [selectedProduct, setSelectedProduct] = useState<MarketSearchProduct | null>(null);
   const [offersResponse, setOffersResponse] = useState<MarketProductOffersResponse | null>(null);
   const [offersLoading, setOffersLoading] = useState(false);
@@ -1802,7 +1874,6 @@ export const PriceCompareScreen: React.FC = () => {
   const [marketSheetState, setMarketSheetState] = useState<MarketSheetState>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [quickAddLoadingId, setQuickAddLoadingId] = useState<string | null>(null);
-  const initialCategoryBrowseBootstrappedRef = useRef(false);
   const priceHistoryRequestRef = useRef(0);
   const scrollViewRef = useRef<ScrollView | null>(null);
   const resultsSectionOffsetRef = useRef<number>(0);
@@ -1843,6 +1914,14 @@ export const PriceCompareScreen: React.FC = () => {
   const selectedCategoryLabel = selectedCategoryId
     ? categoryLabelLookup.get(selectedCategoryId) ?? null
     : null;
+  const favoriteKeySet = useMemo(() => new Set(favoriteKeys), [favoriteKeys]);
+  const favoriteProducts = useMemo(
+    () =>
+      favoriteKeys
+        .map((key) => favoriteProductsByKey[key])
+        .filter((item): item is MarketSearchProduct => Boolean(item)),
+    [favoriteKeys, favoriteProductsByKey]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1866,6 +1945,83 @@ export const PriceCompareScreen: React.FC = () => {
     setShowOnboarding(false);
     void markScreenOnboardingSeen('price');
   }, []);
+
+  const refreshFavorites = useCallback(async () => {
+    const nextFavoriteBarcodes = getAllFavoriteBarcodes(40);
+    const historyFavorites = getLatestHistoryEntriesForBarcodes(nextFavoriteBarcodes);
+
+    if (historyFavorites.length) {
+      await mergePriceCompareFavorites(
+        historyFavorites.map((entry) => mapHistoryEntryToSearchProduct(entry)),
+        { prependNew: true, updateExistingOnly: false }
+      );
+    }
+
+    const favorites = await listPriceCompareFavorites(40);
+
+    setFavoriteKeys(favorites.map((item) => item.key));
+    setFavoriteProductsByKey(
+      favorites.reduce<Record<string, MarketSearchProduct>>((acc, item) => {
+        acc[item.key] = item.product;
+        return acc;
+      }, {})
+    );
+  }, []);
+
+  useEffect(() => {
+    void refreshFavorites();
+  }, [refreshFavorites]);
+
+  useEffect(() => {
+    const candidates = [...results, ...autocompleteResults, ...(selectedProduct ? [selectedProduct] : [])]
+      .filter((item) => Boolean(getPriceCompareFavoriteKey(item)));
+
+    if (!candidates.length) {
+      return;
+    }
+
+    const favoriteCandidates = candidates.filter((item) => {
+      const key = getPriceCompareFavoriteKey(item);
+      return Boolean(key && favoriteKeySet.has(key));
+    });
+
+    if (!favoriteCandidates.length) {
+      return;
+    }
+
+    setFavoriteProductsByKey((previous) => {
+      const next = { ...previous };
+      let changed = false;
+
+      favoriteCandidates.forEach((item) => {
+        const key = getPriceCompareFavoriteKey(item);
+
+        if (!key) {
+          return;
+        }
+
+        const existing = next[key];
+        const merged = existing ? mergeSearchProductDetails(existing, item) : item;
+
+        if (existing !== merged) {
+          next[key] = merged;
+          changed = true;
+        }
+      });
+
+      return changed ? next : previous;
+    });
+
+    void mergePriceCompareFavorites(
+      favoriteCandidates.map((item) => {
+        const key = getPriceCompareFavoriteKey(item);
+        return key && favoriteProductsByKey[key]
+          ? mergeSearchProductDetails(favoriteProductsByKey[key], item)
+          : item;
+      }),
+      { prependNew: false, updateExistingOnly: true }
+    );
+  }, [autocompleteResults, favoriteKeySet, favoriteProductsByKey, results, selectedProduct]);
 
   useEffect(() => {
     setResultsPage(1);
@@ -1944,34 +2100,38 @@ export const PriceCompareScreen: React.FC = () => {
       setOffersError(null);
       void loadPriceHistory(product);
 
-      if (!hasComparableBarcode(product)) {
-        const fallbackResponse = buildOffersResponseFromSearchProduct(product);
-        setOffersResponse({
-          barcode: fallbackResponse?.barcode ?? product.id,
-          fetchedAt: fallbackResponse?.fetchedAt ?? new Date().toISOString(),
-          requestId: null,
-          partial: true,
-          warnings: [],
-          city:
-            fallbackResponse?.city ??
-            (cityCode && effectiveCity ? { code: cityCode, name: effectiveCity } : null),
-          dataFreshness: fallbackResponse?.dataFreshness ?? product.dataFreshness ?? null,
-          offers: fallbackResponse?.offers ?? [],
-        });
-        setOffersLoading(false);
-        return;
-      }
-
       try {
-        const response = await resolveWithin(
-          fetchMarketProductOffers(product.barcode!, {
-            cityCode: cityCode ?? undefined,
-            districtName: effectiveDistrict ?? undefined,
-            includeOutOfStock: true,
-            limit: 200,
-          }),
-          REMOTE_OFFERS_TIMEOUT_MS
-        );
+        const response = hasComparableBarcode(product)
+          ? await resolveWithin(
+              fetchMarketProductOffers(product.barcode!, {
+                cityCode: cityCode ?? undefined,
+                districtName: effectiveDistrict ?? undefined,
+                includeOutOfStock: true,
+                limit: 200,
+                fallbackProductName: product.productName,
+                fallbackBrand: product.brand,
+                enableNameFallback: true,
+              }),
+              REMOTE_OFFERS_TIMEOUT_MS
+            )
+          : hasComparableProductId(product)
+            ? await resolveWithin(
+                fetchMarketProductOffersById(product.productId!, {
+                  cityCode: cityCode ?? undefined,
+                  districtName: effectiveDistrict ?? undefined,
+                  includeOutOfStock: true,
+                  limit: 200,
+                  fallbackProductName: product.productName,
+                  fallbackBrand: product.brand,
+                  enableNameFallback: true,
+                }),
+                REMOTE_OFFERS_TIMEOUT_MS
+              )
+            : buildOffersResponseFromSearchProduct(product);
+
+        if (!response) {
+          throw new Error('market_product_offers_not_available');
+        }
 
         setOffersResponse(response);
       } catch (error) {
@@ -1987,7 +2147,7 @@ export const PriceCompareScreen: React.FC = () => {
         setOffersLoading(false);
       }
     },
-    [cityCode, effectiveCity, effectiveDistrict, loadPriceHistory, tt]
+    [cityCode, effectiveDistrict, loadPriceHistory, tt]
   );
 
   const loadCategoryBrowsePage = useCallback(
@@ -2033,30 +2193,67 @@ export const PriceCompareScreen: React.FC = () => {
         };
       }
 
+      const localFallbackResults = searchLocalCategoryBrowseProducts(
+        selectedCategoryNode.taxonomyLeaf,
+        SEARCH_RESULTS_PAGE_SIZE
+      ).map((item) => annotateBrowseResult(item, selectedCategoryNode));
+
       try {
-        const fallbackQuery =
-          buildCategoryBrowseQueries(selectedCategoryNode.taxonomyLeaf)[0] ??
-          selectedCategoryNode.taxonomyLeaf;
-        const response = await resolveWithin(
-          fetchMarketProductSearch({
-            query: fallbackQuery,
-            cityCode: cityCode ?? undefined,
-            categoryId: selectedCategoryNode.normalizedCategoryId,
-            limit: SEARCH_RESULTS_PAGE_SIZE,
-          }),
-          REMOTE_SEARCH_TIMEOUT_MS
-        );
+        const fallbackQueries =
+          buildCategoryBrowseQueries(selectedCategoryNode.taxonomyLeaf).slice(0, 4);
+
+        for (const fallbackQuery of fallbackQueries) {
+          const attempts = [
+            {
+              query: fallbackQuery,
+              cityCode: cityCode ?? undefined,
+              categoryId: selectedCategoryNode.normalizedCategoryId,
+            },
+            {
+              query: fallbackQuery,
+              categoryId: selectedCategoryNode.normalizedCategoryId,
+            },
+            {
+              query: fallbackQuery,
+              cityCode: cityCode ?? undefined,
+            },
+            {
+              query: fallbackQuery,
+            },
+          ];
+
+          for (const attempt of attempts) {
+            const response = await resolveWithin(
+              fetchMarketProductSearch({
+                query: attempt.query,
+                cityCode: attempt.cityCode,
+                categoryId: attempt.categoryId,
+                limit: SEARCH_RESULTS_PAGE_SIZE,
+              }),
+              REMOTE_SEARCH_TIMEOUT_MS
+            );
+
+            if (!response.results.length) {
+              continue;
+            }
+
+            return {
+              results: response.results.map((item) =>
+                annotateBrowseResult(item, selectedCategoryNode)
+              ),
+              nextCursor: null as number | null,
+            };
+          }
+        }
 
         return {
-          results: response.results.map((item) =>
-            annotateBrowseResult(item, selectedCategoryNode)
-          ),
+          results: localFallbackResults,
           nextCursor: null as number | null,
         };
       } catch (error) {
         console.warn('[PriceCompareScreen] category browse search failed:', error);
         return {
-          results: [] as MarketSearchProduct[],
+          results: localFallbackResults,
           nextCursor: null as number | null,
         };
       }
@@ -2122,7 +2319,10 @@ export const PriceCompareScreen: React.FC = () => {
       }
 
       const localResults = effectiveCategoryId || isCategoryBrowseMode
-        ? []
+        ? selectedCategoryNode
+          ? searchLocalCategoryBrowseProducts(selectedCategoryNode.taxonomyLeaf, limit)
+              .map((item) => annotateBrowseResult(item, selectedCategoryNode))
+          : []
         : searchLocalPriceCompareProducts(trimmedQuery, limit);
       const variants = buildSearchVariants(trimmedQuery);
       const timeoutMs =
@@ -2195,18 +2395,16 @@ export const PriceCompareScreen: React.FC = () => {
       }
 
       if (categoryBrowseFallbackNeeded && selectedCategoryNode) {
-        const fallbackQuery =
-          buildCategoryBrowseQueries(selectedCategoryNode.taxonomyLeaf)[0] ??
-          selectedCategoryNode.taxonomyLeaf;
-
         remoteTasks.push(
           (async () => {
             try {
+              const fallbackQueries =
+                buildCategoryBrowseQueries(selectedCategoryNode.taxonomyLeaf).slice(0, 4);
               const attempts: {
                 query: string;
                 cityCode?: string;
                 categoryId?: string;
-              }[] = [
+              }[] = fallbackQueries.flatMap((fallbackQuery) => [
                 {
                   query: fallbackQuery,
                   cityCode: cityCode ?? undefined,
@@ -2216,7 +2414,14 @@ export const PriceCompareScreen: React.FC = () => {
                   query: fallbackQuery,
                   categoryId: selectedCategoryNode.normalizedCategoryId,
                 },
-              ];
+                {
+                  query: fallbackQuery,
+                  cityCode: cityCode ?? undefined,
+                },
+                {
+                  query: fallbackQuery,
+                },
+              ]);
 
               for (const attempt of attempts) {
                 const response = await resolveWithin(
@@ -2397,7 +2602,7 @@ export const PriceCompareScreen: React.FC = () => {
       const response = await resolveWithin(
         fetchMarketCategoryTree({
           depthLimit: 1,
-          includeCounts: true,
+          includeCounts: false,
           onlyActive: true,
         }),
         REMOTE_CATEGORY_TREE_TIMEOUT_MS
@@ -2461,19 +2666,13 @@ export const PriceCompareScreen: React.FC = () => {
         );
       } catch (error) {
         console.warn('[PriceCompareScreen] category child load failed:', error);
-        setCategoryTreeError(
-          tt(
-            'price_compare_category_tree_error',
-            'Market reyonları şu anda yüklenemedi. Aramaya yine de devam edebilirsin.'
-          )
-        );
       } finally {
         setCategoryLoadingKeys((previous) =>
           previous.filter((item) => item !== rootCategoryId)
         );
       }
     },
-    [cityCode, loadedCategoryBranchIds, marketRuntime.isEnabled, mergeCategoryNodes, tt]
+    [cityCode, loadedCategoryBranchIds, marketRuntime.isEnabled, mergeCategoryNodes]
   );
 
   const toggleCategoryNode = useCallback(
@@ -2626,39 +2825,6 @@ export const PriceCompareScreen: React.FC = () => {
     ]
   );
 
-  useEffect(() => {
-    if (initialCategoryBrowseBootstrappedRef.current) {
-      return;
-    }
-    if (query.trim().length > 0 || hasSearched || selectedCategoryId || searchLoading || categoryTreeLoading) {
-      return;
-    }
-    if (!categoryTree.length) {
-      return;
-    }
-
-    const initialNode = findFirstBrowsableCategoryNode(
-      categoryTree.filter((node) => node.categoryId !== CATEGORY_ROOT_KEY)
-    );
-
-    if (!initialNode) {
-      return;
-    }
-
-    initialCategoryBrowseBootstrappedRef.current = true;
-    setSelectedCategoryId(initialNode.categoryId);
-    setCategoryTreeCollapsed(true);
-    void handleSearch(initialNode.categoryId);
-  }, [
-    categoryTree,
-    categoryTreeLoading,
-    handleSearch,
-    hasSearched,
-    query,
-    searchLoading,
-    selectedCategoryId,
-  ]);
-
   const resolveComparableProduct = useCallback(
     async (product: MarketSearchProduct): Promise<MarketSearchProduct> => {
       if (product.barcode) {
@@ -2709,7 +2875,10 @@ export const PriceCompareScreen: React.FC = () => {
         return hasProduct ? previous : [product, ...previous];
       });
       setAutocompleteResults([]);
-      const resolvedProduct = await resolveComparableProduct(product);
+      const resolvedProduct =
+        hasComparableBarcode(product) || hasComparableProductId(product)
+          ? product
+          : await resolveComparableProduct(product);
       await loadOffers(resolvedProduct);
     },
     [loadOffers, resolveComparableProduct]
@@ -2717,7 +2886,10 @@ export const PriceCompareScreen: React.FC = () => {
 
   const handleOpenPricingFromResult = useCallback(
     async (product: MarketSearchProduct) => {
-      const resolvedProduct = await resolveComparableProduct(product);
+      const resolvedProduct =
+        hasComparableBarcode(product) || hasComparableProductId(product)
+          ? product
+          : await resolveComparableProduct(product);
       await loadOffers(resolvedProduct);
     },
     [loadOffers, resolveComparableProduct]
@@ -2743,7 +2915,10 @@ export const PriceCompareScreen: React.FC = () => {
 
   const handleQuickAddFromResult = useCallback(
     async (product: MarketSearchProduct) => {
-      const resolvedProduct = await resolveComparableProduct(product);
+      const resolvedProduct =
+        hasComparableBarcode(product) || hasComparableProductId(product)
+          ? product
+          : await resolveComparableProduct(product);
       const identity = getProductIdentity(resolvedProduct);
       const immediateOffersResponse = buildOffersResponseFromSearchProduct(resolvedProduct);
 
@@ -2752,22 +2927,46 @@ export const PriceCompareScreen: React.FC = () => {
         return;
       }
 
-      if (!resolvedProduct.barcode) {
+      if (!resolvedProduct.barcode && !resolvedProduct.productId) {
+        setSelectedProduct(resolvedProduct);
+        setOffersResponse(null);
+        setOffersError(
+          tt(
+            'price_compare_quick_add_requires_live_offer',
+            'Bu ürün önce canlı tekliflerle yüklenmeli. Fiyatlarını açıp tekrar deneyebilirsin.'
+          )
+        );
         return;
       }
 
       setQuickAddLoadingId(identity);
 
       try {
-        const response = await resolveWithin(
-          fetchMarketProductOffers(resolvedProduct.barcode, {
-            cityCode: cityCode ?? undefined,
-            districtName: effectiveDistrict ?? undefined,
-            includeOutOfStock: true,
-            limit: 200,
-          }),
-          REMOTE_OFFERS_TIMEOUT_MS
-        );
+        const response = resolvedProduct.barcode
+          ? await resolveWithin(
+              fetchMarketProductOffers(resolvedProduct.barcode, {
+                cityCode: cityCode ?? undefined,
+                districtName: effectiveDistrict ?? undefined,
+                includeOutOfStock: true,
+                limit: 200,
+                fallbackProductName: resolvedProduct.productName,
+                fallbackBrand: resolvedProduct.brand,
+                enableNameFallback: true,
+              }),
+              REMOTE_OFFERS_TIMEOUT_MS
+            )
+          : await resolveWithin(
+              fetchMarketProductOffersById(resolvedProduct.productId!, {
+                cityCode: cityCode ?? undefined,
+                districtName: effectiveDistrict ?? undefined,
+                includeOutOfStock: true,
+                limit: 200,
+                fallbackProductName: resolvedProduct.productName,
+                fallbackBrand: resolvedProduct.brand,
+                enableNameFallback: true,
+              }),
+              REMOTE_OFFERS_TIMEOUT_MS
+            );
 
         if (!response.offers.length) {
           setOffersError(
@@ -2793,6 +2992,58 @@ export const PriceCompareScreen: React.FC = () => {
       }
     },
     [addOrIncrementEntry, cityCode, effectiveDistrict, resolveComparableProduct, tt]
+  );
+
+  const handleToggleFavoriteFromResult = useCallback(
+    async (product: MarketSearchProduct) => {
+      const resolvedProduct = await resolveComparableProduct(product);
+      const favoriteKey = getPriceCompareFavoriteKey(resolvedProduct);
+
+      if (!favoriteKey) {
+        return;
+      }
+
+      const nextFavoriteState = await togglePriceCompareFavorite(resolvedProduct);
+      const barcode = String(resolvedProduct.barcode || '').trim();
+
+      if (barcode) {
+        const currentlyFavoriteInDb = isFavoriteBarcode(barcode);
+
+        if (nextFavoriteState && !currentlyFavoriteInDb) {
+          addFavoriteBarcode(barcode);
+        }
+
+        if (!nextFavoriteState && currentlyFavoriteInDb) {
+          removeFavoriteBarcode(barcode);
+        }
+      }
+
+      setFavoriteKeys((previous) =>
+        nextFavoriteState
+          ? [favoriteKey, ...previous.filter((item) => item !== favoriteKey)]
+          : previous.filter((item) => item !== favoriteKey)
+      );
+      setFavoriteProductsByKey((previous) => {
+        const existing = previous[favoriteKey];
+        const merged = existing ? mergeSearchProductDetails(existing, resolvedProduct) : resolvedProduct;
+
+        if (existing === merged) {
+          return previous;
+        }
+
+        const next = {
+          ...previous,
+          [favoriteKey]: merged,
+        };
+
+        if (!nextFavoriteState) {
+          delete next[favoriteKey];
+        }
+
+        return next;
+      });
+    },
+    [resolveComparableProduct]
   );
 
   const handleAddSelectedToCart = useCallback(() => {
@@ -3528,6 +3779,10 @@ export const PriceCompareScreen: React.FC = () => {
                         selected={
                           selectedProduct ? getProductIdentity(selectedProduct) === getProductIdentity(item) : false
                         }
+                        isFavorite={Boolean(
+                          getPriceCompareFavoriteKey(item) &&
+                            favoriteKeySet.has(getPriceCompareFavoriteKey(item)!)
+                        )}
                         onOpenPricing={() => {
                           void handleOpenPricingFromResult(item);
                         }}
@@ -3537,11 +3792,10 @@ export const PriceCompareScreen: React.FC = () => {
                         onQuickAdd={() => {
                           void handleQuickAddFromResult(item);
                         }}
-                        quickAddDisabled={
-                          !buildOffersResponseFromSearchProduct(item) &&
-                          !item.barcode &&
-                          !item.productId
-                        }
+                        onToggleFavorite={() => {
+                          void handleToggleFavoriteFromResult(item);
+                        }}
+                        quickAddDisabled={!canQuickAddSearchProduct(item)}
                         quickAddLoading={quickAddLoadingId === getProductIdentity(item)}
                         cardWidth={resultCardWidth}
                         colors={colors}
@@ -3645,6 +3899,65 @@ export const PriceCompareScreen: React.FC = () => {
                 colors={colors}
               />
             )}
+          </View>
+        ) : null}
+
+        {favoriteProducts.length ? (
+          <View>
+            <Text style={[styles.sectionTitle, { color: colors.text }]}>
+              {tt('favorite_products', 'Favoriler')}
+            </Text>
+            <Text style={[styles.savedListsHelper, { color: colors.mutedText }]}>
+              {tt(
+                'favorite_products_subtitle',
+                'Sık baktığın ürünleri yıldızla ve buradan tek dokunuşla aç.'
+              )}
+            </Text>
+            <View
+              style={[
+                styles.resultsGridWrap,
+                {
+                  backgroundColor: withAlpha(colors.cardElevated, 'B8'),
+                  borderColor: withAlpha(colors.border, '8F'),
+                },
+              ]}
+            >
+              <View style={styles.resultsGrid}>
+                {favoriteProducts.slice(0, SEARCH_RESULTS_PAGE_SIZE).map((item) => (
+                  <SearchResultCard
+                    key={`favorite-${getProductIdentity(item)}`}
+                    item={item}
+                    selected={
+                      selectedProduct
+                        ? getProductIdentity(selectedProduct) === getProductIdentity(item)
+                        : false
+                    }
+                    isFavorite={Boolean(
+                      getPriceCompareFavoriteKey(item) &&
+                        favoriteKeySet.has(getPriceCompareFavoriteKey(item)!)
+                    )}
+                    onOpenPricing={() => {
+                      void handleOpenPricingFromResult(item);
+                    }}
+                    onOpenScore={() => {
+                      void handleOpenScoreFromResult(item);
+                    }}
+                    onQuickAdd={() => {
+                      void handleQuickAddFromResult(item);
+                    }}
+                    onToggleFavorite={() => {
+                      void handleToggleFavoriteFromResult(item);
+                    }}
+                    quickAddDisabled={!canQuickAddSearchProduct(item)}
+                    quickAddLoading={quickAddLoadingId === getProductIdentity(item)}
+                    cardWidth={resultCardWidth}
+                    colors={colors}
+                    locale={preferredLocale}
+                    tt={tt}
+                  />
+                ))}
+              </View>
+            </View>
           </View>
         ) : null}
 
@@ -4351,7 +4664,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 16,
     overflow: 'hidden',
-    paddingHorizontal: 6,
+    paddingHorizontal: RESULT_GRID_HORIZONTAL_PADDING,
     paddingVertical: 8,
   },
   resultsGrid: {
@@ -4359,6 +4672,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: RESULT_GRID_GAP,
     justifyContent: 'flex-start',
+    alignSelf: 'center',
   },
   resultsPaginationRow: {
     flexDirection: 'row',
@@ -4394,42 +4708,58 @@ const styles = StyleSheet.create({
   },
   categoryTreeCard: {
     borderWidth: 1,
-    borderRadius: 16,
-    marginBottom: 12,
-    shadowOpacity: 0.04,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
+    borderRadius: 18,
+    marginBottom: 18,
     overflow: 'hidden',
   },
   categoryTreeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 10,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 17,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  categoryTreeHeaderText: {
+  categoryTreeHeaderLead: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flex: 1,
+    minWidth: 0,
+    paddingRight: 12,
+  },
+  categoryTreeHeaderIconWrap: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  categoryTreeHeaderRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginLeft: 10,
   },
   categoryTreeHeaderTitle: {
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '800',
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: '700',
   },
   categoryTreeHeaderSubtitle: {
-    marginTop: 2,
-    fontSize: 11,
-    lineHeight: 15,
+    maxWidth: 138,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '700',
+    textAlign: 'right',
   },
   categoryTreeList: {
-    paddingHorizontal: 10,
-    paddingVertical: 2,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
   },
   categoryTreeNodeWrap: {
-    gap: 2,
+    gap: 0,
   },
   categoryTreeToggleButton: {
     width: 26,
@@ -4439,18 +4769,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   categoryTreeRow: {
-    minHeight: 44,
-    borderRadius: 12,
-    borderWidth: 1,
-    paddingLeft: 10,
-    paddingRight: 6,
-    paddingVertical: 6,
+    minHeight: 58,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingLeft: 16,
+    paddingRight: 10,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
   categoryTreeRowAll: {
-    marginBottom: 4,
+    marginBottom: 0,
   },
   categoryTreeMain: {
     flex: 1,
@@ -4462,8 +4791,8 @@ const styles = StyleSheet.create({
   },
   categoryTreeTitle: {
     flex: 1,
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 16,
+    lineHeight: 22,
     fontWeight: '700',
   },
   categoryTreePath: {
@@ -4471,10 +4800,10 @@ const styles = StyleSheet.create({
     lineHeight: 13,
   },
   categoryTreeChildren: {
-    gap: 2,
-    marginLeft: 14,
-    paddingLeft: 8,
-    borderLeftWidth: 1,
+    gap: 0,
+    marginLeft: 0,
+    paddingLeft: 0,
+    borderLeftWidth: 0,
   },
   resultsTableHeader: {
     flexDirection: 'row',

@@ -102,6 +102,14 @@ export type MarketIntegrationsStatusResponse = {
 
 export type MarketProductOffersResponse = {
   barcode: string;
+  productId?: string | null;
+  product?: {
+    productId?: string | null;
+    barcode?: string | null;
+    productName?: string | null;
+    brand?: string | null;
+    imageUrl?: string | null;
+  } | null;
   fetchedAt: string;
   requestId?: string | null;
   partial?: boolean;

@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -27,6 +28,7 @@ import {
 import {
   fetchMarketBasketCompare,
   fetchMarketProductOffers,
+  fetchMarketProductOffersById,
   fetchMarketProductSearch,
 } from '../../services/marketPricing.service';
 import {
@@ -95,7 +97,7 @@ type BasketMatrixRow = {
   marketOfferMap: Map<string, MarketOffer>;
 };
 
-const REMOTE_BASKET_TIMEOUT_MS = 4500;
+const REMOTE_BASKET_TIMEOUT_MS = 6500;
 
 const resolveWithin = <T,>(promise: Promise<T>, timeoutMs: number): Promise<T> =>
   new Promise<T>((resolve, reject) => {
@@ -348,25 +350,113 @@ const hasLiveOfferForEntry = (
     cityCode,
   }).some((offer) => offer.inStock);
 
-const countDistinctDisplayMarkets = (
-  offers: MarketOffer[],
-  options?: {
-    cityCode?: string | null;
+const mergeComparisonOffers = (
+  primaryOffers: MarketOffer[],
+  fallbackOffers: MarketOffer[]
+): MarketOffer[] => {
+  if (!primaryOffers.length) {
+    return fallbackOffers;
   }
-): number => {
-  const identities = new Set<string>();
 
-  normalizeOffersForDisplay(offers, options).forEach((offer) => {
+  if (!fallbackOffers.length) {
+    return primaryOffers;
+  }
+
+  const merged = new Map<string, MarketOffer>();
+
+  [...primaryOffers, ...fallbackOffers].forEach((offer) => {
     const identity =
       getMarketOfferIdentity(offer) ||
-      getNormalizedMarketIdentity(offer.marketKey, offer.marketName);
+      getNormalizedMarketIdentity(offer.marketKey, offer.marketName) ||
+      `${offer.marketName}-${offer.price}-${offer.capturedAt || ''}`;
 
-    if (identity) {
-      identities.add(identity);
+    if (!merged.has(identity)) {
+      merged.set(identity, offer);
+      return;
+    }
+
+    const existing = merged.get(identity)!;
+
+    if (offer.inStock && !existing.inStock) {
+      merged.set(identity, offer);
+      return;
+    }
+
+    if (
+      offer.inStock === existing.inStock &&
+      offer.priceSourceType === 'local_market_price' &&
+      existing.priceSourceType !== 'local_market_price'
+    ) {
+      merged.set(identity, offer);
     }
   });
 
-  return identities.size;
+  return Array.from(merged.values());
+};
+
+const mergeOfferResponses = (
+  responses: (MarketProductOffersResponse | null | undefined)[]
+): MarketProductOffersResponse | null => {
+  const fulfilledResponses = responses.filter(
+    (response): response is MarketProductOffersResponse => Boolean(response)
+  );
+
+  if (!fulfilledResponses.length) {
+    return null;
+  }
+
+  const mergedOffers = fulfilledResponses.reduce<MarketOffer[]>(
+    (accumulator, response) => mergeComparisonOffers(accumulator, response.offers),
+    []
+  );
+  const firstResponse = fulfilledResponses[0];
+  const mergedWarnings = Array.from(
+    new Set(fulfilledResponses.flatMap((response) => response.warnings ?? []))
+  );
+  const mergedCity =
+    fulfilledResponses.find((response) => response.city?.code || response.city?.name)?.city ??
+    firstResponse.city ??
+    null;
+  const mergedFreshness =
+    fulfilledResponses.find((response) => response.dataFreshness != null)?.dataFreshness ??
+    firstResponse.dataFreshness ??
+    null;
+
+  return {
+    ...firstResponse,
+    productId:
+      fulfilledResponses.find((response) => response.productId)?.productId ??
+      firstResponse.productId ??
+      null,
+    product:
+      fulfilledResponses.find((response) => response.product != null)?.product ??
+      firstResponse.product ??
+      null,
+    partial: fulfilledResponses.every((response) => Boolean(response.partial)),
+    warnings: mergedWarnings,
+    city: mergedCity,
+    dataFreshness: mergedFreshness,
+    offers: mergedOffers,
+  };
+};
+
+const buildEntryComparisonOffers = (
+  entry: PriceCompareCartEntry,
+  compareOffers: MarketOffer[] | null | undefined,
+  cityCode?: string | null
+): MarketOffer[] => {
+  const seededOffers = [
+    ...(entry.product.bestOffer ? [entry.product.bestOffer] : []),
+    ...(entry.product.seedOffers ?? []),
+  ];
+  const mergedOffers = mergeComparisonOffers(
+    mergeComparisonOffers(compareOffers ?? [], entry.offersResponse.offers),
+    seededOffers
+  );
+
+  return normalizeOffersForDisplay(mergedOffers, {
+    cityCode,
+  });
 };
 
 const normalizeComparableText = (value?: string | null): string =>
@@ -446,6 +536,7 @@ export const PriceCompareBasketScreen: React.FC = () => {
   const navigation = useNavigation<any>();
   const { t, i18n } = useTranslation();
   const { colors, isDark } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
   const { profile, user } = useAuth();
   const layout = useAppScreenLayout({
     topInsetExtra: 18,
@@ -657,40 +748,24 @@ export const PriceCompareBasketScreen: React.FC = () => {
 
   useEffect(() => {
     const candidates = entries.filter((entry) => {
-      if (!entry.product.barcode) {
+      if (!entry.product.barcode && !entry.product.productId) {
         return false;
       }
 
       const entryId = getProductIdentity(entry.product);
-      const currentMarketCount = countDistinctDisplayMarkets(entry.offersResponse.offers, {
-        cityCode,
-      });
-      const expectedMarketCount = Math.max(
-        entry.product.inStockMarketCount ?? 0,
-        entry.product.marketCount ?? 0
-      );
       const hydrationKey = [
         entryId,
-        currentMarketCount,
-        expectedMarketCount,
-        entry.offersResponse.offers.length,
-        entry.offersResponse.partial ? 'partial' : 'full',
+        entry.product.barcode || entry.product.productId,
+        cityCode ?? 'no-city',
+        effectiveDistrict ?? 'no-district',
       ].join(':');
 
       if (hydratedOfferRequestKeysRef.current.has(hydrationKey)) {
         return false;
       }
 
-      const needsHydration =
-        Boolean(entry.offersResponse.partial) ||
-        (expectedMarketCount > 0 && currentMarketCount < expectedMarketCount) ||
-        currentMarketCount <= 1;
-
-      if (needsHydration) {
-        hydratedOfferRequestKeysRef.current.add(hydrationKey);
-      }
-
-      return needsHydration;
+      hydratedOfferRequestKeysRef.current.add(hydrationKey);
+      return true;
     });
 
     if (!candidates.length) {
@@ -702,15 +777,51 @@ export const PriceCompareBasketScreen: React.FC = () => {
     void (async () => {
       const hydratedResponses = await Promise.allSettled(
         candidates.map(async (entry) => {
-          const response = await resolveWithin(
-            fetchMarketProductOffers(entry.product.barcode!, {
+          const fetchOffersForEntry = (
+            scope: 'district' | 'city'
+          ): Promise<MarketProductOffersResponse | null> => {
+            const districtName =
+              scope === 'district' ? effectiveDistrict ?? undefined : undefined;
+            const sharedParams = {
               cityCode: cityCode ?? undefined,
-              districtName: effectiveDistrict ?? undefined,
+              districtName,
               includeOutOfStock: true,
               limit: 200,
-            }),
-            REMOTE_BASKET_TIMEOUT_MS
-          );
+              fallbackProductName: entry.product.productName,
+              fallbackBrand: entry.product.brand ?? undefined,
+              enableNameFallback: true,
+            };
+
+            if (entry.product.barcode) {
+              return resolveWithin(
+                fetchMarketProductOffers(entry.product.barcode, sharedParams),
+                REMOTE_BASKET_TIMEOUT_MS
+              ).catch(() => null);
+            }
+
+            if (entry.product.productId) {
+              return resolveWithin(
+                fetchMarketProductOffersById(entry.product.productId, sharedParams),
+                REMOTE_BASKET_TIMEOUT_MS
+              ).catch(() => null);
+            }
+
+            return Promise.resolve<MarketProductOffersResponse | null>(null);
+          };
+
+          const [districtScopedResponse, cityWideResponse] = await Promise.all([
+            fetchOffersForEntry('district'),
+            effectiveDistrict ? fetchOffersForEntry('city') : Promise.resolve<MarketProductOffersResponse | null>(null),
+          ]);
+          const response = mergeOfferResponses([
+            districtScopedResponse,
+            cityWideResponse,
+            entry.offersResponse,
+          ]);
+
+          if (!response) {
+            throw new Error('market_offers_hydration_empty');
+          }
 
           return {
             entryId: getProductIdentity(entry.product),
@@ -937,6 +1048,14 @@ export const PriceCompareBasketScreen: React.FC = () => {
               resolvedProduct = candidate;
               resolvedOffers = {
                 barcode: candidate.barcode || candidate.id,
+                productId: candidate.productId ?? null,
+                product: {
+                  productId: candidate.productId ?? null,
+                  barcode: candidate.barcode ?? null,
+                  productName: candidate.productName,
+                  brand: candidate.brand ?? null,
+                  imageUrl: candidate.imageUrl ?? null,
+                },
                 fetchedAt: new Date().toISOString(),
                 requestId: null,
                 partial: true,
@@ -949,19 +1068,32 @@ export const PriceCompareBasketScreen: React.FC = () => {
             }
           }
 
-          if (!candidate.barcode) {
+          if (!candidate.barcode && !candidate.productId) {
             continue;
           }
 
-          const offersResponse = await resolveWithin(
-            fetchMarketProductOffers(candidate.barcode, {
-              cityCode: cityCode ?? undefined,
-              districtName: effectiveDistrict ?? undefined,
-              includeOutOfStock: true,
-              limit: 24,
-            }),
-            4500
-          );
+          const offersResponse = candidate.barcode
+            ? await resolveWithin(
+                fetchMarketProductOffers(candidate.barcode, {
+                  cityCode: cityCode ?? undefined,
+                  districtName: effectiveDistrict ?? undefined,
+                  includeOutOfStock: true,
+                  limit: 24,
+                }),
+                4500
+              )
+            : await resolveWithin(
+                fetchMarketProductOffersById(candidate.productId!, {
+                  cityCode: cityCode ?? undefined,
+                  districtName: effectiveDistrict ?? undefined,
+                  includeOutOfStock: true,
+                  limit: 24,
+                  fallbackProductName: candidate.productName,
+                  fallbackBrand: candidate.brand ?? undefined,
+                  enableNameFallback: true,
+                }),
+                4500
+              );
 
           const hasLiveOffers = normalizeOffersForDisplay(offersResponse.offers, {
             cityCode,
@@ -1265,12 +1397,7 @@ export const PriceCompareBasketScreen: React.FC = () => {
     analysisEntries.forEach((entry) => {
       const compareItem =
         entry.product.barcode != null ? basketCompareItemMap.get(entry.product.barcode) : null;
-      const sourceOffers =
-        compareItem?.offers?.length ? compareItem.offers : entry.offersResponse.offers;
-
-      normalizeOffersForDisplay(sourceOffers, {
-        cityCode,
-      }).forEach((offer) => {
+      buildEntryComparisonOffers(entry, compareItem?.offers, cityCode).forEach((offer) => {
         const identity =
           getMarketOfferIdentity(offer) ||
           getNormalizedMarketIdentity(offer.marketKey, offer.marketName);
@@ -1322,16 +1449,21 @@ export const PriceCompareBasketScreen: React.FC = () => {
     });
   }, [analysisEntries, basketCompareItemMap, basketDisplayTotals.marketTotals, cityCode]);
 
+  const matrixViewportWidth = useMemo(() => {
+    const leadColumnWidth = 184;
+    const marketColumnWidth = 116;
+    const availableWidth = Math.max(260, windowWidth - layout.horizontalPadding * 2);
+    const contentWidth = leadColumnWidth + comparisonMarketColumns.length * marketColumnWidth;
+
+    return Math.min(availableWidth, Math.max(260, contentWidth));
+  }, [comparisonMarketColumns.length, layout.horizontalPadding, windowWidth]);
+
   const comparisonRows = useMemo<BasketMatrixRow[]>(() => {
     return analysisEntries.map((entry) => {
       const entryId = getProductIdentity(entry.product);
       const compareItem =
         entry.product.barcode != null ? basketCompareItemMap.get(entry.product.barcode) : null;
-      const sourceOffers =
-        compareItem?.offers?.length ? compareItem.offers : entry.offersResponse.offers;
-      const displayOffers = normalizeOffersForDisplay(sourceOffers, {
-        cityCode,
-      });
+      const displayOffers = buildEntryComparisonOffers(entry, compareItem?.offers, cityCode);
       const marketOfferMap = new Map<string, MarketOffer>();
 
       displayOffers.forEach((offer) => {
@@ -2054,6 +2186,8 @@ export const PriceCompareBasketScreen: React.FC = () => {
                 {
                   backgroundColor: withAlpha(colors.cardElevated, 'F1'),
                   borderColor: withAlpha(colors.border, 'BC'),
+                  width: matrixViewportWidth,
+                  alignSelf: 'flex-start',
                 },
               ]}
             >
