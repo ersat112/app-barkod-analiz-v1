@@ -49,6 +49,7 @@ import { MissingProductScreen } from '../screens/main/MissingProductScreen';
 import { PaywallScreen } from '../screens/main/PaywallScreen';
 import { PriceCompareScreen } from '../screens/main/PriceCompareScreen';
 import { PriceCompareBasketScreen } from '../screens/main/PriceCompareBasketScreen';
+import { MarketBulletinsScreen } from '../screens/main/MarketBulletinsScreen';
 import { FamilyHealthProfileScreen } from '../screens/main/FamilyHealthProfileScreen';
 import { RiskInsightDetailScreen } from '../screens/main/RiskInsightDetailScreen';
 import { HelpCenterScreen } from '../screens/main/HelpCenterScreen';
@@ -72,7 +73,11 @@ export type MainTabParamList = {
 
 export type RootStackParamList = {
   Main: NavigatorScreenParams<MainTabParamList> | undefined;
-  Scanner: undefined;
+  Scanner:
+    | {
+        returnTo?: 'PriceCompare';
+      }
+    | undefined;
   MedicineScanner: undefined;
   Detail: {
     barcode: string;
@@ -93,9 +98,12 @@ export type RootStackParamList = {
   PriceCompare:
     | {
         initialQuery?: string;
+        initialQueryNonce?: number;
+        initialQuerySource?: 'scanner' | 'manual';
       }
     | undefined;
   PriceCompareBasket: undefined;
+  MarketBulletins: undefined;
   FamilyHealthProfile: undefined;
   RiskInsightDetail:
     | {
@@ -453,6 +461,11 @@ const AppStack = () => (
     <Stack.Screen
       name="PriceCompareBasket"
       component={PriceCompareBasketScreen}
+      options={{ animation: 'slide_from_right' }}
+    />
+    <Stack.Screen
+      name="MarketBulletins"
+      component={MarketBulletinsScreen}
       options={{ animation: 'slide_from_right' }}
     />
     <Stack.Screen

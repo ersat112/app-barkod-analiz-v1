@@ -86,6 +86,10 @@ import {
   togglePriceCompareFavorite,
 } from '../../services/priceCompareFavorites.service';
 import {
+  getCachedPriceCompareRootCategories,
+  prewarmPriceCompareRootCategories,
+} from '../../services/priceCompareWarmup.service';
+import {
   hasSeenScreenOnboarding,
   markScreenOnboardingSeen,
 } from '../../services/screenOnboarding.service';
@@ -921,6 +925,39 @@ const buildOffersResponseFromSearchProduct = (
   };
 };
 
+const buildCartFallbackOffersResponseFromSearchProduct = (
+  item: MarketSearchProduct
+): MarketProductOffersResponse | null => {
+  const seededResponse = buildOffersResponseFromSearchProduct(item);
+
+  if (seededResponse) {
+    return seededResponse;
+  }
+
+  if (!hasComparableBarcode(item) && !hasComparableProductId(item)) {
+    return null;
+  }
+
+  return {
+    barcode: item.barcode || item.id || item.productId || getProductIdentity(item),
+    productId: item.productId ?? null,
+    product: {
+      productId: item.productId ?? null,
+      barcode: item.barcode ?? null,
+      productName: item.productName,
+      brand: item.brand ?? null,
+      imageUrl: item.imageUrl ?? null,
+    },
+    fetchedAt: new Date().toISOString(),
+    requestId: null,
+    partial: true,
+    warnings: ['live_offers_unavailable'],
+    city: null,
+    dataFreshness: item.dataFreshness ?? null,
+    offers: [],
+  };
+};
+
 const mergeMarketOfferLists = (
   primaryOffers: MarketOffer[],
   fallbackOffers: MarketOffer[]
@@ -1450,9 +1487,8 @@ const SearchCategoryTreeSection: React.FC<{
       style={[
         styles.categoryTreeCard,
         {
-          backgroundColor: isDark ? withAlpha(colors.cardElevated, 'F9') : '#FFFFFF',
-          borderColor: withAlpha(colors.border, isDark ? '88' : '7A'),
-          shadowColor: colors.shadow,
+          backgroundColor: isDark ? withAlpha(colors.card, 'F7') : '#FFFFFF',
+          borderColor: withAlpha(colors.border, isDark ? '70' : '64'),
         },
       ]}
     >
@@ -1546,6 +1582,7 @@ const SearchResultCard: React.FC<{
   quickAddLoading: boolean;
   cardWidth: number;
   colors: ThemeColors;
+  isDark: boolean;
   locale: string;
   tt: TranslateFn;
 }> = ({
@@ -1560,6 +1597,7 @@ const SearchResultCard: React.FC<{
   quickAddLoading,
   cardWidth,
   colors,
+  isDark,
   locale,
   tt,
 }) => {
@@ -1655,9 +1693,8 @@ const SearchResultCard: React.FC<{
         styles.resultGridCard,
         {
           width: cardWidth,
-          backgroundColor: withAlpha(colors.cardElevated, 'F4'),
-          borderColor: withAlpha(selected ? colors.primary : colors.border, selected ? 'BB' : '92'),
-          shadowColor: colors.shadow,
+          backgroundColor: withAlpha(colors.card, 'FC'),
+          borderColor: withAlpha(selected ? colors.primary : colors.border, selected ? 'A8' : '62'),
         },
       ]}
     >
@@ -1665,8 +1702,8 @@ const SearchResultCard: React.FC<{
         style={[
           styles.resultGridImageWrap,
           {
-            backgroundColor: withAlpha(colors.backgroundMuted, 'D8'),
-            borderColor: withAlpha(colors.border, '78'),
+            backgroundColor: withAlpha(colors.backgroundMuted, isDark ? '90' : '74'),
+            borderColor: withAlpha(colors.border, '42'),
           },
         ]}
       >
@@ -1748,12 +1785,12 @@ const SearchResultCard: React.FC<{
         </Text>
       </TouchableOpacity>
 
-      <Text style={[styles.resultGridTitle, { color: colors.text }]} numberOfLines={3}>
+      <Text style={[styles.resultGridTitle, { color: colors.text }]} numberOfLines={2}>
         {displayProductName}
       </Text>
 
       {displayBrand || (item.packSize && item.packUnit) ? (
-        <Text style={[styles.resultGridMeta, { color: colors.mutedText }]} numberOfLines={2}>
+        <Text style={[styles.resultGridMeta, { color: colors.mutedText }]} numberOfLines={1}>
           {[displayBrand, item.packSize && item.packUnit ? `${item.packSize} ${item.packUnit}` : null]
             .filter(Boolean)
             .join(' • ')}
@@ -1776,6 +1813,118 @@ const SearchResultCard: React.FC<{
     </TouchableOpacity>
   );
 };
+
+const FavoriteProductStripCard: React.FC<{
+  item: MarketSearchProduct;
+  onOpen: () => void;
+  onQuickAdd: () => void;
+  onToggleFavorite: () => void;
+  quickAddDisabled: boolean;
+  quickAddLoading: boolean;
+  colors: ThemeColors;
+  locale: string;
+  tt: TranslateFn;
+}> = ({
+  item,
+  onOpen,
+  onQuickAdd,
+  onToggleFavorite,
+  quickAddDisabled,
+  quickAddLoading,
+  colors,
+  locale,
+  tt,
+}) => {
+  const thumbnailUri =
+    item.imageUrl ||
+    item.bestOffer?.imageUrl ||
+    item.seedOffers?.find((offer) => offer.imageUrl)?.imageUrl ||
+    null;
+  const priceLabel = item.bestOffer
+    ? formatLocalizedPrice(locale, item.bestOffer.price, item.bestOffer.currency)
+    : tt('price_compare_result_market_pending_short', 'Teklif bekliyor');
+  const marketLabel =
+    item.marketCount > 0
+      ? tt('price_compare_result_market_count', '{{count}} market').replace(
+          '{{count}}',
+          String(item.marketCount)
+        )
+      : item.bestOffer?.marketName || '';
+
+  return (
+    <TouchableOpacity
+      activeOpacity={0.88}
+      onPress={onOpen}
+      style={[
+        styles.favoriteStripCard,
+        {
+          backgroundColor: withAlpha(colors.card, 'FC'),
+          borderColor: withAlpha(colors.border, '66'),
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.favoriteStripImageWrap,
+          { backgroundColor: withAlpha(colors.backgroundMuted, '84') },
+        ]}
+      >
+        {thumbnailUri ? (
+          <Image source={{ uri: thumbnailUri }} style={styles.favoriteStripImage} resizeMode="contain" />
+        ) : (
+          <Ionicons name="cube-outline" size={18} color={colors.primary} />
+        )}
+      </View>
+
+      <View style={styles.favoriteStripTextWrap}>
+        <Text style={[styles.favoriteStripTitle, { color: colors.text }]} numberOfLines={2}>
+          {toDisplayProductName(item.productName)}
+        </Text>
+        <Text style={[styles.favoriteStripMeta, { color: colors.mutedText }]} numberOfLines={1}>
+          {[item.brand ? toDisplayProductName(item.brand) : null, marketLabel].filter(Boolean).join(' • ')}
+        </Text>
+        <Text style={[styles.favoriteStripPrice, { color: colors.text }]} numberOfLines={1}>
+          {priceLabel}
+        </Text>
+      </View>
+
+      <View style={styles.favoriteStripActions}>
+        <TouchableOpacity
+          activeOpacity={0.82}
+          onPress={(event) => {
+            event.stopPropagation();
+            onToggleFavorite();
+          }}
+          style={[
+            styles.favoriteStripIconButton,
+            { backgroundColor: withAlpha(colors.primary, '12') },
+          ]}
+        >
+          <Ionicons name="heart" size={13} color={colors.primary} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.82}
+          onPress={(event) => {
+            event.stopPropagation();
+            onQuickAdd();
+          }}
+          disabled={quickAddDisabled || quickAddLoading}
+          style={[
+            styles.favoriteStripAddButton,
+            { backgroundColor: colors.primary, opacity: quickAddDisabled ? 0.55 : 1 },
+          ]}
+        >
+          {quickAddLoading ? (
+            <ActivityIndicator size="small" color={colors.primaryContrast} />
+          ) : (
+            <Ionicons name="add" size={15} color={colors.primaryContrast} />
+          )}
+        </TouchableOpacity>
+      </View>
+    </TouchableOpacity>
+  );
+};
+
 const PriceHistoryTrendCard: React.FC<{
   buckets: WeeklyPriceHistoryBucket[];
   loading: boolean;
@@ -2033,11 +2182,13 @@ export const PriceCompareScreen: React.FC = () => {
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [quickAddLoadingId, setQuickAddLoadingId] = useState<string | null>(null);
   const priceHistoryRequestRef = useRef(0);
+  const appliedInitialQueryRef = useRef<string | null>(null);
   const scrollViewRef = useRef<ScrollView | null>(null);
   const resultsSectionOffsetRef = useRef<number>(0);
   const selectedSectionOffsetRef = useRef<number>(0);
   const comparisonCart = usePriceCompareBasketStore((state) => state.entries);
   const addOrIncrementEntry = usePriceCompareBasketStore((state) => state.addOrIncrementEntry);
+  const updateEntryOffers = usePriceCompareBasketStore((state) => state.updateEntryOffers);
   const loadedResultsPages = useMemo(
     () => Math.max(1, Math.ceil(results.length / SEARCH_RESULTS_PAGE_SIZE)),
     [results.length]
@@ -2789,20 +2940,30 @@ export const PriceCompareScreen: React.FC = () => {
 
     setCategoryTreeLoading(true);
     setCategoryTreeError(null);
+    let usedWarmNodes = false;
 
     try {
-      const response = await resolveWithin(
-        fetchMarketCategoryTree({
-          depthLimit: 1,
-          includeCounts: false,
-          onlyActive: true,
-        }),
-        REMOTE_CATEGORY_TREE_TIMEOUT_MS
-      );
+      const warmNodes = await getCachedPriceCompareRootCategories({
+        allowStale: true,
+      });
+
+      if (warmNodes?.length) {
+        usedWarmNodes = true;
+        setCategoryNodes(buildGroupedRootCategoryNodes(warmNodes));
+        setExpandedCategoryKeys([]);
+        setLoadedCategoryBranchIds([CATEGORY_ROOT_KEY]);
+        setCategoryTreeLoading(false);
+      }
+
+      const freshNodes =
+        (await prewarmPriceCompareRootCategories({
+          forceRefresh: true,
+          allowStale: true,
+        })) ?? [];
 
       const resolvedNodes =
-        response.nodes.length > 0
-          ? buildGroupedRootCategoryNodes(response.nodes)
+        freshNodes.length > 0
+          ? buildGroupedRootCategoryNodes(freshNodes)
           : await loadSeededRootCategories();
 
       setCategoryNodes(resolvedNodes);
@@ -2810,15 +2971,18 @@ export const PriceCompareScreen: React.FC = () => {
       setLoadedCategoryBranchIds([CATEGORY_ROOT_KEY]);
     } catch (error) {
       console.warn('[PriceCompareScreen] category root load failed:', error);
-      setCategoryNodes([]);
-      setExpandedCategoryKeys([]);
-      setLoadedCategoryBranchIds([]);
-      setCategoryTreeError(
-        tt(
-          'price_compare_category_tree_error',
-          'Market reyonları şu anda yüklenemedi. Aramaya yine de devam edebilirsin.'
-        )
-      );
+
+      if (!usedWarmNodes) {
+        setCategoryNodes([]);
+        setExpandedCategoryKeys([]);
+        setLoadedCategoryBranchIds([]);
+        setCategoryTreeError(
+          tt(
+            'price_compare_category_tree_error',
+            'Market reyonları şu anda yüklenemedi. Aramaya yine de devam edebilirsin.'
+          )
+        );
+      }
     } finally {
       setCategoryTreeLoading(false);
     }
@@ -2884,9 +3048,13 @@ export const PriceCompareScreen: React.FC = () => {
     [loadCategoryChildren]
   );
 
-  const handleSearch = useCallback(async (categoryIdOverride?: string | null) => {
-    const trimmedQuery = query.trim();
-    const effectiveCategoryId = categoryIdOverride ?? selectedCategoryId;
+  const handleSearch = useCallback(async (
+    categoryIdOverride?: string | null,
+    queryOverride?: string
+  ) => {
+    const trimmedQuery = (queryOverride ?? query).trim();
+    const effectiveCategoryId =
+      categoryIdOverride === undefined ? selectedCategoryId : categoryIdOverride;
     const isCategoryBrowseMode =
       Boolean(effectiveCategoryId) && trimmedQuery.length < SEARCH_MIN_LENGTH;
     const effectiveQuery = trimmedQuery;
@@ -3114,7 +3282,8 @@ export const PriceCompareScreen: React.FC = () => {
           ? product
           : await resolveComparableProduct(product);
       const identity = getProductIdentity(resolvedProduct);
-      const immediateOffersResponse = buildOffersResponseFromSearchProduct(resolvedProduct);
+      const cartFallbackResponse =
+        buildCartFallbackOffersResponseFromSearchProduct(resolvedProduct);
 
       if (!resolvedProduct.barcode && !resolvedProduct.productId) {
         setSelectedProduct(resolvedProduct);
@@ -3131,11 +3300,7 @@ export const PriceCompareScreen: React.FC = () => {
       setQuickAddLoadingId(identity);
 
       try {
-        const response =
-          (await fetchComprehensiveOffersForProduct(resolvedProduct)) ??
-          immediateOffersResponse;
-
-        if (!response?.offers.length) {
+        if (!cartFallbackResponse) {
           setOffersError(
             tt(
               'price_compare_selected_no_live_offers',
@@ -3145,7 +3310,26 @@ export const PriceCompareScreen: React.FC = () => {
           return;
         }
 
-        addOrIncrementEntry(resolvedProduct, response);
+        addOrIncrementEntry(resolvedProduct, cartFallbackResponse);
+
+        if (!cartFallbackResponse.offers.length) {
+          setOffersError(
+            tt(
+              'price_compare_cart_added_without_live_offers',
+              'Ürün sepete eklendi. Canlı market teklifleri yüklenince fiyat karşılaştırması otomatik dolacak.'
+            )
+          );
+        }
+
+        void fetchComprehensiveOffersForProduct(resolvedProduct)
+          .then((response) => {
+            if (response?.offers.length) {
+              updateEntryOffers(resolvedProduct, response);
+            }
+          })
+          .catch((error) => {
+            console.warn('[PriceCompareScreen] quick add enrichment failed:', error);
+          });
       } catch (error) {
         console.warn('[PriceCompareScreen] quick add failed:', error);
         setOffersError(
@@ -3158,7 +3342,13 @@ export const PriceCompareScreen: React.FC = () => {
         setQuickAddLoadingId((current) => (current === identity ? null : current));
       }
     },
-    [addOrIncrementEntry, fetchComprehensiveOffersForProduct, resolveComparableProduct, tt]
+    [
+      addOrIncrementEntry,
+      fetchComprehensiveOffersForProduct,
+      resolveComparableProduct,
+      tt,
+      updateEntryOffers,
+    ]
   );
 
   const handleToggleFavoriteFromResult = useCallback(
@@ -3216,9 +3406,9 @@ export const PriceCompareScreen: React.FC = () => {
   const handleAddSelectedToCart = useCallback(() => {
     const effectiveResponse =
       offersResponse ??
-      (selectedProduct ? buildOffersResponseFromSearchProduct(selectedProduct) : null);
+      (selectedProduct ? buildCartFallbackOffersResponseFromSearchProduct(selectedProduct) : null);
 
-    if (!selectedProduct || !effectiveResponse || !effectiveResponse.offers.length) {
+    if (!selectedProduct || !effectiveResponse) {
       return;
     }
 
@@ -3313,15 +3503,33 @@ export const PriceCompareScreen: React.FC = () => {
   useEffect(() => {
     const initialQuery = route.params?.initialQuery?.trim();
 
-    if (initialQuery && !hasSearched && initialQuery === query.trim()) {
-      void handleSearch();
+    if (!initialQuery) {
+      return;
     }
-  }, [handleSearch, hasSearched, query, route.params?.initialQuery]);
+
+    const queryToken = `${route.params?.initialQueryNonce ?? 'initial'}:${initialQuery}`;
+
+    if (appliedInitialQueryRef.current === queryToken) {
+      return;
+    }
+
+    appliedInitialQueryRef.current = queryToken;
+    setQuery(initialQuery);
+    setSelectedCategoryId(null);
+    setCategoryTreeCollapsed(false);
+    setAutocompleteResults([]);
+    void handleSearch(null, initialQuery);
+  }, [
+    handleSearch,
+    route.params?.initialQuery,
+    route.params?.initialQueryNonce,
+    route.params?.initialQuerySource,
+  ]);
 
   const selectedEffectiveOffersResponse = useMemo(
     () =>
       offersResponse ??
-      (selectedProduct ? buildOffersResponseFromSearchProduct(selectedProduct) : null),
+      (selectedProduct ? buildCartFallbackOffersResponseFromSearchProduct(selectedProduct) : null),
     [offersResponse, selectedProduct]
   );
 
@@ -3555,6 +3763,15 @@ export const PriceCompareScreen: React.FC = () => {
     navigation.navigate('PriceCompareBasket');
   }, [navigation]);
 
+  const handleOpenMarketBulletins = useCallback(() => {
+    navigation.navigate('MarketBulletins');
+  }, [navigation]);
+
+  const handleOpenBarcodeScanner = useCallback(() => {
+    setAutocompleteResults([]);
+    navigation.navigate('Scanner', { returnTo: 'PriceCompare' });
+  }, [navigation]);
+
   useEffect(() => {
     if (!selectedCategoryId || !hasSearched || searchLoading || !results.length) {
       return;
@@ -3716,13 +3933,48 @@ export const PriceCompareScreen: React.FC = () => {
           </View>
         ) : null}
 
+        <TouchableOpacity
+          activeOpacity={0.88}
+          onPress={handleOpenMarketBulletins}
+          style={[
+            styles.catalogShortcutCard,
+            {
+              backgroundColor: withAlpha(colors.card, 'FC'),
+              borderColor: withAlpha(colors.border, '66'),
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.catalogShortcutIcon,
+              { backgroundColor: withAlpha(colors.primary, '14') },
+            ]}
+          >
+            <Ionicons name="newspaper-outline" size={20} color={colors.primary} />
+          </View>
+          <View style={styles.catalogShortcutTextWrap}>
+            <Text style={[styles.catalogShortcutTitle, { color: colors.text }]}>
+              {tt('price_compare_bulletins_shortcut_title', 'Aktüel kataloglar')}
+            </Text>
+            <Text
+              style={[styles.catalogShortcutSubtitle, { color: colors.mutedText }]}
+              numberOfLines={1}
+            >
+              {tt(
+                'price_compare_bulletins_shortcut_subtitle',
+                'Market kampanyalarını ve katalog ürünlerini görüntüle'
+              )}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={19} color={colors.mutedText} />
+        </TouchableOpacity>
+
         <View
           style={[
             styles.searchCard,
             {
-              backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-              borderColor: withAlpha(colors.border, 'BC'),
-              shadowColor: colors.shadow,
+              backgroundColor: withAlpha(colors.card, 'FC'),
+              borderColor: withAlpha(colors.border, '66'),
             },
           ]}
         >
@@ -3756,6 +4008,24 @@ export const PriceCompareScreen: React.FC = () => {
                 void handleSearch();
               }}
             />
+            <TouchableOpacity
+              activeOpacity={0.88}
+              onPress={handleOpenBarcodeScanner}
+              style={[
+                styles.searchScanButton,
+                {
+                  borderColor: withAlpha(colors.border, 'C8'),
+                  backgroundColor: withAlpha(colors.backgroundMuted, isDark ? 'D4' : 'F5'),
+                },
+              ]}
+              accessibilityRole="button"
+              accessibilityLabel={tt(
+                'price_compare_scan_barcode_button_label',
+                'Barkod tarayarak fiyat araması yap'
+              )}
+            >
+              <Ionicons name="barcode-outline" size={20} color={colors.primary} />
+            </TouchableOpacity>
             <TouchableOpacity
               activeOpacity={0.88}
               onPress={() => {
@@ -3848,8 +4118,8 @@ export const PriceCompareScreen: React.FC = () => {
             style={[
               styles.loadingCard,
               {
-                backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-                borderColor: withAlpha(colors.border, 'BC'),
+                backgroundColor: withAlpha(colors.card, 'FC'),
+                borderColor: withAlpha(colors.border, '66'),
                 marginBottom: 14,
               },
             ]}
@@ -3922,8 +4192,8 @@ export const PriceCompareScreen: React.FC = () => {
                 style={[
                   styles.loadingCard,
                   {
-                    backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-                    borderColor: withAlpha(colors.border, 'BC'),
+                    backgroundColor: withAlpha(colors.card, 'FC'),
+                    borderColor: withAlpha(colors.border, '66'),
                   },
                 ]}
               >
@@ -3935,8 +4205,8 @@ export const PriceCompareScreen: React.FC = () => {
                   style={[
                     styles.resultsGridWrap,
                     {
-                      backgroundColor: withAlpha(colors.cardElevated, 'B8'),
-                      borderColor: withAlpha(colors.border, '8F'),
+                      backgroundColor: withAlpha(colors.card, isDark ? 'E8' : 'F8'),
+                      borderColor: withAlpha(colors.border, '5A'),
                     },
                   ]}
                 >
@@ -3968,6 +4238,7 @@ export const PriceCompareScreen: React.FC = () => {
                         quickAddLoading={quickAddLoadingId === getProductIdentity(item)}
                         cardWidth={resultCardWidth}
                         colors={colors}
+                        isDark={isDark}
                         locale={preferredLocale}
                         tt={tt}
                       />
@@ -4077,44 +4348,50 @@ export const PriceCompareScreen: React.FC = () => {
         ) : null}
 
         {favoriteProducts.length ? (
-          <View>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              {tt('favorite_products', 'Favoriler')}
-            </Text>
-            <Text style={[styles.savedListsHelper, { color: colors.mutedText }]}>
-              {tt(
-                'favorite_products_subtitle',
-                'Sık baktığın ürünleri yıldızla ve buradan tek dokunuşla aç.'
-              )}
-            </Text>
+          <View style={styles.favoriteStripSection}>
+            <View style={styles.favoriteStripHeader}>
+              <View style={styles.favoriteStripHeaderText}>
+                <Text style={[styles.sectionTitle, styles.favoriteStripTitleHeading, { color: colors.text }]}>
+                  {tt('favorite_products', 'Favoriler')}
+                </Text>
+                <Text style={[styles.savedListsHelper, { color: colors.mutedText }]}>
+                  {tt(
+                    'favorite_products_subtitle',
+                    'Sık baktığın ürünleri buradan hızlı aç.'
+                  )}
+                </Text>
+              </View>
+              <View
+                style={[
+                  styles.favoriteStripCountPill,
+                  { backgroundColor: withAlpha(colors.primary, '12') },
+                ]}
+              >
+                <Text style={[styles.favoriteStripCountText, { color: colors.primary }]}>
+                  {favoriteProducts.length}
+                </Text>
+              </View>
+            </View>
             <View
               style={[
-                styles.resultsGridWrap,
+                styles.favoriteStripWrap,
                 {
-                  backgroundColor: withAlpha(colors.cardElevated, 'B8'),
-                  borderColor: withAlpha(colors.border, '8F'),
+                  backgroundColor: withAlpha(colors.cardElevated, isDark ? '8C' : '72'),
+                  borderColor: withAlpha(colors.border, '62'),
                 },
               ]}
             >
-              <View style={styles.resultsGrid}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.favoriteStripScrollContent}
+              >
                 {favoriteProducts.slice(0, SEARCH_RESULTS_PAGE_SIZE).map((item) => (
-                  <SearchResultCard
+                  <FavoriteProductStripCard
                     key={`favorite-${getProductIdentity(item)}`}
                     item={item}
-                    selected={
-                      selectedProduct
-                        ? getProductIdentity(selectedProduct) === getProductIdentity(item)
-                        : false
-                    }
-                    isFavorite={Boolean(
-                      getPriceCompareFavoriteKey(item) &&
-                        favoriteKeySet.has(getPriceCompareFavoriteKey(item)!)
-                    )}
-                    onOpenPricing={() => {
+                    onOpen={() => {
                       void handleOpenPricingFromResult(item);
-                    }}
-                    onOpenScore={() => {
-                      void handleOpenScoreFromResult(item);
                     }}
                     onQuickAdd={() => {
                       void handleQuickAddFromResult(item);
@@ -4124,13 +4401,12 @@ export const PriceCompareScreen: React.FC = () => {
                     }}
                     quickAddDisabled={!canQuickAddSearchProduct(item)}
                     quickAddLoading={quickAddLoadingId === getProductIdentity(item)}
-                    cardWidth={resultCardWidth}
                     colors={colors}
                     locale={preferredLocale}
                     tt={tt}
                   />
                 ))}
-              </View>
+              </ScrollView>
             </View>
           </View>
         ) : null}
@@ -4246,13 +4522,13 @@ export const PriceCompareScreen: React.FC = () => {
                   <TouchableOpacity
                     activeOpacity={0.88}
                     onPress={handleAddSelectedToCart}
-                    disabled={!selectedEffectiveOffersResponse || offersLoading || offerItems.length === 0}
+                    disabled={!selectedEffectiveOffersResponse || offersLoading}
                     style={[
                       styles.addToCartButton,
                       {
                         backgroundColor: colors.primary,
                         opacity:
-                          !selectedEffectiveOffersResponse || offersLoading || offerItems.length === 0
+                          !selectedEffectiveOffersResponse || offersLoading
                             ? 0.65
                             : 1,
                       },
@@ -4564,15 +4840,45 @@ const styles = StyleSheet.create({
   runtimeNoticeWrap: {
     marginBottom: 14,
   },
+  catalogShortcutCard: {
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 13,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  catalogShortcutIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  catalogShortcutTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  catalogShortcutTitle: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  catalogShortcutSubtitle: {
+    marginTop: 3,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
   searchCard: {
     borderWidth: 1,
-    borderRadius: 24,
-    padding: 18,
-    marginBottom: 18,
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 6,
+    borderRadius: 20,
+    padding: 14,
+    marginBottom: 14,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   searchLabel: {
     fontSize: 14,
@@ -4586,16 +4892,24 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
-    minHeight: 52,
+    minHeight: 46,
     borderWidth: 1,
-    borderRadius: 18,
-    paddingHorizontal: 16,
-    fontSize: 15,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    fontSize: 14,
   },
   searchButton: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchScanButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -4698,6 +5012,107 @@ const styles = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  favoriteStripSection: {
+    marginTop: 14,
+    marginBottom: 4,
+  },
+  favoriteStripHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+    marginBottom: 8,
+  },
+  favoriteStripHeaderText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  favoriteStripTitleHeading: {
+    marginTop: 0,
+    marginBottom: 2,
+  },
+  favoriteStripCountPill: {
+    minWidth: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 9,
+  },
+  favoriteStripCountText: {
+    fontSize: 12,
+    lineHeight: 14,
+    fontWeight: '900',
+  },
+  favoriteStripWrap: {
+    borderWidth: 1,
+    borderRadius: 20,
+    overflow: 'hidden',
+  },
+  favoriteStripScrollContent: {
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  favoriteStripCard: {
+    width: 218,
+    minHeight: 92,
+    borderWidth: 1,
+    borderRadius: 16,
+    padding: 9,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  favoriteStripImageWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  favoriteStripImage: {
+    width: '86%',
+    height: '86%',
+  },
+  favoriteStripTextWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  favoriteStripTitle: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '800',
+  },
+  favoriteStripMeta: {
+    marginTop: 3,
+    fontSize: 8.5,
+    lineHeight: 11,
+  },
+  favoriteStripPrice: {
+    marginTop: 5,
+    fontSize: 11,
+    lineHeight: 13,
+    fontWeight: '900',
+  },
+  favoriteStripActions: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  favoriteStripIconButton: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  favoriteStripAddButton: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -4836,10 +5251,10 @@ const styles = StyleSheet.create({
   },
   resultsGridWrap: {
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
     paddingHorizontal: RESULT_GRID_HORIZONTAL_PADDING,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
   resultsGrid: {
     flexDirection: 'row',
@@ -4886,8 +5301,8 @@ const styles = StyleSheet.create({
   },
   categoryTreeCard: {
     borderWidth: 1,
-    borderRadius: 16,
-    marginBottom: 14,
+    borderRadius: 20,
+    marginBottom: 12,
     overflow: 'hidden',
   },
   categoryTreeHeader: {
@@ -4895,7 +5310,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   categoryTreeHeaderLead: {
@@ -4921,13 +5336,13 @@ const styles = StyleSheet.create({
   categoryTreeHeaderTitle: {
     flex: 1,
     fontSize: 14,
-    lineHeight: 18,
+    lineHeight: 17,
     fontWeight: '700',
   },
   categoryTreeHeaderSubtitle: {
     maxWidth: 120,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 11,
+    lineHeight: 15,
     fontWeight: '700',
     textAlign: 'right',
   },
@@ -4952,11 +5367,11 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   categoryTreeRow: {
-    minHeight: 44,
+    minHeight: 38,
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingLeft: 14,
     paddingRight: 8,
-    paddingVertical: 7,
+    paddingVertical: 5,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -4974,8 +5389,8 @@ const styles = StyleSheet.create({
   },
   categoryTreeTitle: {
     flex: 1,
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 17,
     fontWeight: '700',
   },
   categoryTreeRowValue: {
@@ -5098,17 +5513,17 @@ const styles = StyleSheet.create({
   },
   resultGridCard: {
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 5,
-    paddingTop: 5,
+    borderRadius: 16,
+    paddingHorizontal: 6,
+    paddingTop: 6,
     paddingBottom: 8,
-    minHeight: 182,
+    minHeight: 160,
     alignItems: 'center',
   },
   resultGridImageWrap: {
     width: '100%',
-    height: 88,
-    borderRadius: 10,
+    height: 78,
+    borderRadius: 12,
     borderWidth: 1,
     overflow: 'hidden',
     position: 'relative',
@@ -5116,11 +5531,11 @@ const styles = StyleSheet.create({
   },
   resultGridWishButton: {
     position: 'absolute',
-    top: 5,
-    right: 5,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    top: 4,
+    right: 4,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -5128,11 +5543,11 @@ const styles = StyleSheet.create({
   },
   resultGridAddButton: {
     position: 'absolute',
-    right: 5,
-    bottom: 5,
-    width: 24,
-    height: 24,
-    borderRadius: 7,
+    right: 4,
+    bottom: 4,
+    width: 26,
+    height: 26,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2,
@@ -5177,8 +5592,8 @@ const styles = StyleSheet.create({
     width: '100%',
     fontSize: 10,
     lineHeight: 13,
-    fontWeight: '700',
-    minHeight: 39,
+    fontWeight: '800',
+    minHeight: 26,
     textAlign: 'center',
   },
   resultGridMeta: {
@@ -5186,28 +5601,28 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontSize: 8,
     lineHeight: 11,
-    minHeight: 22,
+    minHeight: 11,
     textAlign: 'center',
   },
   resultGridMetaSpacer: {
-    height: 22,
+    height: 11,
   },
   resultGridSubMeta: {
     width: '100%',
     marginTop: 2,
     fontSize: 7.5,
     lineHeight: 10,
-    minHeight: 18,
+    minHeight: 10,
     textAlign: 'center',
   },
   resultGridSubMetaSpacer: {
-    height: 18,
+    height: 10,
   },
   resultGridPrice: {
     width: '100%',
-    marginTop: 6,
-    fontSize: 10.5,
-    lineHeight: 13,
+    marginTop: 5,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '900',
     textAlign: 'center',
   },

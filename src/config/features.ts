@@ -117,12 +117,12 @@ export const AD_POLICY = Object.freeze({
 });
 
 export const MONETIZATION_POLICY = Object.freeze({
-  monthlyPlanEnabled: false,
-  monthlyPriceTry: 49.99,
-  monthlyProductId: '',
+  monthlyPlanEnabled: true,
+  monthlyPriceTry: 39.99,
+  monthlyProductId: 'premium_monthly_39_99_try',
   annualPlanEnabled: true,
-  annualPriceTry: 39.99,
-  annualProductId: 'premium_annual_39_99_try:annual',
+  annualPriceTry: 249.99,
+  annualProductId: 'premium_annual_249_99_try',
   purchaseProviderEnabled: true,
   restoreEnabled: true,
   paywallEnabled: true,

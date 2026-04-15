@@ -97,7 +97,7 @@ const SettingsItem: React.FC<SettingsItemProps> = ({
       <View style={styles.itemGlyphWrap}>
         <Ionicons
           name={icon}
-          size={20}
+          size={18}
           color={danger ? '#D64545' : colors.text}
         />
       </View>
@@ -390,6 +390,14 @@ export const SettingsScreen: React.FC = () => {
     contentBottomMin: 40,
     horizontalPadding: 25,
   });
+  const settingsMenuCardSurface = useMemo(
+    () => ({
+      backgroundColor: isDark ? withAlpha(colors.card, 'F7') : '#FFFFFF',
+      borderColor: withAlpha(colors.border, isDark ? '70' : '64'),
+      marginHorizontal: layout.horizontalPadding,
+    }),
+    [colors.border, colors.card, isDark, layout.horizontalPadding]
+  );
 
   const showInternalDiagnostics = false;
   const adDiagnosticsEnabled =
@@ -611,6 +619,10 @@ export const SettingsScreen: React.FC = () => {
 
   const handleOpenPriceCompare = useCallback(() => {
     navigation.navigate('PriceCompare');
+  }, [navigation]);
+
+  const handleOpenMarketBulletins = useCallback(() => {
+    navigation.navigate('MarketBulletins');
   }, [navigation]);
 
   const handleOpenLegalDocument = useCallback(
@@ -1090,11 +1102,7 @@ export const SettingsScreen: React.FC = () => {
         <View
           style={[
             styles.menuCard,
-            {
-              backgroundColor: colors.card,
-              borderColor: withAlpha(colors.border, 'D4'),
-              marginHorizontal: layout.horizontalPadding,
-            },
+            settingsMenuCardSurface,
           ]}
         >
           <SettingsItem
@@ -1179,11 +1187,7 @@ export const SettingsScreen: React.FC = () => {
         <View
           style={[
             styles.menuCard,
-            {
-              backgroundColor: colors.card,
-              borderColor: withAlpha(colors.border, 'D4'),
-              marginHorizontal: layout.horizontalPadding,
-            },
+            settingsMenuCardSurface,
           ]}
         >
           <SettingsItem
@@ -1250,6 +1254,14 @@ export const SettingsScreen: React.FC = () => {
             value={tt('price_compare_short_value', 'Market bazında')}
             onPress={handleOpenPriceCompare}
             colors={colors}
+            grouped="middle"
+          />
+          <SettingsItem
+            icon="newspaper-outline"
+            label={tt('market_bulletins_title', 'Aktüel Kataloglar')}
+            value={tt('market_bulletins_short_value', 'Market kampanyaları')}
+            onPress={handleOpenMarketBulletins}
+            colors={colors}
             grouped="last"
           />
         </View>
@@ -1266,11 +1278,7 @@ export const SettingsScreen: React.FC = () => {
         <View
           style={[
             styles.menuCard,
-            {
-              backgroundColor: colors.card,
-              borderColor: withAlpha(colors.border, 'D4'),
-              marginHorizontal: layout.horizontalPadding,
-            },
+            settingsMenuCardSurface,
           ]}
         >
           <SettingsItem
@@ -1336,11 +1344,7 @@ export const SettingsScreen: React.FC = () => {
         <View
           style={[
             styles.menuCard,
-            {
-              backgroundColor: colors.card,
-              borderColor: withAlpha(colors.border, 'D4'),
-              marginHorizontal: layout.horizontalPadding,
-            },
+            settingsMenuCardSurface,
           ]}
         >
           <SettingsItem
@@ -1360,11 +1364,7 @@ export const SettingsScreen: React.FC = () => {
         <View
           style={[
             styles.menuCard,
-            {
-              backgroundColor: colors.card,
-              borderColor: withAlpha(colors.border, 'D4'),
-              marginHorizontal: layout.horizontalPadding,
-            },
+            settingsMenuCardSurface,
           ]}
         >
           <SettingsItem
@@ -1377,28 +1377,6 @@ export const SettingsScreen: React.FC = () => {
             value={APP_VERSION}
             colors={colors}
             onPress={handleOpenAboutApp}
-            grouped="single"
-          />
-        </View>
-
-        <View
-          style={[
-            styles.menuCard,
-            {
-              backgroundColor: colors.card,
-              borderColor: withAlpha(colors.border, 'D4'),
-              marginHorizontal: layout.horizontalPadding,
-              marginTop: 16,
-              marginBottom: 24,
-            },
-          ]}
-        >
-          <SettingsItem
-            icon="log-out-outline"
-            label={tt('logout', 'Çıkış Yap')}
-            colors={colors}
-            onPress={handleLogout}
-            danger
             grouped="single"
           />
         </View>
@@ -3323,15 +3301,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    marginBottom: 10,
-    marginTop: 6,
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '800',
+    marginBottom: 7,
+    marginTop: 2,
   },
   menuCard: {
     borderWidth: 1,
-    borderRadius: 18,
-    marginBottom: 18,
+    borderRadius: 20,
+    marginBottom: 12,
     overflow: 'hidden',
   },
   premiumLoadingCard: {
@@ -3622,8 +3601,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 17,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
   },
   legalMetaCard: {
     borderWidth: 1,
@@ -3640,17 +3620,16 @@ const styles = StyleSheet.create({
   },
   itemLeft: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     flexShrink: 1,
-    paddingRight: 12,
+    paddingRight: 10,
     flex: 1,
   },
   itemGlyphWrap: {
-    width: 28,
+    width: 20,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14,
-    paddingTop: 1,
+    marginRight: 10,
   },
   itemTextWrap: {
     flex: 1,
@@ -3665,26 +3644,28 @@ const styles = StyleSheet.create({
     marginRight: 15,
   },
   itemLabel: {
-    fontSize: 16,
+    fontSize: 14,
+    lineHeight: 17,
     fontWeight: '700',
     flexShrink: 1,
   },
   itemSubtitle: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 18,
+    marginTop: 2,
+    fontSize: 11,
+    lineHeight: 15,
     fontWeight: '600',
   },
   itemRight: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: 10,
-    gap: 8,
+    marginLeft: 8,
+    gap: 6,
   },
   itemValue: {
-    fontSize: 14,
+    fontSize: 12,
+    lineHeight: 15,
     fontWeight: '700',
-    maxWidth: 138,
+    maxWidth: 128,
     textAlign: 'right',
   },
   itemBadge: {

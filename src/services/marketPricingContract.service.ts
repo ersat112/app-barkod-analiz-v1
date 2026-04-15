@@ -187,6 +187,58 @@ export function buildMarketGelsinCategoryTreeEndpoint(params?: {
   return `/v1/categories/tree${suffix ? `?${suffix}` : ''}`;
 }
 
+export function buildMarketGelsinBulletinsEndpoint(
+  marketKey: string,
+  params?: {
+    cityCode?: string;
+    citySlug?: string;
+    limit?: number;
+    cursor?: string | null;
+  }
+): string {
+  const query = new URLSearchParams();
+
+  if (params?.citySlug) {
+    query.set('city', params.citySlug);
+  }
+
+  if (params?.cityCode) {
+    query.set('city_code', params.cityCode);
+  }
+
+  if (typeof params?.limit === 'number' && Number.isFinite(params.limit)) {
+    query.set('limit', String(params.limit));
+  }
+
+  if (params?.cursor) {
+    query.set('cursor', params.cursor);
+  }
+
+  const suffix = query.toString();
+  return `/api/v1/markets/${encodeURIComponent(marketKey)}/bulletins${suffix ? `?${suffix}` : ''}`;
+}
+
+export function buildMarketGelsinBulletinEndpoint(
+  bulletinId: number | string,
+  params?: {
+    limit?: number;
+    cursor?: number | null;
+  }
+): string {
+  const query = new URLSearchParams();
+
+  if (typeof params?.limit === 'number' && Number.isFinite(params.limit)) {
+    query.set('limit', String(params.limit));
+  }
+
+  if (typeof params?.cursor === 'number' && Number.isFinite(params.cursor)) {
+    query.set('cursor', String(params.cursor));
+  }
+
+  const suffix = query.toString();
+  return `/api/v1/bulletins/${encodeURIComponent(String(bulletinId))}${suffix ? `?${suffix}` : ''}`;
+}
+
 export function buildMarketGelsinLegacyOffersSearchEndpoint(params?: {
   citySlug?: string;
   query?: string;

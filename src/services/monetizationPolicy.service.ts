@@ -76,15 +76,13 @@ function normalizeAnnualProductIdValue(value: unknown, fallback: string): string
     return fallbackNormalized;
   }
 
-  if (normalized.includes(':')) {
-    return normalized;
+  const storeProductIdentifier = normalized.split(':')[0]?.trim();
+
+  if (storeProductIdentifier) {
+    return storeProductIdentifier;
   }
 
-  if (fallbackNormalized.includes(':')) {
-    return fallbackNormalized;
-  }
-
-  return normalized;
+  return fallbackNormalized.split(':')[0]?.trim() || fallbackNormalized;
 }
 
 function clampInteger(

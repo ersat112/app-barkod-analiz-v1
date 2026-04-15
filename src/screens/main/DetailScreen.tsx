@@ -3864,7 +3864,9 @@ const styles = StyleSheet.create({
   },
   scrollContent: {},
   content: {
-    padding: 25,
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 24,
   },
   shareOverlay: {
     flex: 1,
@@ -3889,13 +3891,13 @@ const styles = StyleSheet.create({
   },
   marketSheetCard: {
     borderWidth: 1,
-    borderRadius: 26,
-    padding: 18,
+    borderRadius: 22,
+    padding: 16,
     shadowColor: '#000',
-    shadowOpacity: 0.16,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 10 },
-    elevation: 12,
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 5,
   },
   marketSheetHandle: {
     alignSelf: 'center',
@@ -3916,9 +3918,9 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   marketSheetTitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '800',
-    lineHeight: 22,
+    lineHeight: 21,
   },
   marketSheetSubtitle: {
     fontSize: 12,
@@ -3945,7 +3947,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   marketSheetDetailLabel: {
@@ -3968,11 +3970,11 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   marketSheetActionButton: {
-    minHeight: 42,
+    minHeight: 38,
     borderRadius: 999,
     borderWidth: 1,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },

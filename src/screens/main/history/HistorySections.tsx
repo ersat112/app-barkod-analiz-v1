@@ -13,6 +13,7 @@ import { Swipeable } from 'react-native-gesture-handler';
 
 import type { HistoryEntry } from '../../../services/db';
 import type { HistoryFilterType, HistorySection } from '../../../types/history';
+import { withAlpha } from '../../../utils/color';
 
 type ThemeColors = {
   background: string;
@@ -274,7 +275,10 @@ export const HistoryFilterBar: React.FC<HistoryFilterBarProps> = ({
       <View
         style={[
           styles.searchBox,
-          { backgroundColor: colors.card, borderColor: colors.border },
+          {
+            backgroundColor: colors.card,
+            borderColor: withAlpha(colors.border, '64'),
+          },
         ]}
       >
         <Ionicons name="search-outline" size={18} color={colors.primary} />
@@ -406,7 +410,10 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
       <TouchableOpacity
         style={[
           styles.itemCard,
-          { backgroundColor: colors.card, borderColor: colors.border },
+          {
+            backgroundColor: colors.card,
+            borderColor: withAlpha(colors.border, '64'),
+          },
         ]}
         onPress={onPress}
         activeOpacity={0.82}
@@ -460,29 +467,24 @@ export const HistoryListItem: React.FC<HistoryListItemProps> = ({
                   color={colors.primary}
                 />
               </TouchableOpacity>
+              <View
+                style={[
+                  styles.scoreBubble,
+                  {
+                    backgroundColor: scoreBubble.backgroundColor,
+                    borderColor: scoreBubble.borderColor,
+                  },
+                ]}
+              >
+                <Text style={[styles.scoreBubbleValue, { color: scoreBubble.textColor }]}>
+                  {scoreBubble.value}
+                </Text>
+                <Text style={[styles.scoreBubbleLabel, { color: scoreBubble.textColor }]}>
+                  {scoreBubble.label}
+                </Text>
+              </View>
               <Ionicons name="chevron-forward" size={18} color={colors.border} />
             </View>
-          </View>
-
-          <View style={styles.itemMetaRow}>
-            <TouchableOpacity
-              style={[
-                styles.scoreBubble,
-                {
-                  backgroundColor: scoreBubble.backgroundColor,
-                  borderColor: scoreBubble.borderColor,
-                },
-              ]}
-              activeOpacity={1}
-              disabled
-            >
-              <Text style={[styles.scoreBubbleValue, { color: scoreBubble.textColor }]}>
-                {scoreBubble.value}
-              </Text>
-              <Text style={[styles.scoreBubbleLabel, { color: scoreBubble.textColor }]}>
-                {scoreBubble.label}
-              </Text>
-            </TouchableOpacity>
           </View>
         </View>
       </TouchableOpacity>
@@ -680,43 +682,43 @@ const styles = StyleSheet.create({
   },
   filterWrap: {
     paddingHorizontal: 16,
-    paddingBottom: 10,
+    paddingBottom: 8,
   },
   searchBox: {
     borderWidth: 1,
-    borderRadius: 16,
-    minHeight: 52,
+    borderRadius: 20,
+    minHeight: 46,
     paddingHorizontal: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   searchInput: {
     flex: 1,
     fontSize: 14,
-    paddingVertical: 12,
+    paddingVertical: 9,
   },
   filterRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 12,
+    gap: 8,
+    marginTop: 8,
     flexWrap: 'wrap',
   },
   filterChip: {
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
   filterChipText: {
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   clearChip: {
     borderWidth: 1,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
   },
   clearChipText: {
     fontSize: 12,
@@ -724,114 +726,112 @@ const styles = StyleSheet.create({
   },
   sectionHeader: {
     paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 10,
+    paddingTop: 14,
+    paddingBottom: 7,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '800',
   },
   itemCard: {
     marginHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 18,
+    marginBottom: 6,
+    borderRadius: 20,
     borderWidth: 1,
-    padding: 15,
+    padding: 9,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   itemImage: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
+    width: 44,
+    height: 44,
+    borderRadius: 11,
     resizeMode: 'cover',
   },
   itemDetails: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 10,
   },
   itemHeaderRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
+    alignItems: 'center',
+    gap: 8,
   },
   itemHeaderTextWrap: {
     flex: 1,
   },
   itemBrand: {
-    fontSize: 13,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '600',
     opacity: 0.66,
   },
   itemName: {
-    marginTop: 4,
-    fontSize: 16,
-    fontWeight: '800',
-    lineHeight: 21,
+    marginTop: 2,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 17,
   },
   itemStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    marginTop: 8,
+    gap: 5,
+    marginTop: 5,
     flexWrap: 'wrap',
   },
   statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
   },
   itemStatusLabel: {
-    fontSize: 14,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '800',
   },
   itemScoreInline: {
-    fontSize: 13,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '700',
     opacity: 0.72,
   },
   itemMetaLine: {
-    marginTop: 8,
-    fontSize: 12,
-    lineHeight: 18,
+    marginTop: 5,
+    fontSize: 11,
+    lineHeight: 14,
     opacity: 0.62,
-  },
-  itemMetaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 12,
   },
   itemRightArea: {
     alignItems: 'flex-end',
-    gap: 12,
-    paddingTop: 2,
+    gap: 6,
+    paddingTop: 0,
   },
   favoriteIconButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
   scoreBubble: {
-    minWidth: 64,
-    height: 36,
-    borderRadius: 18,
+    minWidth: 46,
+    height: 26,
+    borderRadius: 13,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
-    gap: 4,
-    paddingHorizontal: 10,
+    gap: 3,
+    paddingHorizontal: 8,
   },
   scoreBubbleValue: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '900',
   },
   scoreBubbleLabel: {
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: '900',
     letterSpacing: 0.5,
   },

@@ -1910,9 +1910,8 @@ export const PriceCompareBasketScreen: React.FC = () => {
           style={[
             styles.summaryCard,
             {
-              backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-              borderColor: withAlpha(colors.border, 'BC'),
-              shadowColor: colors.shadow,
+              backgroundColor: withAlpha(colors.card, 'FC'),
+              borderColor: withAlpha(colors.border, '68'),
             },
           ]}
         >
@@ -2202,8 +2201,8 @@ export const PriceCompareBasketScreen: React.FC = () => {
               style={[
                 styles.metricsCard,
                 {
-                  backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-                  borderColor: withAlpha(colors.border, 'BC'),
+                  backgroundColor: withAlpha(colors.card, 'FC'),
+                  borderColor: withAlpha(colors.border, '68'),
                 },
               ]}
             >
@@ -2317,8 +2316,8 @@ export const PriceCompareBasketScreen: React.FC = () => {
               style={[
                 styles.matrixCard,
                 {
-                  backgroundColor: withAlpha(colors.cardElevated, 'F1'),
-                  borderColor: withAlpha(colors.border, 'BC'),
+                  backgroundColor: withAlpha(colors.card, 'FC'),
+                  borderColor: withAlpha(colors.border, '68'),
                   width: matrixViewportWidth,
                   alignSelf: 'flex-start',
                 },
@@ -2342,11 +2341,6 @@ export const PriceCompareBasketScreen: React.FC = () => {
                         {
                           backgroundColor: withAlpha(colors.backgroundMuted, isDark ? '88' : 'F6'),
                           borderRightColor: withAlpha(colors.border, '90'),
-                          shadowColor: '#000',
-                          shadowOpacity: isDark ? 0.18 : 0.08,
-                          shadowRadius: 10,
-                          shadowOffset: { width: 6, height: 0 },
-                          elevation: 3,
                           zIndex: 2,
                         },
                       ]}
@@ -2415,11 +2409,6 @@ export const PriceCompareBasketScreen: React.FC = () => {
                                 colors.backgroundMuted,
                                 isDark ? '78' : 'FB'
                               ),
-                              shadowColor: '#000',
-                              shadowOpacity: isDark ? 0.18 : 0.08,
-                              shadowRadius: 10,
-                              shadowOffset: { width: 6, height: 0 },
-                              elevation: 3,
                               zIndex: 2,
                             },
                           ]}
@@ -2622,11 +2611,6 @@ export const PriceCompareBasketScreen: React.FC = () => {
                         {
                           backgroundColor: withAlpha(colors.backgroundMuted, isDark ? '88' : 'F6'),
                           borderRightColor: withAlpha(colors.border, '90'),
-                          shadowColor: '#000',
-                          shadowOpacity: isDark ? 0.18 : 0.08,
-                          shadowRadius: 10,
-                          shadowOffset: { width: 6, height: 0 },
-                          elevation: 3,
                           zIndex: 2,
                         },
                       ]}
@@ -2925,14 +2909,14 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   summaryCard: {
-    borderRadius: 24,
+    borderRadius: 20,
     borderWidth: 1,
-    padding: 18,
-    marginBottom: 16,
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 8,
+    padding: 14,
+    marginBottom: 14,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   summaryTitle: {
     fontSize: 18,
@@ -2942,7 +2926,7 @@ const styles = StyleSheet.create({
   summarySubtitle: {
     fontSize: 13,
     lineHeight: 19,
-    marginBottom: 14,
+    marginBottom: 12,
   },
   summaryCoverageRow: {
     flexDirection: 'row',
@@ -2951,9 +2935,9 @@ const styles = StyleSheet.create({
   },
   summaryCoveragePill: {
     flex: 1,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
     gap: 4,
   },
   summaryCoverageValue: {
@@ -3132,14 +3116,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   metricsCard: {
-    borderRadius: 22,
+    borderRadius: 18,
     borderWidth: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingTop: 6,
     marginBottom: 12,
   },
   metricRow: {
-    minHeight: 52,
+    minHeight: 46,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -3159,10 +3143,10 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   matrixCard: {
-    borderRadius: 22,
+    borderRadius: 18,
     borderWidth: 1,
     overflow: 'hidden',
-    marginBottom: 18,
+    marginBottom: 14,
   },
   matrixNotesCard: {
     borderRadius: 18,
@@ -3195,9 +3179,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   matrixHeaderLeadCell: {
-    width: 184,
-    minHeight: 68,
-    paddingHorizontal: 12,
+    width: 164,
+    minHeight: 58,
+    paddingHorizontal: 10,
     justifyContent: 'center',
     borderRightWidth: 1,
   },
@@ -3206,8 +3190,8 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   matrixMarketHeaderCell: {
-    width: 116,
-    minHeight: 68,
+    width: 104,
+    minHeight: 58,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,
@@ -3227,26 +3211,26 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   matrixProductCell: {
-    width: 184,
-    minHeight: 168,
-    padding: 12,
+    width: 164,
+    minHeight: 142,
+    padding: 10,
     borderRightWidth: 1,
   },
   matrixProductImageWrap: {
-    width: 58,
-    height: 58,
-    borderRadius: 14,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
   matrixProductImage: {
-    width: 50,
-    height: 50,
+    width: 42,
+    height: 42,
   },
   matrixProductTitle: {
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 17,
     fontWeight: '800',
     marginBottom: 4,
   },
@@ -3298,18 +3282,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   matrixValueCell: {
-    width: 116,
-    minHeight: 168,
-    paddingHorizontal: 8,
-    paddingVertical: 10,
+    width: 104,
+    minHeight: 142,
+    paddingHorizontal: 7,
+    paddingVertical: 8,
     borderRightWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
   matrixCellPrice: {
-    fontSize: 18,
-    lineHeight: 22,
+    fontSize: 16,
+    lineHeight: 20,
     fontWeight: '900',
     textAlign: 'center',
   },
@@ -3335,9 +3319,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   matrixFooterLeadCell: {
-    width: 184,
-    minHeight: 82,
-    paddingHorizontal: 12,
+    width: 164,
+    minHeight: 72,
+    paddingHorizontal: 10,
     justifyContent: 'center',
     borderRightWidth: 1,
   },
@@ -3346,10 +3330,10 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   matrixFooterCell: {
-    width: 116,
-    minHeight: 82,
-    paddingHorizontal: 8,
-    paddingVertical: 10,
+    width: 104,
+    minHeight: 72,
+    paddingHorizontal: 7,
+    paddingVertical: 8,
     borderRightWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',

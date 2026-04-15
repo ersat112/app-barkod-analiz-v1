@@ -11,6 +11,8 @@ import type {
   PurchaseProviderPurchaseResult,
   PurchaseProviderRestoreParams,
   PurchaseProviderRestoreResult,
+  PremiumPackagePlanKey,
+  PremiumPackageSnapshot,
 } from '../types/monetization';
 
 type RevenueCatPurchasesApi = {
@@ -19,8 +21,21 @@ type RevenueCatPurchasesApi = {
   logIn?: (appUserId: string) => Promise<unknown>;
   logOut?: () => Promise<unknown>;
   getOfferings?: () => Promise<RevenueCatOfferings>;
+  getProducts?: (productIdentifiers: string[], type?: unknown) => Promise<RevenueCatStoreProduct[]>;
   purchasePackage?: (pkg: unknown) => Promise<RevenueCatPurchaseResponse>;
+  purchaseStoreProduct?: (product: unknown) => Promise<RevenueCatPurchaseResponse>;
+  purchaseProduct?: (
+    productIdentifier: string,
+    upgradeInfo?: unknown,
+    type?: unknown
+  ) => Promise<RevenueCatPurchaseResponse>;
   restorePurchases?: () => Promise<RevenueCatCustomerInfo>;
+  PRODUCT_CATEGORY?: {
+    SUBSCRIPTION?: unknown;
+  };
+  PURCHASE_TYPE?: {
+    SUBS?: unknown;
+  };
 };
 
 type RevenueCatPurchaseResponse = {
@@ -43,11 +58,22 @@ type RevenueCatEntitlementInfo = {
 
 type RevenueCatPackage = {
   identifier?: string;
+  packageType?: string;
   productIdentifier?: string;
-  storeProduct?: {
-    identifier?: string;
-    productIdentifier?: string;
-  };
+  product?: RevenueCatStoreProduct;
+  storeProduct?: RevenueCatStoreProduct;
+};
+
+type RevenueCatStoreProduct = {
+  identifier?: string;
+  productIdentifier?: string;
+  id?: string;
+  title?: string;
+  description?: string;
+  priceString?: string;
+  price?: number;
+  currencyCode?: string;
+  subscriptionPeriod?: string | null;
 };
 
 type RevenueCatOffering = {
@@ -68,6 +94,7 @@ type PackageSelectionSource =
   | 'annual_fallback'
   | 'available_annual_hint'
   | 'available_fallback'
+  | 'direct_product'
   | 'none';
 
 type OfferingsSmokeCheckResult = {
@@ -110,6 +137,20 @@ function normalizeIdentifier(value: unknown): string | null {
 
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function getAnnualProductIdentifierCandidates(annualProductId: string): string[] {
+  const normalized = normalizeIdentifier(annualProductId);
+
+  if (!normalized) {
+    return [];
+  }
+
+  const storeProductIdentifier = normalized.split(':')[0]?.trim();
+
+  return Array.from(
+    new Set([normalized, storeProductIdentifier].filter((value): value is string => Boolean(value)))
+  );
 }
 
 function toErrorMessage(error: unknown): string {
@@ -293,23 +334,126 @@ function getPackageIdentifiers(pkg: RevenueCatPackage | null): string[] {
   return [
     normalizeIdentifier(pkg.identifier),
     normalizeIdentifier(pkg.productIdentifier),
+    normalizeIdentifier(pkg.product?.identifier),
+    normalizeIdentifier(pkg.product?.productIdentifier),
     normalizeIdentifier(pkg.storeProduct?.identifier),
     normalizeIdentifier(pkg.storeProduct?.productIdentifier),
   ].filter((value): value is string => Boolean(value));
+}
+
+function resolvePackageStoreProduct(
+  pkg: RevenueCatPackage | null
+): RevenueCatStoreProduct | null {
+  if (!pkg) {
+    return null;
+  }
+
+  return pkg.storeProduct ?? pkg.product ?? null;
+}
+
+function resolvePremiumPackagePlanKey(pkg: RevenueCatPackage): PremiumPackagePlanKey {
+  const searchable = [
+    normalizeIdentifier(pkg.identifier),
+    normalizeIdentifier(pkg.packageType),
+    resolvePackageProductIdentifier(pkg),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' ')
+    .toLowerCase();
+
+  if (
+    searchable.includes('six') ||
+    searchable.includes('6month') ||
+    searchable.includes('6-month') ||
+    searchable.includes('6_month')
+  ) {
+    return 'six_month';
+  }
+
+  if (
+    searchable.includes('annual') ||
+    searchable.includes('year') ||
+    searchable.includes('yearly')
+  ) {
+    return 'annual';
+  }
+
+  if (searchable.includes('monthly') || searchable.includes('month')) {
+    return 'monthly';
+  }
+
+  return 'unknown';
+}
+
+function getPremiumPackageSortOrder(planKey: PremiumPackagePlanKey): number {
+  switch (planKey) {
+    case 'annual':
+      return 0;
+    case 'six_month':
+      return 1;
+    case 'monthly':
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+function toPremiumPackageSnapshot(
+  pkg: RevenueCatPackage
+): PremiumPackageSnapshot | null {
+  const product = resolvePackageStoreProduct(pkg);
+  const packageIdentifier =
+    normalizeIdentifier(pkg.identifier) ?? resolvePackageProductIdentifier(pkg);
+  const productIdentifier = resolvePackageProductIdentifier(pkg);
+
+  if (!packageIdentifier || !productIdentifier) {
+    return null;
+  }
+
+  return {
+    identifier: packageIdentifier,
+    productIdentifier,
+    planKey: resolvePremiumPackagePlanKey(pkg),
+    title: normalizeIdentifier(product?.title),
+    description: normalizeIdentifier(product?.description),
+    priceString: normalizeIdentifier(product?.priceString),
+    price:
+      typeof product?.price === 'number' && Number.isFinite(product.price)
+        ? product.price
+        : null,
+    currencyCode: normalizeIdentifier(product?.currencyCode),
+    isLiveProviderPackage: true,
+  };
+}
+
+function sortPremiumPackageSnapshots(
+  packages: PremiumPackageSnapshot[]
+): PremiumPackageSnapshot[] {
+  return [...packages].sort((left, right) => {
+    const planOrder =
+      getPremiumPackageSortOrder(left.planKey) -
+      getPremiumPackageSortOrder(right.planKey);
+
+    if (planOrder !== 0) {
+      return planOrder;
+    }
+
+    return left.identifier.localeCompare(right.identifier);
+  });
 }
 
 function matchesAnnualProductId(
   pkg: RevenueCatPackage,
   annualProductId: string
 ): boolean {
-  const normalizedAnnualProductId = normalizeIdentifier(annualProductId);
+  const annualProductIdCandidates = getAnnualProductIdentifierCandidates(annualProductId);
 
-  if (!normalizedAnnualProductId) {
+  if (!annualProductIdCandidates.length) {
     return false;
   }
 
   return getPackageIdentifiers(pkg).some(
-    (identifier) => identifier === normalizedAnnualProductId
+    (identifier) => annualProductIdCandidates.includes(identifier)
   );
 }
 
@@ -424,10 +568,304 @@ function resolvePackageProductIdentifier(pkg: RevenueCatPackage | null): string 
 
   return (
     normalizeIdentifier(pkg.productIdentifier) ??
+    normalizeIdentifier(pkg.product?.identifier) ??
+    normalizeIdentifier(pkg.product?.productIdentifier) ??
     normalizeIdentifier(pkg.storeProduct?.identifier) ??
     normalizeIdentifier(pkg.storeProduct?.productIdentifier) ??
     null
   );
+}
+
+function resolveStoreProductIdentifier(product: RevenueCatStoreProduct | null): string | null {
+  if (!product) {
+    return null;
+  }
+
+  return (
+    normalizeIdentifier(product.identifier) ??
+    normalizeIdentifier(product.productIdentifier) ??
+    normalizeIdentifier(product.id) ??
+    null
+  );
+}
+
+function resolveSubscriptionProductType(api: RevenueCatPurchasesApi): unknown {
+  return api.PRODUCT_CATEGORY?.SUBSCRIPTION ?? api.PURCHASE_TYPE?.SUBS;
+}
+
+async function fetchDirectAnnualProduct(
+  api: RevenueCatPurchasesApi,
+  annualProductId: string
+): Promise<RevenueCatStoreProduct | null> {
+  const productIdentifiers = getAnnualProductIdentifierCandidates(annualProductId);
+
+  if (!api.getProducts || !productIdentifiers.length) {
+    return null;
+  }
+
+  const products = await api.getProducts(
+    productIdentifiers,
+    resolveSubscriptionProductType(api)
+  );
+
+  return (
+    products.find((product) => {
+      const productIdentifier = resolveStoreProductIdentifier(product);
+      return Boolean(productIdentifier && productIdentifiers.includes(productIdentifier));
+    }) ??
+    products[0] ??
+    null
+  );
+}
+
+async function purchaseDirectAnnualProduct(
+  api: RevenueCatPurchasesApi,
+  annualProductId: string
+): Promise<PurchaseProviderPurchaseResult | null> {
+  const productIdentifiers = getAnnualProductIdentifierCandidates(annualProductId);
+
+  if (api.purchaseStoreProduct) {
+    const product = await fetchDirectAnnualProduct(api, annualProductId);
+
+    if (product) {
+      const purchaseResult = await api.purchaseStoreProduct(product);
+
+      if (purchaseResult?.userCancelled) {
+        return {
+          status: 'cancelled',
+          providerName: 'revenuecat',
+          message: 'Satın alma işlemi kullanıcı tarafından iptal edildi.',
+          activatedAt: null,
+          expiresAt: null,
+          lastValidatedAt: null,
+          transactionId: null,
+          customerId: null,
+        };
+      }
+
+      return buildPurchaseSuccessResult(purchaseResult?.customerInfo);
+    }
+  }
+
+  if (api.purchaseProduct && productIdentifiers[0]) {
+    const purchaseResult = await api.purchaseProduct(
+      productIdentifiers[0],
+      null,
+      api.PURCHASE_TYPE?.SUBS
+    );
+
+    if (purchaseResult?.userCancelled) {
+      return {
+        status: 'cancelled',
+        providerName: 'revenuecat',
+        message: 'Satın alma işlemi kullanıcı tarafından iptal edildi.',
+        activatedAt: null,
+        expiresAt: null,
+        lastValidatedAt: null,
+        transactionId: null,
+        customerId: null,
+      };
+    }
+
+    return buildPurchaseSuccessResult(purchaseResult?.customerInfo);
+  }
+
+  return null;
+}
+
+function matchesPackageTarget(
+  pkg: RevenueCatPackage,
+  target: {
+    packageIdentifier?: string | null;
+    productIdentifier?: string | null;
+  }
+): boolean {
+  const targetIdentifiers = [
+    ...getAnnualProductIdentifierCandidates(target.packageIdentifier ?? ''),
+    ...getAnnualProductIdentifierCandidates(target.productIdentifier ?? ''),
+  ];
+
+  if (!targetIdentifiers.length) {
+    return false;
+  }
+
+  return getPackageIdentifiers(pkg).some((identifier) =>
+    targetIdentifiers.includes(identifier)
+  );
+}
+
+function selectPackageByTarget(
+  offering: RevenueCatOffering | null,
+  target: {
+    packageIdentifier?: string | null;
+    productIdentifier?: string | null;
+  }
+): RevenueCatPackage | null {
+  const candidates = listUniquePackages(offering);
+
+  return candidates.find((pkg) => matchesPackageTarget(pkg, target)) ?? null;
+}
+
+export async function fetchPurchaseProviderPackages(params: {
+  authUid: string | null;
+}): Promise<PremiumPackageSnapshot[]> {
+  const configured = await ensureConfigured(params.authUid);
+
+  if (!configured) {
+    return [];
+  }
+
+  const { api } = getRevenueCatApi();
+
+  if (!api?.getOfferings) {
+    return [];
+  }
+
+  const offerings = await api.getOfferings();
+  const offeringSelection = selectOffering(offerings);
+  const snapshots = listUniquePackages(offeringSelection.offering)
+    .map((pkg) => toPremiumPackageSnapshot(pkg))
+    .filter((value): value is PremiumPackageSnapshot => Boolean(value));
+
+  return sortPremiumPackageSnapshots(snapshots);
+}
+
+export async function purchaseProviderPackage(params: {
+  packageIdentifier: string;
+  productIdentifier?: string | null;
+  authUid: string | null;
+}): Promise<PurchaseProviderPurchaseResult> {
+  if (!REVENUECAT_RUNTIME.supportsNativePurchases) {
+    return {
+      status: 'not_supported',
+      providerName: 'revenuecat',
+      message: 'Expo Go yerine native dev build veya release build kullan.',
+      activatedAt: null,
+      expiresAt: null,
+      lastValidatedAt: null,
+      transactionId: null,
+      customerId: null,
+    };
+  }
+
+  if (!REVENUECAT_RUNTIME.isReady) {
+    return {
+      status: 'not_supported',
+      providerName: 'revenuecat',
+      message: `RevenueCat runtime hazır değil. Eksik alanlar: ${REVENUECAT_RUNTIME.missingKeys.join(', ') || 'bilinmiyor'}`,
+      activatedAt: null,
+      expiresAt: null,
+      lastValidatedAt: null,
+      transactionId: null,
+      customerId: null,
+    };
+  }
+
+  const configured = await ensureConfigured(params.authUid);
+
+  if (!configured) {
+    return {
+      status: 'not_supported',
+      providerName: 'revenuecat',
+      message: 'RevenueCat SDK kurulu değil veya provider identity senkronu hazır değil.',
+      activatedAt: null,
+      expiresAt: null,
+      lastValidatedAt: null,
+      transactionId: null,
+      customerId: null,
+    };
+  }
+
+  const { api } = getRevenueCatApi();
+
+  if (!api?.getOfferings || !api.purchasePackage) {
+    return {
+      status: 'not_supported',
+      providerName: 'revenuecat',
+      message: 'RevenueCat purchase API hazır değil.',
+      activatedAt: null,
+      expiresAt: null,
+      lastValidatedAt: null,
+      transactionId: null,
+      customerId: null,
+    };
+  }
+
+  try {
+    let offerings: RevenueCatOfferings | null = null;
+
+    try {
+      offerings = await api.getOfferings();
+    } catch (offeringsError) {
+      const directPurchaseResult = await purchaseDirectAnnualProduct(
+        api,
+        params.productIdentifier ?? params.packageIdentifier
+      );
+
+      if (directPurchaseResult) {
+        return directPurchaseResult;
+      }
+
+      throw offeringsError;
+    }
+
+    const offeringSelection = selectOffering(offerings);
+    const selectedPackage = selectPackageByTarget(offeringSelection.offering, params);
+
+    if (!selectedPackage) {
+      const directPurchaseResult = await purchaseDirectAnnualProduct(
+        api,
+        params.productIdentifier ?? params.packageIdentifier
+      );
+
+      if (directPurchaseResult) {
+        return directPurchaseResult;
+      }
+
+      return {
+        status: 'error',
+        providerName: 'revenuecat',
+        message:
+          'RevenueCat paket çözümlenemedi. Offering içindeki package identifier ve Google Play product eşleşmesini kontrol et.',
+        activatedAt: null,
+        expiresAt: null,
+        lastValidatedAt: null,
+        transactionId: null,
+        customerId: null,
+      };
+    }
+
+    const purchaseResult = await api.purchasePackage(selectedPackage);
+
+    if (purchaseResult?.userCancelled) {
+      return {
+        status: 'cancelled',
+        providerName: 'revenuecat',
+        message: 'Satın alma işlemi kullanıcı tarafından iptal edildi.',
+        activatedAt: null,
+        expiresAt: null,
+        lastValidatedAt: null,
+        transactionId: null,
+        customerId: null,
+      };
+    }
+
+    return buildPurchaseSuccessResult(purchaseResult?.customerInfo);
+  } catch (error) {
+    return {
+      status: 'error',
+      providerName: 'revenuecat',
+      message: formatRevenueCatUserMessage(
+        error,
+        'RevenueCat satın alma akışı hata verdi.'
+      ),
+      activatedAt: null,
+      expiresAt: null,
+      lastValidatedAt: null,
+      transactionId: null,
+      customerId: null,
+    };
+  }
 }
 
 async function runOfferingsSmokeCheck(
@@ -457,9 +895,10 @@ async function runOfferingsSmokeCheck(
       : 0;
     const packageSelection = selectPackage(selection.offering, annualProductId);
     const resolvedProductIdentifier = resolvePackageProductIdentifier(packageSelection.pkg);
-    const matchedAnnualProductId =
-      Boolean(normalizeIdentifier(annualProductId)) &&
-      resolvedProductIdentifier === normalizeIdentifier(annualProductId);
+    const annualProductIdCandidates = getAnnualProductIdentifierCandidates(annualProductId);
+    const matchedAnnualProductId = resolvedProductIdentifier
+      ? annualProductIdCandidates.includes(resolvedProductIdentifier)
+      : false;
 
     const summary =
       selection.offering && packageSelection.pkg
@@ -714,7 +1153,23 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
       }
 
       try {
-        const offerings = await api.getOfferings();
+        let offerings: RevenueCatOfferings | null = null;
+
+        try {
+          offerings = await api.getOfferings();
+        } catch (offeringsError) {
+          const directPurchaseResult = await purchaseDirectAnnualProduct(
+            api,
+            params.annualProductId
+          );
+
+          if (directPurchaseResult) {
+            return directPurchaseResult;
+          }
+
+          throw offeringsError;
+        }
+
         const offeringSelection = selectOffering(offerings);
         const packageSelection = selectPackage(
           offeringSelection.offering,
@@ -723,11 +1178,20 @@ function createRevenueCatAdapter(): PurchaseProviderAdapter {
         const selectedPackage = packageSelection.pkg;
 
         if (!selectedPackage) {
+          const directPurchaseResult = await purchaseDirectAnnualProduct(
+            api,
+            params.annualProductId
+          );
+
+          if (directPurchaseResult) {
+            return directPurchaseResult;
+          }
+
           return {
             status: 'error',
             providerName: 'revenuecat',
             message:
-              'RevenueCat offering/package çözümlenemedi. Dashboard tarafında annual package ve product mapping kontrol edilmeli.',
+              'RevenueCat offering/package çözümlenemedi. RevenueCat dashboard içinde offering, package ve Google Play subscription mapping kontrol edilmeli.',
             activatedAt: null,
             expiresAt: null,
             lastValidatedAt: null,

@@ -234,23 +234,37 @@ export const useSettingsProfileEditor = () => {
         user,
       });
 
-      await authAnalyticsService.trackProfileSaveSucceeded({
-        surface: 'settings',
-        completionScore: completion.score,
-        missingFields: completion.missingFields,
-        changedFields,
-      });
+      try {
+        await authAnalyticsService.trackProfileSaveSucceeded({
+          surface: 'settings',
+          completionScore: completion.score,
+          missingFields: completion.missingFields,
+          changedFields,
+        });
+      } catch (analyticsError) {
+        console.warn(
+          '[useSettingsProfileEditor] success analytics failed:',
+          analyticsError
+        );
+      }
 
       setIsEditing(false);
       return true;
     } catch (error) {
       console.error('[useSettingsProfileEditor] save failed:', error);
 
-      await authAnalyticsService.trackProfileSaveFailed({
-        surface: 'settings',
-        changedFields,
-        error,
-      });
+      try {
+        await authAnalyticsService.trackProfileSaveFailed({
+          surface: 'settings',
+          changedFields,
+          error,
+        });
+      } catch (analyticsError) {
+        console.warn(
+          '[useSettingsProfileEditor] failure analytics failed:',
+          analyticsError
+        );
+      }
 
       setSaveError(toErrorMessage(error));
       return false;

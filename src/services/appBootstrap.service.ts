@@ -18,6 +18,7 @@ import {
   flushRemoteProductCacheWriteQueue,
   initializeRemoteProductCacheWriteQueue,
 } from './productRemoteWriteQueue.service';
+import { prewarmPriceCompareRootCategories } from './priceCompareWarmup.service';
 
 export type AppBootstrapSnapshot = {
   fetchedAt: string;
@@ -93,6 +94,9 @@ export const ensureAppBootstrap = async (): Promise<AppBootstrapSnapshot> => {
       initializeMissingProductDraftSync();
       const admobInitialized = await initializeAdMob();
       await resolveMarketGelsinRuntimeConfig({
+        allowStale: true,
+      });
+      void prewarmPriceCompareRootCategories({
         allowStale: true,
       });
 

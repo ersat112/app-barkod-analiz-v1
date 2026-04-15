@@ -80,6 +80,20 @@ export type PurchaseAnnualPlanResult = {
   identityMismatchWarning: string | null;
 };
 
+export type PremiumPackagePlanKey = 'monthly' | 'six_month' | 'annual' | 'unknown';
+
+export type PremiumPackageSnapshot = {
+  identifier: string;
+  productIdentifier: string;
+  planKey: PremiumPackagePlanKey;
+  title: string | null;
+  description: string | null;
+  priceString: string | null;
+  price: number | null;
+  currencyCode: string | null;
+  isLiveProviderPackage: boolean;
+};
+
 export type RestorePurchasesStatus =
   | 'restored'
   | 'not_supported'

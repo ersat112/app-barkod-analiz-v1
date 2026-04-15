@@ -12,6 +12,10 @@ import type {
   MarketBasketMarketTotal,
   MarketBasketMissingItem,
   MarketBatchScanEventResponse,
+  MarketBulletin,
+  MarketBulletinDetailResponse,
+  MarketBulletinItem,
+  MarketBulletinListResponse,
   MarketCategoryNode,
   MarketCategoryProductsResponse,
   MarketCategoryTreeResponse,
@@ -36,6 +40,8 @@ import {
   buildMarketGelsinAlternativesEndpoint,
   buildMarketGelsinBasketCompareEndpoint,
   buildMarketGelsinBatchScanEventEndpoint,
+  buildMarketGelsinBulletinEndpoint,
+  buildMarketGelsinBulletinsEndpoint,
   buildMarketGelsinCategoryTreeEndpoint,
   buildMarketGelsinHistoryEndpoint,
   buildMarketGelsinIntegrationsStatusEndpoint,
@@ -66,6 +72,8 @@ type MarketPricingRuntimeContext = {
     searchProducts: string;
     listCategories: string;
     listCategoryProducts: string;
+    listBulletins: string;
+    getBulletin: string;
     recordScan: string;
   };
 };
@@ -89,8 +97,18 @@ const DEFAULT_RPC_NAMES = Object.freeze({
   searchProducts: 'mg_rpc_search_products',
   listCategories: 'mg_rpc_list_categories',
   listCategoryProducts: 'mg_rpc_list_category_products',
+  listBulletins: 'mg_rpc_list_bulletins',
+  getBulletin: 'mg_rpc_get_bulletin',
   recordScan: 'mg_rpc_record_barcode_scan',
 });
+const DEFAULT_BULLETIN_MARKET_KEYS = Object.freeze([
+  'bim_market',
+  'cepte_sok',
+  'migros_sanal_market',
+  'tarim_kredi_koop_market',
+  'bizim_toptan_online',
+  'carrefoursa_online_market',
+]);
 
 const toObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -141,6 +159,8 @@ const getRpcName = (
     | 'EXPO_PUBLIC_MARKET_GELSIN_RPC_SEARCH_PRODUCTS'
     | 'EXPO_PUBLIC_MARKET_GELSIN_RPC_LIST_CATEGORIES'
     | 'EXPO_PUBLIC_MARKET_GELSIN_RPC_LIST_CATEGORY_PRODUCTS'
+    | 'EXPO_PUBLIC_MARKET_GELSIN_RPC_LIST_BULLETINS'
+    | 'EXPO_PUBLIC_MARKET_GELSIN_RPC_GET_BULLETIN'
     | 'EXPO_PUBLIC_MARKET_GELSIN_RPC_RECORD_SCAN',
   fallback: string
 ): string => getEnvString(envKey, fallback).trim() || fallback;
@@ -174,6 +194,14 @@ const getRpcConfig = () => ({
   listCategoryProducts: getRpcName(
     'EXPO_PUBLIC_MARKET_GELSIN_RPC_LIST_CATEGORY_PRODUCTS',
     DEFAULT_RPC_NAMES.listCategoryProducts
+  ),
+  listBulletins: getRpcName(
+    'EXPO_PUBLIC_MARKET_GELSIN_RPC_LIST_BULLETINS',
+    DEFAULT_RPC_NAMES.listBulletins
+  ),
+  getBulletin: getRpcName(
+    'EXPO_PUBLIC_MARKET_GELSIN_RPC_GET_BULLETIN',
+    DEFAULT_RPC_NAMES.getBulletin
   ),
   recordScan: getRpcName(
     'EXPO_PUBLIC_MARKET_GELSIN_RPC_RECORD_SCAN',
@@ -959,6 +987,94 @@ const parseCategoryNode = (value: unknown): MarketCategoryNode | null => {
   };
 };
 
+const parseMarketBulletin = (value: unknown): MarketBulletin | null => {
+  const payload = toObject(value);
+  const bulletinId = toNumber(payload.bulletin_id ?? payload.bulletinId ?? payload.id);
+
+  if (bulletinId == null) {
+    return null;
+  }
+
+  const marketKey = toText(payload.market_key ?? payload.marketKey, 'unknown_market');
+  const marketName =
+    toText(payload.market_name ?? payload.marketName, '') ||
+    marketKey
+      .split('_')
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toLocaleUpperCase('tr') + part.slice(1))
+      .join(' ');
+  const title =
+    toText(payload.title ?? payload.name ?? payload.bulletin_title ?? payload.bulletinTitle, '') ||
+    marketName ||
+    'Aktüel katalog';
+
+  return {
+    bulletinId,
+    marketKey,
+    marketName,
+    cityCode: toText(payload.city_code ?? payload.cityCode, '') || null,
+    citySlug: toText(payload.city_slug ?? payload.citySlug, '') || null,
+    cityName: toText(payload.city_name ?? payload.cityName, '') || null,
+    bulletinKey: toText(payload.bulletin_key ?? payload.bulletinKey, '') || null,
+    title,
+    sourceUrl: toText(payload.source_url ?? payload.sourceUrl, '') || null,
+    imageUrl: toText(payload.image_url ?? payload.imageUrl, '') || null,
+    imageFormat: toText(payload.image_format ?? payload.imageFormat, '') || null,
+    publishedAt: toText(payload.published_at ?? payload.publishedAt, '') || null,
+    startsAt: toText(payload.starts_at ?? payload.startsAt, '') || null,
+    endsAt: toText(payload.ends_at ?? payload.endsAt, '') || null,
+    itemCount: Math.max(0, toNumber(payload.item_count ?? payload.itemCount) ?? 0),
+    runId: toNumber(payload.run_id ?? payload.runId),
+  };
+};
+
+const parseMarketBulletinItem = (value: unknown): MarketBulletinItem | null => {
+  const payload = toObject(value);
+  const displayName = toText(
+    payload.display_name ??
+      payload.displayName ??
+      payload.product_name ??
+      payload.productName ??
+      payload.name ??
+      payload.title,
+    ''
+  );
+
+  if (!displayName) {
+    return null;
+  }
+
+  return {
+    sourceProductId:
+      toText(
+        payload.source_product_id ?? payload.sourceProductId ?? payload.product_id ?? payload.productId,
+        ''
+      ) || null,
+    barcode: toText(payload.barcode ?? payload.code, '') || null,
+    displayName,
+    listedPrice: toNumber(payload.listed_price ?? payload.listedPrice),
+    promoPrice: toNumber(payload.promo_price ?? payload.promoPrice),
+    activePrice: toNumber(payload.active_price ?? payload.activePrice ?? payload.price),
+    availability: toText(payload.availability ?? payload.stock_status ?? payload.stockStatus, '') || null,
+    unitLabel: toText(payload.unit_label ?? payload.unitLabel, '') || null,
+    imageUrl: toText(payload.image_url ?? payload.imageUrl, '') || null,
+    sourceUrl: toText(payload.source_url ?? payload.sourceUrl, '') || null,
+    observedAt: toText(payload.observed_at ?? payload.observedAt ?? payload.captured_at, '') || null,
+    position: toNumber(payload.position ?? payload.sort_order ?? payload.sortOrder),
+  };
+};
+
+const getBulletinSortTime = (bulletin: MarketBulletin): number => {
+  const date = new Date(
+    bulletin.startsAt ||
+      bulletin.publishedAt ||
+      bulletin.endsAt ||
+      ''
+  );
+
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+};
+
 const buildLegacyProductGroupKey = (
   offer: ReturnType<typeof parseLegacyOffer>,
   fallbackKey: string
@@ -1303,6 +1419,158 @@ export async function fetchMarketCategoryProducts(params: {
     partial: toBoolean(payload.partial, false),
     warnings: toStringArray(payload.warnings),
     results,
+  };
+}
+
+export async function fetchMarketBulletins(params?: {
+  marketKey?: string | null;
+  cityCode?: string | null;
+  citySlug?: string | null;
+  limit?: number;
+  cursor?: string | null;
+}): Promise<MarketBulletinListResponse> {
+  const runtime = await ensureRuntimeReady();
+  const marketKey = params?.marketKey?.trim() || null;
+
+  if (runtime.transport !== 'supabase_rpc' && !marketKey) {
+    const limit = params?.limit ?? 20;
+    const perMarketLimit = Math.max(
+      3,
+      Math.ceil(limit / DEFAULT_BULLETIN_MARKET_KEYS.length)
+    );
+    const settledResponses = await Promise.allSettled(
+      DEFAULT_BULLETIN_MARKET_KEYS.map((defaultMarketKey) =>
+        runtime.client.get(
+          buildMarketGelsinBulletinsEndpoint(defaultMarketKey, {
+            cityCode: params?.cityCode ?? undefined,
+            citySlug: params?.citySlug ?? undefined,
+            limit: perMarketLimit,
+          })
+        )
+      )
+    );
+    const bulletins = settledResponses
+      .flatMap((settledResponse) => {
+        if (settledResponse.status !== 'fulfilled') {
+          return [];
+        }
+
+        const payload = toObject(settledResponse.value.data);
+        const rawBulletins = Array.isArray(settledResponse.value.data)
+          ? settledResponse.value.data
+          : Array.isArray(payload.bulletins)
+          ? payload.bulletins
+          : Array.isArray(payload.results)
+            ? payload.results
+            : [];
+
+        return rawBulletins
+          .map(parseMarketBulletin)
+          .filter((item): item is MarketBulletin => Boolean(item));
+      })
+      .sort((left, right) => getBulletinSortTime(right) - getBulletinSortTime(left))
+      .slice(0, limit);
+
+    return {
+      fetchedAt: new Date().toISOString(),
+      requestId: null,
+      marketKey: null,
+      cityCode: params?.cityCode ?? null,
+      limit,
+      nextCursor: null,
+      partial: settledResponses.some((item) => item.status === 'rejected'),
+      warnings: settledResponses.some((item) => item.status === 'rejected')
+        ? ['bulletin_market_partial_failure']
+        : [],
+      bulletins,
+    };
+  }
+
+  const response =
+    runtime.transport === 'supabase_rpc'
+      ? await runtime.client.post(`/${runtime.rpc.listBulletins}`, {
+          p_market_key: marketKey,
+          p_city_code: params?.cityCode ?? null,
+          p_limit: params?.limit ?? 20,
+          p_cursor: params?.cursor ?? null,
+        })
+      : await runtime.client.get(
+          buildMarketGelsinBulletinsEndpoint(marketKey || 'all', {
+            cityCode: params?.cityCode ?? undefined,
+            citySlug: params?.citySlug ?? undefined,
+            limit: params?.limit,
+            cursor: params?.cursor,
+          })
+        );
+  const payload = toObject(response.data);
+  const rawBulletins = Array.isArray(response.data)
+    ? response.data
+    : Array.isArray(payload.bulletins)
+    ? payload.bulletins
+    : Array.isArray(payload.results)
+      ? payload.results
+      : [];
+  const bulletins = rawBulletins
+    .map(parseMarketBulletin)
+    .filter((item): item is MarketBulletin => Boolean(item));
+
+  return {
+    fetchedAt: toText(payload.fetched_at ?? payload.fetchedAt, new Date().toISOString()),
+    requestId: toText(payload.request_id ?? payload.requestId, '') || null,
+    marketKey: toText(payload.market_key ?? payload.marketKey, marketKey || '') || marketKey,
+    cityCode: toText(payload.city_code ?? payload.cityCode, params?.cityCode || '') || null,
+    limit: toNumber(payload.limit) ?? params?.limit ?? 20,
+    nextCursor: toText(payload.next_cursor ?? payload.nextCursor, '') || null,
+    partial: toBoolean(payload.partial, false),
+    warnings: toStringArray(payload.warnings),
+    bulletins,
+  };
+}
+
+export async function fetchMarketBulletin(params: {
+  bulletinId: number;
+  limit?: number;
+  cursor?: number | null;
+}): Promise<MarketBulletinDetailResponse> {
+  const runtime = await ensureRuntimeReady();
+  const response =
+    runtime.transport === 'supabase_rpc'
+      ? await runtime.client.post(`/${runtime.rpc.getBulletin}`, {
+          p_bulletin_id: params.bulletinId,
+          p_limit: params.limit ?? 500,
+          p_cursor: params.cursor ?? null,
+        })
+      : await runtime.client.get(
+          buildMarketGelsinBulletinEndpoint(params.bulletinId, {
+            limit: params.limit,
+            cursor: params.cursor,
+          })
+        );
+  const payload = toObject(response.data);
+  const rawItems = Array.isArray(response.data)
+    ? response.data
+    : Array.isArray(payload.items)
+    ? payload.items
+    : Array.isArray(payload.results)
+      ? payload.results
+      : [];
+  const items = rawItems
+    .map(parseMarketBulletinItem)
+    .filter((item): item is MarketBulletinItem => Boolean(item));
+  const bulletin =
+    parseMarketBulletin(payload.bulletin) ??
+    parseMarketBulletin(payload.header) ??
+    parseMarketBulletin(payload);
+
+  return {
+    fetchedAt: toText(payload.fetched_at ?? payload.fetchedAt, new Date().toISOString()),
+    requestId: toText(payload.request_id ?? payload.requestId, '') || null,
+    bulletin,
+    limit: toNumber(payload.limit) ?? params.limit ?? 500,
+    nextCursor: toNumber(payload.next_cursor ?? payload.nextCursor),
+    partial: toBoolean(payload.partial, false),
+    warnings: toStringArray(payload.warnings),
+    items,
   };
 }
 

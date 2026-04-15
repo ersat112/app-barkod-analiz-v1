@@ -92,6 +92,13 @@ export const HomeScreen: React.FC = () => {
     contentBottomMin: 90,
     horizontalPadding: 24,
   });
+  const homeListCardSurface = useMemo(
+    () => ({
+      backgroundColor: isDark ? withAlpha(colors.card, 'F7') : '#FFFFFF',
+      borderColor: withAlpha(colors.border, isDark ? '70' : '64'),
+    }),
+    [colors.border, colors.card, isDark]
+  );
 
   const tt = useCallback(
     (key: string, fallback: string) => {
@@ -323,10 +330,7 @@ export const HomeScreen: React.FC = () => {
             <View
               style={[
                 styles.listCard,
-                {
-                  backgroundColor: colors.card,
-                  borderColor: withAlpha(colors.border, 'D4'),
-                },
+                homeListCardSurface,
               ]}
             >
               {qaDetailShortcuts.map((item, index) => (
@@ -335,8 +339,8 @@ export const HomeScreen: React.FC = () => {
                   style={[
                     styles.listRow,
                     index < qaDetailShortcuts.length - 1 && {
-                      borderBottomWidth: 1,
-                      borderBottomColor: withAlpha(colors.border, '88'),
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: withAlpha(colors.border, '80'),
                     },
                   ]}
                   activeOpacity={0.86}
@@ -389,10 +393,7 @@ export const HomeScreen: React.FC = () => {
           <View
             style={[
               styles.listCard,
-              {
-                backgroundColor: colors.card,
-                borderColor: withAlpha(colors.border, 'D4'),
-              },
+              homeListCardSurface,
             ]}
           >
             {familyAllergenDefinitions.map((item, index) => (
@@ -401,8 +402,8 @@ export const HomeScreen: React.FC = () => {
                 style={[
                   styles.listRow,
                   index < familyAllergenDefinitions.length - 1 && {
-                    borderBottomWidth: 1,
-                    borderBottomColor: withAlpha(colors.border, '88'),
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderBottomColor: withAlpha(colors.border, '80'),
                   },
                 ]}
                 activeOpacity={0.86}
@@ -453,10 +454,7 @@ export const HomeScreen: React.FC = () => {
           <View
             style={[
               styles.listCard,
-              {
-                backgroundColor: colors.card,
-                borderColor: withAlpha(colors.border, 'D4'),
-              },
+              homeListCardSurface,
             ]}
           >
             {homeAdditives.map((item, index) => (
@@ -465,8 +463,8 @@ export const HomeScreen: React.FC = () => {
                 style={[
                   styles.listRow,
                   index < homeAdditives.length - 1 && {
-                    borderBottomWidth: 1,
-                    borderBottomColor: withAlpha(colors.border, '88'),
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderBottomColor: withAlpha(colors.border, '80'),
                   },
                 ]}
                 activeOpacity={0.86}
@@ -529,10 +527,7 @@ export const HomeScreen: React.FC = () => {
           <View
             style={[
               styles.listCard,
-              {
-                backgroundColor: colors.card,
-                borderColor: withAlpha(colors.border, 'D4'),
-              },
+              homeListCardSurface,
             ]}
           >
             {recentItems.length ? (
@@ -546,8 +541,8 @@ export const HomeScreen: React.FC = () => {
                     style={[
                       styles.scanRow,
                       index < recentItems.length - 1 && {
-                        borderBottomWidth: 1,
-                        borderBottomColor: withAlpha(colors.border, '88'),
+                        borderBottomWidth: StyleSheet.hairlineWidth,
+                        borderBottomColor: withAlpha(colors.border, '80'),
                       },
                     ]}
                     activeOpacity={0.88}
@@ -751,26 +746,27 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   sectionBlock: {
-    marginTop: 24,
+    marginTop: 16,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
-    marginBottom: 14,
+    marginBottom: 8,
   },
   sectionHeaderTextWrap: {
     flex: 1,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '800',
   },
   sectionSubtitleCompact: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 17,
+    marginTop: 2,
+    fontSize: 11,
+    lineHeight: 15,
   },
   sectionAction: {
     flexDirection: 'row',
@@ -786,21 +782,21 @@ const styles = StyleSheet.create({
   },
   listCard: {
     borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 20,
     overflow: 'hidden',
   },
   listRow: {
-    minHeight: 64,
-    paddingHorizontal: 16,
-    paddingVertical: 11,
+    minHeight: 46,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   listRowAccent: {
-    width: 32,
-    height: 32,
-    borderRadius: 9,
+    width: 28,
+    height: 28,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -809,59 +805,59 @@ const styles = StyleSheet.create({
   },
   listRowTitle: {
     fontSize: 14,
-    fontWeight: '800',
-    lineHeight: 19,
+    fontWeight: '700',
+    lineHeight: 17,
   },
   listRowSubtitle: {
-    marginTop: 3,
-    fontSize: 12,
-    lineHeight: 17,
+    marginTop: 2,
+    fontSize: 11,
+    lineHeight: 15,
   },
   inlineBadge: {
     borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   inlineBadgeText: {
     fontSize: 11,
     fontWeight: '800',
   },
   scanRow: {
-    minHeight: 68,
-    paddingHorizontal: 16,
-    paddingVertical: 11,
+    minHeight: 48,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
   scanRowTextWrap: {
     flex: 1,
   },
   scanRowName: {
     fontSize: 14,
-    fontWeight: '800',
-    lineHeight: 20,
-  },
-  scanRowMeta: {
-    marginTop: 4,
-    fontSize: 12,
+    fontWeight: '700',
     lineHeight: 17,
   },
+  scanRowMeta: {
+    marginTop: 2,
+    fontSize: 11,
+    lineHeight: 15,
+  },
   scoreBubble: {
-    minWidth: 52,
-    height: 52,
-    borderRadius: 16,
+    minWidth: 42,
+    height: 42,
+    borderRadius: 14,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 8,
   },
   scoreValue: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '900',
   },
   emptyHistoryWrap: {
-    padding: 20,
+    padding: 16,
   },
   emptyHistoryTitle: {
     fontSize: 16,

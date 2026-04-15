@@ -24,6 +24,11 @@
       "android": {
         "track": "internal"
       }
+    },
+    "productionStore": {
+      "android": {
+        "track": "production"
+      }
     }
   }
 }

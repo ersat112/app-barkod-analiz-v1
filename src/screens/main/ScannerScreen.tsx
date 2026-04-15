@@ -144,6 +144,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const isFocused = useIsFocused();
+  const isPriceCompareCaptureMode = route.params?.returnTo === 'PriceCompare';
 
   const layout = useAppScreenLayout({
     topInsetExtra: 8,
@@ -303,7 +304,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     let cancelled = false;
 
     const loadWalkthroughState = async () => {
-      const shouldRunWalkthrough = initialMode === 'food';
+      const shouldRunWalkthrough = initialMode === 'food' && !isPriceCompareCaptureMode;
 
       if (!shouldRunWalkthrough) {
         if (!cancelled) {
@@ -349,7 +350,7 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [initialMode]);
+  }, [initialMode, isPriceCompareCaptureMode]);
 
   useEffect(() => {
     if (walkthroughState !== 'idle') {
@@ -438,6 +439,21 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
     navigation.navigate('Main');
   }, [navigation]);
+
+  const returnBarcodeToPriceCompare = useCallback(
+    (barcode: string) => {
+      navigation.navigate({
+        name: 'PriceCompare',
+        params: {
+          initialQuery: barcode,
+          initialQueryNonce: Date.now(),
+          initialQuerySource: 'scanner',
+        },
+        merge: true,
+      });
+    },
+    [navigation]
+  );
 
   const handleSelectMode = useCallback((nextMode: ScannerUiMode) => {
     if (isWalkthroughActive) {
@@ -798,6 +814,25 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
   const processBarcode = useCallback(
     async (validBarcodeData: string) => {
+      if (isPriceCompareCaptureMode) {
+        setScanned(true);
+        setActiveLookupBarcode(validBarcodeData);
+        Vibration.vibrate(18);
+        void playScanBeep();
+        resetTransientState();
+        returnBarcodeToPriceCompare(validBarcodeData);
+
+        if (scanResetTimeoutRef.current) {
+          clearTimeout(scanResetTimeoutRef.current);
+        }
+
+        scanResetTimeoutRef.current = setTimeout(() => {
+          setScanned(false);
+          setActiveLookupBarcode(null);
+        }, 700);
+        return;
+      }
+
       setScanned(true);
       setActiveLookupBarcode(validBarcodeData);
       let chargedFreeScan = false;
@@ -973,11 +1008,13 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     },
     [
       handleScanLimitReached,
+      isPriceCompareCaptureMode,
       markNotFound,
       maybeShowScanInterstitial,
       previewCacheByBarcode,
       pushLoadingPreview,
       resetTransientState,
+      returnBarcodeToPriceCompare,
       route?.name,
       scanMode,
       setAnalysis,
@@ -1281,6 +1318,19 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
     },
   ];
   const selectedModeMeta = modeOptions.find((item) => item.key === selectedMode) ?? modeOptions[0];
+  const scannerHeaderMeta = isPriceCompareCaptureMode
+    ? {
+        label: tt('price_compare_scanner_mode_label', 'Fiyat'),
+        frameTitle: tt(
+          'price_compare_scanner_frame_title',
+          'Barkodu fiyat aramasına aktar'
+        ),
+        frameSubtitle: tt(
+          'price_compare_scanner_frame_subtitle',
+          'Okuttuğun barkod Fiyat ekranındaki arama kutusuna otomatik yazılır.'
+        ),
+      }
+    : selectedModeMeta;
 
   useEffect(() => {
     if (!isFocused) {
@@ -1452,10 +1502,10 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
 
                 <View style={styles.topHeaderTextWrap}>
                   <Text style={styles.topHeaderEyebrow}>
-                    {selectedModeMeta.label}
+                    {scannerHeaderMeta.label}
                   </Text>
                   <Text style={styles.topHeaderTitle}>
-                    {selectedModeMeta.frameTitle}
+                    {scannerHeaderMeta.frameTitle}
                   </Text>
                 </View>
 
@@ -1524,53 +1574,55 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                 </View>
               </View>
 
-              <View style={styles.modeRailWrap}>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.modeSelectorRow}
-                >
-                  {modeOptions.map((mode) => {
-                    const selected = mode.key === selectedMode;
+              {!isPriceCompareCaptureMode ? (
+                <View style={styles.modeRailWrap}>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.modeSelectorRow}
+                  >
+                    {modeOptions.map((mode) => {
+                      const selected = mode.key === selectedMode;
 
-                    return (
-                      <TouchableOpacity
-                        key={mode.key}
-                        style={[
-                          styles.modeChip,
-                          {
-                            backgroundColor: selected
-                              ? `${colors.primary}22`
-                              : 'rgba(255,255,255,0.04)',
-                            borderColor: selected
-                              ? `${colors.primary}88`
-                              : 'rgba(255,255,255,0.10)',
-                          },
-                        ]}
-                        disabled={isWalkthroughActive}
-                        activeOpacity={0.88}
-                        onPress={() => handleSelectMode(mode.key)}
-                      >
-                        <Ionicons
-                          name={MODE_ICON_MAP[mode.key]}
-                          size={15}
-                          color={selected ? colors.primary : '#FFFFFF'}
-                        />
-                        <Text
+                      return (
+                        <TouchableOpacity
+                          key={mode.key}
                           style={[
-                            styles.modeChipText,
-                            { color: selected ? colors.primary : '#FFFFFF' },
+                            styles.modeChip,
+                            {
+                              backgroundColor: selected
+                                ? `${colors.primary}22`
+                                : 'rgba(255,255,255,0.04)',
+                              borderColor: selected
+                                ? `${colors.primary}88`
+                                : 'rgba(255,255,255,0.10)',
+                            },
                           ]}
+                          disabled={isWalkthroughActive}
+                          activeOpacity={0.88}
+                          onPress={() => handleSelectMode(mode.key)}
                         >
-                          {mode.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </View>
+                          <Ionicons
+                            name={MODE_ICON_MAP[mode.key]}
+                            size={15}
+                            color={selected ? colors.primary : '#FFFFFF'}
+                          />
+                          <Text
+                            style={[
+                              styles.modeChipText,
+                              { color: selected ? colors.primary : '#FFFFFF' },
+                            ]}
+                          >
+                            {mode.label}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                </View>
+              ) : null}
 
-              {freeScanSnapshot?.limitEnabled ? (
+              {!isPriceCompareCaptureMode && freeScanSnapshot?.limitEnabled ? (
                 <View style={styles.scanAllowanceCard}>
                   <View style={styles.scanAllowanceTextWrap}>
                     <Text style={styles.scanAllowanceEyebrow}>
@@ -1810,14 +1862,14 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               <View style={styles.frameGuideCard}>
                 <View style={styles.frameGuideIconWrap}>
                   <Ionicons
-                    name={MODE_ICON_MAP[selectedMode]}
+                    name={isPriceCompareCaptureMode ? 'barcode-outline' : MODE_ICON_MAP[selectedMode]}
                     size={16}
                     color={colors.primary}
                   />
                 </View>
                 <View style={styles.frameGuideTextWrap}>
-                  <Text style={styles.frameGuideTitle}>{selectedModeMeta.frameTitle}</Text>
-                  <Text style={styles.frameGuideSubtitle}>{selectedModeMeta.frameSubtitle}</Text>
+                  <Text style={styles.frameGuideTitle}>{scannerHeaderMeta.frameTitle}</Text>
+                  <Text style={styles.frameGuideSubtitle}>{scannerHeaderMeta.frameSubtitle}</Text>
                 </View>
               </View>
             )
@@ -2127,6 +2179,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
               <Text style={[styles.manualTitle, { color: colors.text }]}>
                 {manualEntryMode === 'text'
                   ? tt('manual_text_title', 'Analiz edilecek metni girin')
+                  : isPriceCompareCaptureMode
+                    ? tt(
+                        'price_compare_manual_barcode_title',
+                        'Barkodu fiyat aramasına aktar'
+                      )
                   : tt(
                       'manual_entry_title_with_mode',
                       `${selectedModeMeta.label} barkodunu girin`
@@ -2144,6 +2201,11 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                     'manual_text_help',
                     'Gıda için içindekiler ve besin değerleri tablosunu birlikte yapıştırın. Sadece içerik metni girilirse sonuç sınırlı olabilir.'
                   )
+                : isPriceCompareCaptureMode
+                  ? tt(
+                      'price_compare_manual_barcode_help',
+                      'Barkodu yaz veya okut; numara Fiyat ekranındaki arama kutusuna otomatik aktarılır.'
+                    )
                 : tt(
                     'manual_barcode_help_with_mode',
                     `Şu an ${selectedModeMeta.label} sekmesindesiniz. Gıda barkodu için Gıda, kozmetik barkodu için Kozmetik, ilaç barkodu için İlaç sekmesini seçin.`
@@ -2215,12 +2277,16 @@ const ScannerExperience: React.FC<ScannerExperienceProps> = ({
                 accessibilityLabel={
                   manualEntryMode === 'text'
                     ? tt('analyze', 'Analiz Et')
+                    : isPriceCompareCaptureMode
+                      ? tt('price_compare_manual_barcode_submit', 'Aktar')
                     : tt('search', 'Sorgula')
                 }
               >
                 <Text style={styles.submitBtnText}>
                   {manualEntryMode === 'text'
                     ? tt('analyze', 'Analiz Et')
+                    : isPriceCompareCaptureMode
+                      ? tt('price_compare_manual_barcode_submit', 'Aktar')
                     : tt('search', 'Sorgula')}
                 </Text>
               </TouchableOpacity>
@@ -2294,7 +2360,7 @@ const styles = StyleSheet.create({
   },
   topDarkArea: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.72)',
+    backgroundColor: 'rgba(0,0,0,0.64)',
     paddingHorizontal: 16,
   },
   topHeaderCard: {
@@ -2302,18 +2368,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 22,
-    backgroundColor: 'rgba(11,14,20,0.42)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 18,
+    backgroundColor: 'rgba(11,14,20,0.34)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
   },
   topBackButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.10)',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
@@ -2326,36 +2392,36 @@ const styles = StyleSheet.create({
   },
   topHeaderEyebrow: {
     color: 'rgba(255,255,255,0.68)',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '800',
     textTransform: 'uppercase',
     letterSpacing: 0.7,
   },
   topHeaderTitle: {
     color: '#FFFFFF',
-    fontSize: 14,
-    lineHeight: 18,
+    fontSize: 13,
+    lineHeight: 17,
     fontWeight: '900',
     marginTop: 2,
   },
   modeRailWrap: {
-    marginTop: 12,
-    borderRadius: 18,
-    backgroundColor: 'rgba(11,14,20,0.42)',
+    marginTop: 10,
+    borderRadius: 16,
+    backgroundColor: 'rgba(11,14,20,0.30)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
   modeSelectorRow: {
-    gap: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
+    gap: 7,
+    paddingHorizontal: 7,
+    paddingVertical: 7,
   },
   scanAllowanceCard: {
-    marginTop: 12,
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(11,14,20,0.72)',
+    marginTop: 10,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(11,14,20,0.58)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
     flexDirection: 'row',
@@ -2380,16 +2446,16 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   scanAllowanceBadge: {
-    minWidth: 40,
-    height: 40,
-    borderRadius: 20,
+    minWidth: 34,
+    height: 34,
+    borderRadius: 17,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
   },
   scanAllowanceBadgeText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '900',
   },
   scanAllowanceAction: {
@@ -2405,8 +2471,8 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   modeChip: {
-    minHeight: 36,
-    paddingHorizontal: 12,
+    minHeight: 32,
+    paddingHorizontal: 10,
     borderRadius: 999,
     borderWidth: 1,
     flexDirection: 'row',
@@ -2414,7 +2480,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   modeChipText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
   },
   topActionsGroup: {
@@ -2423,10 +2489,10 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   modeHintCard: {
-    marginTop: 12,
-    borderRadius: 18,
-    padding: 14,
-    backgroundColor: 'rgba(11,14,20,0.72)',
+    marginTop: 10,
+    borderRadius: 16,
+    padding: 12,
+    backgroundColor: 'rgba(11,14,20,0.58)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
   },
@@ -2507,10 +2573,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   topIconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.09)',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.07)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
@@ -2518,7 +2584,7 @@ const styles = StyleSheet.create({
   },
   sideDarkArea: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.72)',
+    backgroundColor: 'rgba(0,0,0,0.64)',
   },
   middleRow: {
     flexDirection: 'row',
@@ -2572,15 +2638,15 @@ const styles = StyleSheet.create({
   },
   bottomDarkArea: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.72)',
+    backgroundColor: 'rgba(0,0,0,0.64)',
     paddingHorizontal: 16,
-    paddingTop: 18,
+    paddingTop: 14,
   },
   frameGuideCard: {
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
-    backgroundColor: 'rgba(11,14,20,0.76)',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    backgroundColor: 'rgba(11,14,20,0.62)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.10)',
     flexDirection: 'row',
@@ -2690,20 +2756,20 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     borderWidth: 1,
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 18,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 14,
     zIndex: 4,
   },
   previewPrimaryCard: {
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.045)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
-    padding: 14,
+    padding: 12,
   },
   previewCardTopRow: {
     flexDirection: 'row',
@@ -2766,18 +2832,18 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   previewScoreBubble: {
-    width: 82,
-    height: 82,
-    borderRadius: 41,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 6,
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.18)',
   },
   previewScoreValue: {
     color: '#FFFFFF',
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '900',
     textAlign: 'center',
   },

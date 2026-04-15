@@ -4,14 +4,18 @@ import { entitlementService } from './entitlement.service';
 import { monetizationPolicyService } from './monetizationPolicy.service';
 import { appendMonetizationFlowLog } from './purchaseFlowLog.service';
 import {
+  fetchPurchaseProviderPackages,
   getLastPurchaseProviderConfigurationIssue,
   getPurchaseProviderAdapter,
+  purchaseProviderPackage,
 } from './purchaseProvider.service';
 import type {
   EntitlementSnapshot,
   MonetizationFlowAction,
   MonetizationFlowSource,
   PaywallEntrySource,
+  PremiumPackagePlanKey,
+  PremiumPackageSnapshot,
   PurchaseAnnualPlanResult,
   RestorePurchasesResult,
 } from '../types/monetization';
@@ -134,6 +138,222 @@ async function appendErrorFlowLog(input: {
 }
 
 export const purchaseService = {
+  async getPremiumPackages(): Promise<PremiumPackageSnapshot[]> {
+    const policy = await monetizationPolicyService.getResolvedPolicy({
+      allowStale: true,
+    });
+
+    if (!policy.purchaseProviderEnabled) {
+      return [];
+    }
+
+    try {
+      return await fetchPurchaseProviderPackages({
+        authUid: auth.currentUser?.uid ?? null,
+      });
+    } catch {
+      return [];
+    }
+  },
+
+  async purchasePremiumPackage(options: {
+    packageIdentifier: string;
+    productIdentifier?: string | null;
+    planKey?: PremiumPackagePlanKey;
+    source?: PaywallEntrySource;
+  }): Promise<PurchaseAnnualPlanResult> {
+    const [policy, currentSnapshot] = await Promise.all([
+      monetizationPolicyService.getResolvedPolicy({ allowStale: true }),
+      entitlementService.getSnapshot(),
+    ]);
+    const source = options.source ?? 'service';
+    const packageIdentifier = options.packageIdentifier.trim();
+    const productIdentifier = options.productIdentifier?.trim() || packageIdentifier;
+    const flowProductId = productIdentifier || packageIdentifier || policy.annualProductId;
+
+    if (!packageIdentifier) {
+      const result: PurchaseAnnualPlanResult = {
+        status: 'not_supported',
+        snapshot: currentSnapshot,
+        providerName: 'none',
+        message: 'Satın alınacak Premium paketi seçilemedi.',
+        transactionId: null,
+        customerId: null,
+        identityMismatchWarning: null,
+      };
+
+      await appendResultFlowLog({
+        action: 'purchase',
+        source,
+        annualProductId: flowProductId,
+        result,
+      });
+
+      return result;
+    }
+
+    if (!policy.purchaseProviderEnabled || !policy.annualPlanEnabled) {
+      const result: PurchaseAnnualPlanResult = {
+        status: 'not_supported',
+        snapshot: currentSnapshot,
+        providerName: 'none',
+        message: 'Satın alma sağlayıcısı bu build içinde aktif değil.',
+        transactionId: null,
+        customerId: null,
+        identityMismatchWarning: null,
+      };
+
+      await appendResultFlowLog({
+        action: 'purchase',
+        source,
+        annualProductId: flowProductId,
+        result,
+      });
+
+      return result;
+    }
+
+    const adapter = getPurchaseProviderAdapter();
+    const isConfigured = await adapter.isConfigured();
+
+    if (!isConfigured) {
+      const result: PurchaseAnnualPlanResult = {
+        status: 'not_supported',
+        snapshot: currentSnapshot,
+        providerName: adapter.name,
+        message: buildProviderUnavailableMessage(
+          'Satın alma adapter sözleşmesi hazır, fakat gerçek provider bu build içinde bağlı değil.'
+        ),
+        transactionId: null,
+        customerId: null,
+        identityMismatchWarning: null,
+      };
+
+      await appendResultFlowLog({
+        action: 'purchase',
+        source,
+        annualProductId: flowProductId,
+        result,
+      });
+
+      return result;
+    }
+
+    await appendStartedFlowLog({
+      action: 'purchase',
+      source,
+      annualProductId: flowProductId,
+      providerName: adapter.name,
+      snapshot: currentSnapshot,
+    });
+
+    await analyticsService.track(
+      'monetization_purchase_started',
+      {
+        packageIdentifier,
+        productIdentifier,
+        planKey: options.planKey ?? 'unknown',
+        providerName: adapter.name,
+        source,
+      },
+      { flush: false }
+    );
+
+    try {
+      const providerResult = await purchaseProviderPackage({
+        packageIdentifier,
+        productIdentifier,
+        authUid: auth.currentUser?.uid ?? null,
+      });
+      const identityMismatchWarning = resolveIdentityMismatchWarning({
+        authUid: auth.currentUser?.uid ?? null,
+        customerId: providerResult.customerId,
+        providerName: providerResult.providerName,
+      });
+
+      const nextSnapshot =
+        providerResult.status === 'purchased' ||
+        providerResult.status === 'already_active'
+          ? await entitlementService.applyProviderEntitlement({
+              source: 'provider_purchase',
+              activatedAt: providerResult.activatedAt,
+              expiresAt: providerResult.expiresAt,
+              lastValidatedAt: providerResult.lastValidatedAt,
+            })
+          : currentSnapshot;
+
+      await analyticsService.track(
+        'monetization_purchase_result',
+        {
+          packageIdentifier,
+          productIdentifier,
+          planKey: options.planKey ?? 'unknown',
+          providerName: providerResult.providerName,
+          status: providerResult.status,
+          transactionId: providerResult.transactionId,
+          customerId: providerResult.customerId,
+          identityMismatch: Boolean(identityMismatchWarning),
+        },
+        { flush: false }
+      );
+
+      const result: PurchaseAnnualPlanResult = {
+        status: providerResult.status,
+        snapshot: nextSnapshot,
+        providerName: providerResult.providerName,
+        message: providerResult.message,
+        transactionId: providerResult.transactionId,
+        customerId: providerResult.customerId,
+        identityMismatchWarning,
+      };
+
+      await appendResultFlowLog({
+        action: 'purchase',
+        source,
+        annualProductId: flowProductId,
+        result,
+      });
+
+      return result;
+    } catch (error) {
+      const message = toErrorMessage(error);
+
+      await analyticsService.track(
+        'monetization_purchase_result',
+        {
+          packageIdentifier,
+          productIdentifier,
+          planKey: options.planKey ?? 'unknown',
+          providerName: adapter.name,
+          status: 'error',
+          errorMessage: message,
+        },
+        { flush: false }
+      );
+
+      const result: PurchaseAnnualPlanResult = {
+        status: 'error',
+        snapshot: currentSnapshot,
+        providerName: adapter.name,
+        message,
+        transactionId: null,
+        customerId: null,
+        identityMismatchWarning: null,
+      };
+
+      await appendErrorFlowLog({
+        action: 'purchase',
+        source,
+        annualProductId: flowProductId,
+        providerName: adapter.name,
+        snapshot: currentSnapshot,
+        message,
+      });
+
+      return result;
+    }
+  },
+
   async purchaseAnnualPlan(options?: {
     source?: PaywallEntrySource;
   }): Promise<PurchaseAnnualPlanResult> {

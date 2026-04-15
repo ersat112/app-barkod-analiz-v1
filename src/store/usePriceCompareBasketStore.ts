@@ -18,6 +18,10 @@ type PriceCompareBasketState = {
     product: MarketSearchProduct,
     offersResponse: MarketProductOffersResponse
   ) => void;
+  updateEntryOffers: (
+    product: MarketSearchProduct,
+    offersResponse: MarketProductOffersResponse
+  ) => void;
   removeEntry: (productId: string) => void;
   clearEntries: () => void;
   increaseQuantity: (productId: string) => void;
@@ -70,6 +74,26 @@ export const usePriceCompareBasketStore = create<PriceCompareBasketState>((set) 
                 ...item,
                 offersResponse,
                 quantity: item.quantity + 1,
+              }
+            : item
+        ),
+      };
+    }),
+
+  updateEntryOffers: (product, offersResponse) =>
+    set((state) => {
+      const identity = getProductIdentity(product);
+
+      return {
+        entries: state.entries.map((item) =>
+          getProductIdentity(item.product) === identity
+            ? {
+                ...item,
+                product: {
+                  ...item.product,
+                  ...product,
+                },
+                offersResponse,
               }
             : item
         ),

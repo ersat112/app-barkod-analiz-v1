@@ -186,6 +186,63 @@ export type MarketCategoryProductsResponse = {
   results: MarketSearchProduct[];
 };
 
+export type MarketBulletin = {
+  bulletinId: number;
+  marketKey: string;
+  marketName: string;
+  cityCode?: string | null;
+  citySlug?: string | null;
+  cityName?: string | null;
+  bulletinKey?: string | null;
+  title: string;
+  sourceUrl?: string | null;
+  imageUrl?: string | null;
+  imageFormat?: string | null;
+  publishedAt?: string | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  itemCount: number;
+  runId?: number | null;
+};
+
+export type MarketBulletinItem = {
+  sourceProductId?: string | null;
+  barcode?: string | null;
+  displayName: string;
+  listedPrice?: number | null;
+  promoPrice?: number | null;
+  activePrice?: number | null;
+  availability?: string | null;
+  unitLabel?: string | null;
+  imageUrl?: string | null;
+  sourceUrl?: string | null;
+  observedAt?: string | null;
+  position?: number | null;
+};
+
+export type MarketBulletinListResponse = {
+  fetchedAt: string;
+  requestId?: string | null;
+  marketKey?: string | null;
+  cityCode?: string | null;
+  limit: number;
+  nextCursor?: string | null;
+  bulletins: MarketBulletin[];
+  partial?: boolean;
+  warnings?: string[];
+};
+
+export type MarketBulletinDetailResponse = {
+  fetchedAt: string;
+  requestId?: string | null;
+  bulletin: MarketBulletin | null;
+  limit: number;
+  nextCursor?: number | null;
+  items: MarketBulletinItem[];
+  partial?: boolean;
+  warnings?: string[];
+};
+
 export type MarketPriceHistoryResponse = {
   barcode: string;
   marketName: string;

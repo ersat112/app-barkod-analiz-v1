@@ -19,10 +19,18 @@ import { AmbientBackdrop } from '../../components/ui/AmbientBackdrop';
 import { analyticsService } from '../../services/analytics.service';
 import { purchaseService } from '../../services/purchase.service';
 import { useMonetizationStatus } from '../../hooks/useMonetizationStatus';
-import type { PaywallEntrySource } from '../../types/monetization';
+import type {
+  PaywallEntrySource,
+  PremiumPackagePlanKey,
+  PremiumPackageSnapshot,
+} from '../../types/monetization';
 import { withAlpha } from '../../utils/color';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Paywall'>;
+
+const MONTHLY_PRODUCT_ID = 'premium_monthly_39_99_try';
+const SIX_MONTH_PRODUCT_ID = 'premium_6month_149_99_try';
+const ANNUAL_PRODUCT_ID = 'premium_annual_249_99_try';
 
 function formatTryPrice(value: number): string {
   return new Intl.NumberFormat(undefined, {
@@ -98,6 +106,11 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
   const hasTrackedViewRef = useRef(false);
   const [purchasePending, setPurchasePending] = useState(false);
   const [restorePending, setRestorePending] = useState(false);
+  const [premiumPackages, setPremiumPackages] = useState<PremiumPackageSnapshot[]>([]);
+  const [packagesLoading, setPackagesLoading] = useState(false);
+  const [packagesError, setPackagesError] = useState<string | null>(null);
+  const [selectedPackageIdentifier, setSelectedPackageIdentifier] =
+    useState<string | null>(null);
   const [lastOperationResult, setLastOperationResult] =
     useState<PaywallOperationResultState | null>(null);
 
@@ -130,6 +143,57 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
     );
   }, [entitlement, loading, policy, route.params?.source]);
 
+  useEffect(() => {
+    let isCancelled = false;
+
+    if (loading || !policy?.purchaseProviderEnabled) {
+      setPremiumPackages([]);
+      setPackagesLoading(false);
+      return;
+    }
+
+    setPackagesLoading(true);
+    setPackagesError(null);
+
+    purchaseService
+      .getPremiumPackages()
+      .then((packages) => {
+        if (isCancelled) {
+          return;
+        }
+
+        setPremiumPackages(packages);
+        setSelectedPackageIdentifier((current) => {
+          if (current && packages.some((item) => item.identifier === current)) {
+            return current;
+          }
+
+          return packages.find((item) => item.planKey === 'annual')?.identifier ?? null;
+        });
+      })
+      .catch((loadError) => {
+        if (isCancelled) {
+          return;
+        }
+
+        setPremiumPackages([]);
+        setPackagesError(
+          loadError instanceof Error && loadError.message.trim()
+            ? loadError.message
+            : tt('premium_packages_load_error', 'Premium paketleri yüklenemedi.')
+        );
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setPackagesLoading(false);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [loading, policy?.purchaseProviderEnabled, tt]);
+
   const sourceLabel = useMemo(() => {
     switch (route.params?.source) {
       case 'scan_limit':
@@ -145,16 +209,125 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [route.params?.source, tt]);
 
   const paywallSource = (route.params?.source ?? 'unknown') as PaywallEntrySource;
-  const monthlyPlanEnabled = policy?.monthlyPlanEnabled ?? false;
   const monthlyPriceTry = policy?.monthlyPriceTry ?? 49.99;
-  const annualPriceTry = policy?.annualPriceTry ?? 39.99;
-  const purchaseReady = Boolean(
-    policy?.purchaseProviderEnabled && policy?.annualPlanEnabled
+  const annualPriceTry = policy?.annualPriceTry ?? 249.99;
+  const fallbackPremiumPackages = useMemo<PremiumPackageSnapshot[]>(
+    () => [
+      {
+        identifier: '$rc_annual',
+        productIdentifier: policy?.annualProductId || ANNUAL_PRODUCT_ID,
+        planKey: 'annual',
+        title: null,
+        description: null,
+        priceString: formatTryPrice(annualPriceTry),
+        price: annualPriceTry,
+        currencyCode: 'TRY',
+        isLiveProviderPackage: false,
+      },
+      {
+        identifier: '$rc_six_month',
+        productIdentifier: SIX_MONTH_PRODUCT_ID,
+        planKey: 'six_month',
+        title: null,
+        description: null,
+        priceString: formatTryPrice(149.99),
+        price: 149.99,
+        currencyCode: 'TRY',
+        isLiveProviderPackage: false,
+      },
+      {
+        identifier: '$rc_monthly',
+        productIdentifier: policy?.monthlyProductId || MONTHLY_PRODUCT_ID,
+        planKey: 'monthly',
+        title: null,
+        description: null,
+        priceString: formatTryPrice(monthlyPriceTry),
+        price: monthlyPriceTry,
+        currencyCode: 'TRY',
+        isLiveProviderPackage: false,
+      },
+    ],
+    [annualPriceTry, monthlyPriceTry, policy?.annualProductId, policy?.monthlyProductId]
   );
-  const annualSavingsTry = useMemo(() => {
-    const rawValue = monthlyPriceTry * 12 - annualPriceTry;
-    return rawValue > 0 ? Math.round(rawValue * 100) / 100 : 0;
-  }, [annualPriceTry, monthlyPriceTry]);
+  const displayPremiumPackages = premiumPackages.length
+    ? premiumPackages
+    : fallbackPremiumPackages;
+  const selectedPremiumPackage = useMemo(() => {
+    return (
+      displayPremiumPackages.find(
+        (item) => item.identifier === selectedPackageIdentifier
+      ) ??
+      displayPremiumPackages.find((item) => item.planKey === 'annual') ??
+      displayPremiumPackages[0] ??
+      null
+    );
+  }, [displayPremiumPackages, selectedPackageIdentifier]);
+  const purchaseReady = Boolean(
+    policy?.purchaseProviderEnabled &&
+      policy?.annualPlanEnabled &&
+      selectedPremiumPackage
+  );
+
+  const getPackageTitle = useCallback(
+    (planKey: PremiumPackagePlanKey): string => {
+      switch (planKey) {
+        case 'annual':
+          return tt('premium_yearly', 'Yıllık Premium');
+        case 'six_month':
+          return tt('premium_six_month', '6 Aylık Premium');
+        case 'monthly':
+          return tt('premium_monthly', 'Aylık Premium');
+        default:
+          return tt('premium_package', 'Premium Paket');
+      }
+    },
+    [tt]
+  );
+
+  const getPackageBadge = useCallback(
+    (planKey: PremiumPackagePlanKey): string => {
+      switch (planKey) {
+        case 'annual':
+          return tt('annual_plan_badge', 'En iyi değer');
+        case 'six_month':
+          return tt('six_month_plan_badge', 'Dengeli');
+        case 'monthly':
+          return tt('monthly_plan_badge', 'Esnek plan');
+        default:
+          return tt('premium_access_label', 'Premium erişim');
+      }
+    },
+    [tt]
+  );
+
+  const getPackageMeta = useCallback(
+    (item: PremiumPackageSnapshot): string => {
+      const price = item.price ?? null;
+
+      switch (item.planKey) {
+        case 'annual':
+          return price
+            ? tt(
+                'annual_price_equivalent',
+                '{{price}} / ay eşitliği ile yıllık kilit fiyat'
+              ).replace('{{price}}', formatMonthlyEquivalent(price))
+            : tt('annual_plan_meta', 'En avantajlı yıllık Premium erişim.');
+        case 'six_month':
+          return tt(
+            'six_month_plan_meta',
+            'Uzun taahhüt istemeyen kullanıcılar için 6 aylık erişim.'
+          );
+        case 'monthly':
+          return tt(
+            'monthly_plan_meta',
+            'Esnek giriş isteyen kullanıcılar için aylık erişim.'
+          );
+        default:
+          return item.description ?? tt('premium_package_meta', 'Premium erişim paketi.');
+      }
+    },
+    [tt]
+  );
 
   const premiumFeatureCards = useMemo(
     () => [
@@ -336,6 +509,14 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
   }, [load, paywallSource, route.params?.source, tt]);
 
   const handlePurchasePress = useCallback(async () => {
+    if (!selectedPremiumPackage) {
+      Alert.alert(
+        tt('purchase_unavailable_title', 'Satın alma entegrasyonu hazır değil'),
+        tt('premium_package_missing', 'Satın alınacak Premium paketi seçilemedi.')
+      );
+      return;
+    }
+
     setPurchasePending(true);
 
     try {
@@ -343,14 +524,19 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
         'monetization_paywall_cta_tapped',
         {
           source: route.params?.source ?? 'unknown',
-          annualProductId: policy?.annualProductId ?? null,
+          packageIdentifier: selectedPremiumPackage.identifier,
+          productIdentifier: selectedPremiumPackage.productIdentifier,
+          planKey: selectedPremiumPackage.planKey,
           purchaseProviderEnabled: policy?.purchaseProviderEnabled ?? false,
         },
         { flush: false }
       );
 
-      const result = await purchaseService.purchaseAnnualPlan({
+      const result = await purchaseService.purchasePremiumPackage({
         source: paywallSource,
+        packageIdentifier: selectedPremiumPackage.identifier,
+        productIdentifier: selectedPremiumPackage.productIdentifier,
+        planKey: selectedPremiumPackage.planKey,
       });
       setLastOperationResult({
         createdAt: new Date().toISOString(),
@@ -413,7 +599,14 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
     } finally {
       setPurchasePending(false);
     }
-  }, [load, paywallSource, policy?.annualProductId, policy?.purchaseProviderEnabled, route.params?.source, tt]);
+  }, [
+    load,
+    paywallSource,
+    policy?.purchaseProviderEnabled,
+    route.params?.source,
+    selectedPremiumPackage,
+    tt,
+  ]);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -592,109 +785,105 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                 ]}
               >
                 <View style={styles.planComparisonGrid}>
-                  <View
-                    style={[
-                      styles.planOptionCard,
-                      {
-                        backgroundColor: withAlpha(colors.card, 'D8'),
-                        borderColor: withAlpha(colors.border, 'B8'),
-                      },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.planOptionBadge,
-                        {
-                          backgroundColor: withAlpha(
-                            monthlyPlanEnabled ? colors.teal : colors.warning,
-                            '14'
-                          ),
-                        },
-                      ]}
-                    >
-                      <Text
+                  {displayPremiumPackages.map((item) => {
+                    const isSelected =
+                      selectedPremiumPackage?.identifier === item.identifier;
+                    const isRecommended = item.planKey === 'annual';
+                    const packagePrice = item.priceString ?? '-';
+
+                    return (
+                      <TouchableOpacity
+                        key={`${item.identifier}:${item.productIdentifier}`}
                         style={[
-                          styles.planOptionBadgeText,
+                          styles.planOptionCard,
+                          isRecommended ? styles.planOptionCardRecommended : null,
                           {
-                            color: monthlyPlanEnabled ? colors.teal : colors.warning,
+                            backgroundColor: isSelected
+                              ? withAlpha(colors.primary, '10')
+                              : withAlpha(colors.card, 'D8'),
+                            borderColor: isSelected
+                              ? withAlpha(colors.primary, '70')
+                              : withAlpha(colors.border, 'B8'),
                           },
                         ]}
+                        onPress={() => setSelectedPackageIdentifier(item.identifier)}
+                        disabled={purchasePending || restorePending}
+                        activeOpacity={0.86}
                       >
-                        {monthlyPlanEnabled
-                          ? tt('monthly_plan_badge', 'Esnek plan')
-                          : tt('monthly_plan_coming_soon_badge', 'Yakında')}
-                      </Text>
-                    </View>
+                        <View style={styles.planOptionTopRow}>
+                          <View
+                            style={[
+                              styles.planOptionBadge,
+                              {
+                                backgroundColor: withAlpha(
+                                  isRecommended ? colors.primary : colors.teal,
+                                  '16'
+                                ),
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.planOptionBadgeText,
+                                {
+                                  color: isRecommended
+                                    ? colors.primary
+                                    : colors.teal,
+                                },
+                              ]}
+                            >
+                              {getPackageBadge(item.planKey)}
+                            </Text>
+                          </View>
 
-                    <Text style={[styles.planOptionTitle, { color: colors.text }]}>
-                      {tt('premium_monthly', 'Aylık Premium')}
-                    </Text>
-                    <Text style={[styles.planOptionPrice, { color: colors.text }]}>
-                      {monthlyPlanEnabled
-                        ? formatTryPrice(monthlyPriceTry)
-                        : tt('monthly_plan_coming_soon_price', 'Yakında')}
-                    </Text>
-                    <Text style={[styles.planOptionMeta, { color: colors.mutedText }]}>
-                      {monthlyPlanEnabled
-                        ? tt(
-                            'monthly_plan_meta',
-                            'Esnek giriş isteyen kullanıcılar için aylık erişim.'
-                          )
-                        : tt(
-                            'monthly_plan_disabled_meta',
-                            'Aylık plan mağaza ürünü aktif olduğunda bu ekrana eklenecek.'
-                          )}
+                          {isSelected ? (
+                            <Ionicons
+                              name="checkmark-circle"
+                              size={22}
+                              color={colors.primary}
+                            />
+                          ) : null}
+                        </View>
+
+                        <Text style={[styles.planOptionTitle, { color: colors.text }]}>
+                          {getPackageTitle(item.planKey)}
+                        </Text>
+                        <Text style={[styles.planOptionPrice, { color: colors.text }]}>
+                          {packagePrice}
+                        </Text>
+                        <Text style={[styles.planOptionMeta, { color: colors.mutedText }]}>
+                          {getPackageMeta(item)}
+                        </Text>
+                        {!item.isLiveProviderPackage ? (
+                          <Text style={[styles.planOptionSavings, { color: colors.warning }]}>
+                            {tt(
+                              'premium_package_fallback_notice',
+                              'Mağaza paketi yüklenince fiyat RevenueCat üzerinden doğrulanır.'
+                            )}
+                          </Text>
+                        ) : null}
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {packagesLoading ? (
+                  <View style={styles.packageLoadRow}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                    <Text style={[styles.packageLoadText, { color: colors.mutedText }]}>
+                      {tt('premium_packages_loading', 'Premium paketleri yükleniyor...')}
                     </Text>
                   </View>
-
-                  <View
+                ) : packagesError ? (
+                  <Text
                     style={[
-                      styles.planOptionCard,
-                      styles.planOptionCardRecommended,
-                      {
-                        backgroundColor: withAlpha(colors.primary, '10'),
-                        borderColor: withAlpha(colors.primary, '3A'),
-                      },
+                      styles.packageLoadText,
+                      { color: colors.warning, marginTop: 12 },
                     ]}
                   >
-                    <View
-                      style={[
-                        styles.planOptionBadge,
-                        { backgroundColor: withAlpha(colors.primary, '16') },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.planOptionBadgeText,
-                          { color: colors.primary },
-                        ]}
-                      >
-                        {tt('annual_plan_badge', 'En iyi değer')}
-                      </Text>
-                    </View>
-
-                    <Text style={[styles.planOptionTitle, { color: colors.text }]}>
-                      {tt('premium_yearly', 'Yıllık Premium')}
-                    </Text>
-                    <Text style={[styles.planOptionPrice, { color: colors.text }]}>
-                      {formatTryPrice(annualPriceTry)}
-                    </Text>
-                    <Text style={[styles.planOptionMeta, { color: colors.mutedText }]}>
-                      {tt(
-                        'annual_price_equivalent',
-                        '{{price}} / ay eşitliği ile yıllık kilit fiyat'
-                      ).replace('{{price}}', formatMonthlyEquivalent(annualPriceTry))}
-                    </Text>
-                    {monthlyPlanEnabled && annualSavingsTry > 0 ? (
-                      <Text style={[styles.planOptionSavings, { color: colors.primary }]}>
-                        {tt(
-                          'annual_plan_savings',
-                          'Aylık plana göre {{price}} daha avantajlı'
-                        ).replace('{{price}}', formatTryPrice(annualSavingsTry))}
-                      </Text>
-                    ) : null}
-                  </View>
-                </View>
+                    {packagesError}
+                  </Text>
+                ) : null}
 
                 <View style={styles.planBenefitGrid}>
                   {premiumFeatureCards.map((item) => (
@@ -743,11 +932,11 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                     {purchaseReady
                       ? tt(
                           'purchase_surface_ready_text',
-                          'Yıllık plan şu an aktif satın alma yoludur. Store ve provider doğrulandığında doğrudan satın alma akışı açılır.'
+                          'RevenueCat paketleri hazır. Seçtiğin Premium plan doğrudan Google Play satın alma akışını açar.'
                         )
                       : tt(
                           'purchase_surface_setup_text',
-                          'Store ve provider yapılandırması tamamlandığında yıllık plan doğrudan satın alma akışını açacak. Aylık plan ayrı ürün olarak sonra aktive edilebilir.'
+                          'Store ve provider yapılandırması tamamlandığında Premium paketleri doğrudan satın alma akışını açacak.'
                         )}
                   </Text>
                 </View>
@@ -801,7 +990,15 @@ export const PaywallScreen: React.FC<Props> = ({ navigation, route }) => {
                       ]}
                     >
                       {purchaseReady
-                        ? tt('buy_yearly_premium', 'Yıllık Premium ile Tasarrufa Başla')
+                        ? tt(
+                            'buy_selected_premium',
+                            '{{plan}} ile Devam Et'
+                          ).replace(
+                            '{{plan}}',
+                            selectedPremiumPackage
+                              ? getPackageTitle(selectedPremiumPackage.planKey)
+                              : tt('premium_package', 'Premium Paket')
+                          )
                         : tt(
                             'purchase_provider_inactive',
                             'Satın alma sağlayıcısı henüz aktif değil'
@@ -1039,6 +1236,13 @@ const styles = StyleSheet.create({
     },
     elevation: 4,
   },
+  planOptionTopRow: {
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
   planOptionBadge: {
     alignSelf: 'flex-start',
     minHeight: 28,
@@ -1070,6 +1274,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     fontWeight: '800',
+  },
+  packageLoadRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  packageLoadText: {
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
   },
   planHeader: {
     flexDirection: 'row',

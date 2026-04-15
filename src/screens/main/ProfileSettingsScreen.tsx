@@ -640,9 +640,14 @@ export const ProfileSettingsScreen: React.FC = () => {
           ) : null}
 
           {saveError ? (
-            <Text style={styles.errorText}>
-              {tt('profile_save_error', 'Profil bilgileri kaydedilemedi.')}
-            </Text>
+            <View>
+              <Text style={styles.errorText}>
+                {tt('profile_save_error', 'Profil bilgileri kaydedilemedi.')}
+              </Text>
+              {!['profile_save_failed', 'auth_required'].includes(saveError) ? (
+                <Text style={styles.errorText}>{saveError}</Text>
+              ) : null}
+            </View>
           ) : null}
 
           <TouchableOpacity
